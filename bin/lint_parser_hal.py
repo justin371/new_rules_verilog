@@ -23,7 +23,7 @@ LOG_INDENT = ' ' * 9
 
 ################################################################################
 # Constants
-WAIVER_REGEXP = re.compile("\s// lint: disable=(.*)")
+WAIVER_REGEXP = re.compile(r"\s// lint: disable=(.*)")
 
 ################################################################################
 # Helpers
@@ -58,8 +58,8 @@ def find_bazel_runfiles(relpath, bazel_target):
     p.wait()
     assert p.returncode == 0
     stdout, stderr = p.communicate()
-    bazel_bin = re.search("bazel-bin: (.*)", stdout.decode('ascii')).group(1)
-    runfiles_main = os.path.join(bazel_bin, relpath, "{}.runfiles".format(bazel_target), "__main__")
+    bazel_bin = re.search(r"bazel-bin: (.*)", stdout.decode('ascii')).group(1)
+    runfiles_main = os.path.join(bazel_bin, relpath, "{}.runfiles".format(bazel_target), "_main")
     return runfiles_main
 
 
@@ -98,7 +98,7 @@ class HalMessage(object):
             source_line = ""
         try:
             file_info = soup.file_info.text.strip()
-            match = re.search('{"([^"]+)" ([0-9]+) [0-9]+}', file_info)
+            match = re.search(r'{"([^"]+)" ([0-9]+) [0-9]+}', file_info)
             filename = match.group(1)
             lineno = match.group(2)
         except AttributeError:
@@ -125,7 +125,7 @@ class HalLintLog(object):
 
         # Cadence uses cdata in their xml output, need to avoid lxml parser which strips it out
         soup = bs4.BeautifulSoup(text, "html.parser")
-        messages = soup.findAll('message')
+        messages = soup.findAll(r'message')
 
         for message in messages:
             self.issues.append(HalMessage.from_soup(message))

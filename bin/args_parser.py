@@ -324,7 +324,7 @@ def add_basic_arguments(parser):
         help=
         ('Test names to run. This option has some smarts depending on tool invocation directory.\n'
          'If you run in a "bench" directory, just specify a single "glob" of tests that you want to run.\n'
-         'E.g. in digital/dv/benches/sys_tb to run all tests in sys_tb:\n'
+         'E.g. in hw/dv/benches/sys_tb to run all tests in sys_tb:\n'
          '  > simmer -t *\n'
          'If you run at a higher level, or elsewhere in the checkout, you can specify two globs separated by a colon:\n'
          ' bench_glob:test_glob\n'

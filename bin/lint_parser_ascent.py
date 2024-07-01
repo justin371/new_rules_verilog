@@ -15,9 +15,9 @@ import cmn_logging
 
 ################################################################################
 # Constants
-LINE_WAIVER_REGEXP = re.compile("\S\s// lint: disable=(.*)")
-BLOCK_WAIVER_START_REGEXP = re.compile("\s*// lint: disable=(.*)")
-BLOCK_WAIVER_END_REGEXP = re.compile("\s*// lint: enable=(.*)")
+LINE_WAIVER_REGEXP = re.compile(r"\S\s// lint: disable=(.*)")
+BLOCK_WAIVER_START_REGEXP = re.compile(r"\s*// lint: disable=(.*)")
+BLOCK_WAIVER_END_REGEXP = re.compile(r"\s*// lint: enable=(.*)")
 
 ################################################################################
 # Helpers

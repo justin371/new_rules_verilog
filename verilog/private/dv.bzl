@@ -460,9 +460,9 @@ verilog_dv_unit_test = rule(
     This is typically a unit test for a single verilog_dv_library and its dependencies.
     Additional sim options may be passed after '--' in the bazel command.
     Interactive example:
-      bazel run //digital/dv/interfaces/apb_pkg:test -- -gui
+      bazel run //hw/dv/interfaces/apb_pkg:test -- -gui
     For ci testing purposes:
-      bazel test //digital/dv/interfaces/apb_pkg:test
+      bazel test //hw/dv/interfaces/apb_pkg:test
     """,
     implementation = _verilog_dv_unit_test_impl,
     attrs = {

@@ -18,6 +18,10 @@ import subprocess
 # Bigger libraries (better to place these later for dependency ordering
 import jinja2
 
+# Determine the absolute path to the directory containing this script
+dir_path = os.path.dirname(os.path.realpath(__file__))
+sys.path.append(os.path.dirname(__file__))
+
 ################################################################################
 # rules_verilog lib imports
 from args_parser import parse_args
@@ -28,9 +32,6 @@ from lib import regression
 from lib import rv_utils
 
 log = None
-
-# Determine the absolute path to the directory containing this script
-dir_path = os.path.dirname(os.path.realpath(__file__))
 
 # Use the absolute path to locate the 'templates' directory
 file_loader = jinja2.FileSystemLoader(searchpath=os.path.join(dir_path, 'templates'))
@@ -115,7 +116,7 @@ class VCompJob(Job):
 
                 text = stderr.decode('ascii')
                 try:
-                    covfiles = eval(re.search("verilog_dv_tb_ccf\((.*)\)", text).group(1))
+                    covfiles = eval(re.search(r"verilog_dv_tb_ccf\((.*)\)", text).group(1))
                     cov_opts += " ".join([' -covfile {} '.format(ccf) for ccf in covfiles])
                 except (AttributeError):
                     pass # No ccf file declared (bazel query results empty)
@@ -163,10 +164,10 @@ class VCompJob(Job):
         p.wait()
         assert p.returncode == 0
         stdout, stderr = p.communicate()
-        bazel_bin = re.search("bazel-bin: (.*)", stdout.decode('ascii')).group(1)
+        bazel_bin = re.search(r"bazel-bin: (.*)", stdout.decode('ascii')).group(1)
         # This is a gross assumption, but I can't see an easier way to find this in bazel
-        self.bazel_runfiles_main = os.path.join(bazel_bin, relpath, "{}.runfiles".format(bazel_target), "__main__")
-        
+        self.bazel_runfiles_main = os.path.join(bazel_bin, relpath, "{}.runfiles".format(bazel_target), "_main")
+
         for ta in options.tests:
             tb_name = ta.btiglob.split(":")[0]
         if options.msie_prim:
@@ -199,7 +200,7 @@ class VCompJob(Job):
                 xprop_cmd = '-xfile {} -xverbose'.format(xprop_file)
 
         vcomp_sh_path = os.path.join(self.job_dir, "vcomp.sh")
-        
+
         with open(vcomp_sh_path, 'w') as filep:
             if options.simulator.upper() == 'XRUN':
                 filep.write(
@@ -252,7 +253,7 @@ class VCompJob(Job):
         # Promote warnings to errors
         with open(os.path.join(self.log_path), 'r') as logp:
             text = logp.read()
-            warnings = re.findall("\*W.*", text)
+            warnings = re.findall(r"\*W.*", text)
             for warning in warnings:
                 waived = False
                 for ww in warning_waivers:
@@ -320,7 +321,7 @@ class TestJob(Job):
         with open(path) as filep:
             rw = self.RegexWrap()
             for line in filep.readlines():
-                if rw.search("^<INCLUDE>(.*)", line):
+                if rw.search(r"^<INCLUDE>(.*)", line):
                     include = rw.match.group(1).strip()
                     include = os.path.join(os.path.dirname(path), include)
                     flattened.append("# Jumping into {}\n".format(include))
@@ -472,7 +473,7 @@ class TestJob(Job):
                 if options.verbosity == 'UVM_DEBUG':
                     sim_opts += " +UVM_TR_RECORD +UVM_LOG_RECORD "
             else:
-                sim_opts = re.sub(' \+UVM_VERBOSITY=[A-Z_]+', ' +UVM_VERBOSITY=' + options.verbosity, sim_opts)
+                sim_opts = re.sub(r' \+UVM_VERBOSITY=[A-Z_]+', ' +UVM_VERBOSITY=' + options.verbosity, sim_opts)
         else:
             if 'UVM_VERBOSITY' not in sim_opts:
                 sim_opts += ' +UVM_VERBOSITY=UVM_MEDIUM'
@@ -644,7 +645,7 @@ class TestJob(Job):
 
     def _get_stats_from_log_file(self):
         stats_re = re.compile(
-            '.*Test Duration: (?P<duration>[0-9]+:[0-9]+:[0-9]+).*Average cycles/sec: (?P<cps>[0-9]+\.[0-9]+).*')
+            r'.*Test Duration: (?P<duration>[0-9]+:[0-9]+:[0-9]+).*Average cycles/sec: (?P<cps>[0-9]+\.[0-9]+).*')
         with open(self._log_path, 'r', encoding="utf8", errors='ignore') as log_file:
             for line in log_file:
                 match = stats_re.match(line)

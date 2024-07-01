@@ -51,7 +51,7 @@ def create_regression_log_file(rcfg):
 
     current_time = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
 
-    if len(rcfg.all_vcomp)>1:
+    if len(rcfg.all_vcomp) > 1:
         log_file_name = f"regression_{current_time}.log"
     else:
         bench_name = next(iter(rcfg.all_vcomp.keys())).split(':')[1]
@@ -70,7 +70,7 @@ def print_summary(rcfg, vcomp_jobs, icfgs, jm):
     total_tests = sum([icfg.target for _, (icfgs, _) in rcfg.all_vcomp.items() for icfg in icfgs])
     if total_tests > 1:
         if not rcfg.options.no_run:
-             REGRESSION_LOG_PATH = create_regression_log_file(rcfg)
+            REGRESSION_LOG_PATH = create_regression_log_file(rcfg)
 
     table_data = [("bench", "test", "passed", "skipped", "failed", "logs")]
     separator = [""] * len(table_data[0])
@@ -168,7 +168,7 @@ def calc_simresults_location(checkout_path):
     # If username is in the checkout_path try to reduce the name
     # Assume username is somewhere is path
     try:
-        checkout_path = re.search("{}/(.*)".format(username), checkout_path).group(1)
+        checkout_path = re.search(r"{}/(.*)".format(username), checkout_path).group(1)
     except AttributeError:
         pass
     checkout_path = checkout_path.replace('/', '_')

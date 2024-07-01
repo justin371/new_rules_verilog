@@ -62,13 +62,13 @@ err_regex = None
 
 def gen_err_regex():
     global err_regex
-    err_regex = re.compile("(" + ")|(".join(error_signature) + ")")
+    err_regex = re.compile(r"(" + ")|(".join(error_signature) + ")")
 
 
-finish_regex = re.compile("(" + ")|(".join(finish_signature) + ")")
+finish_regex = re.compile(r"(" + ")|(".join(finish_signature) + ")")
 
-enable_regex = re.compile(".*TEST_CHECK_ENABLE: (.*)")
-disable_regex = re.compile(".*TEST_CHECK_DISABLE: (.*)")
+enable_regex = re.compile(r".*TEST_CHECK_ENABLE: (.*)")
+disable_regex = re.compile(r".*TEST_CHECK_DISABLE: (.*)")
 
 
 def parse_args(argv):
@@ -151,11 +151,11 @@ def main(options):
                 err_log.write(line)
             err_log.write('%s\n' % platform.node())
         # Clean up log file by removing path to filenames
-        #fn_regex = re.compile('(/.*/)(.*\.sv.?)\(')
+        #fn_regex = re.compile(r'(/.*/)(.*\.sv.?)\(')
         #with open(options.logfile, 'r', encoding='utf-8', errors='ignore') as in_file:
         #with open(output_file+".log",'w') as out_file:
         #for line in in_file:
-        #out_file.write(fn_regex.sub('\g<2>(', line))
+        #out_file.write(fn_regex.sub(r'\g<2>(', line))
         sys.exit(1)
     elif not found_finish_line:
         # No finish was found

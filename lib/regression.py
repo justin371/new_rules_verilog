@@ -68,8 +68,7 @@ class RegressionConfig():
         self.deferred_messages = []
 
     def table_format(self, b, t, c, indent=' ' * LOGGER_INDENT):
-        return "{}{:{}s}  {:{}s}  {:{}s}".format(indent, b, self.max_bench_name_length, t, self.max_test_name_length, c,
-                                                 6)
+        return "{}{:{}s}  {:{}s}  {:{}s}".format(indent, b, self.max_bench_name_length, t, self.max_test_name_length, c, 6)
 
     def table_format_summary_line(self, bench, test, passed, skipped, failed, indent=' ' * LOGGER_INDENT):
         return f"{indent}{bench:{self.max_bench_name_length}s}  {test:{self.max_test_name_length}s}  {passed:{6}s}  {skipped:{6}s}  {failed:{6}s}"
@@ -159,7 +158,7 @@ class RegressionConfig():
 
             dtp.stop_and_print()
             query_results = stdout.decode('ascii').replace('\n', ' ')
-            query_results = re.sub("\([a-z0-9]{7,64}\) *", "", query_results)
+            query_results = re.sub(r"\([a-z0-9]{7,64}\) *", "", query_results)
             vcomp_to_query_results[vcomp] = query_results
 
         for vcomp, tests in self.all_vcomp.items():
@@ -184,7 +183,7 @@ class RegressionConfig():
             text = stdout.decode('ascii').split('\n') + stderr.decode('ascii').split('\n')
 
             ttv = [
-                re.search("verilog_dv_test_cfg_info\((?P<test>.*), (?P<vcomp>.*), \[(?P<tags>.*)\]\)", line)
+                re.search(r"verilog_dv_test_cfg_info\(@@(?P<test>.*), (@@(?P<vcomp>.*)), \[(?P<tags>.*)\]\)", line)
                 for line in text
             ]
             ttv = [match for match in ttv if match]
