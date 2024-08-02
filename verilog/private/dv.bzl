@@ -1,9 +1,10 @@
 """Rules for building DV infrastructure."""
 
 load(":verilog.bzl", "ToolEncapsulationInfo", "VerilogInfo", "flists_to_arguments", "gather_shell_defines", "get_transitive_srcs")
+load("@//deps:gatesim_modes_list.bzl","GATESIM_MODES")
 
 DVTestInfo = provider(fields = {
-    "sim_opts": "Simulation options to carry forward.",
+    "sim_opts": "Simulation :options to carry forward.",
     "uvm_testname": "UVM Test Name; passed to simulator via plusarg +UVM_TESTNAME.",
     "tb": "The verilog_dv_tb (verilog compile) associated with this test. Must be a Label of type verilog_dv_tb.",
     "tags": "Additional tags to be able to filter in simmer.",
@@ -16,12 +17,12 @@ DVTBInfo = provider(fields = {
     "ccf": "Coverage config file.",
 })
 
-def _verilog_dv_test_cfg_impl(ctx):
+def _verilog_dv_test_base_cfg_impl(ctx):
     parent_uvm_testnames = [dep[DVTestInfo].uvm_testname for dep in reversed(ctx.attr.inherits) if hasattr(dep[DVTestInfo], "uvm_testname")]
     parent_tbs = [dep[DVTestInfo].tb for dep in reversed(ctx.attr.inherits) if hasattr(dep[DVTestInfo], "tb")]
     parent_timeouts = [dep[DVTestInfo].timeout for dep in reversed(ctx.attr.inherits) if hasattr(dep[DVTestInfo], "timeout")]
     parent_pre_run = [dep[DVTestInfo].pre_run for dep in reversed(ctx.attr.inherits) if hasattr(dep[DVTestInfo], "pre_run")]
-
+    
     sim_opts = {}
 
     # Each successive dependency may override previous deps
@@ -90,13 +91,13 @@ def _verilog_dv_test_cfg_impl(ctx):
     )
     return [DVTestInfo(**provider_args)]
 
-verilog_dv_test_cfg = rule(
+verilog_dv_test_base_cfg = rule(
     doc = """A DV test configuration.
 
     This is not a executable target. It generates multiple files which may then
     be used by simmer (the wrapping tool to invoke the simulator).
     """,
-    implementation = _verilog_dv_test_cfg_impl,
+    implementation = _verilog_dv_test_base_cfg_impl,
     attrs = {
         "abstract": attr.bool(
             default = False,
@@ -161,6 +162,77 @@ verilog_dv_test_cfg = rule(
         "dynamic_args": "%{name}_dynamic_args.py",
     },
 )
+
+def verilog_dv_test_cfg(name = None, tags = None, abstract = None, inherits = None, uvm_testname = None, tb = None, sim_opts = None, no_run = None, sockets = None, pre_run = None, timeout = None, description = None, gls_tb = None, pre_opts = None, post_opts = None):
+    #get testcase arguments 
+    params = {}
+    if name != None:
+        params['name'] = name 
+    if abstract != None:
+        params['abstract'] = abstract
+    if inherits != None:
+        params['inherits'] = inherits
+    if uvm_testname != None:
+        params['uvm_testname'] = uvm_testname
+    if tb != None:
+        params['tb'] = tb
+    if no_run != None:
+        params['no_run'] = no_run
+    if sockets != None:
+        params['sockets'] = sockets
+    if pre_run != None:
+        params['pre_run'] = pre_run
+    if timeout != None:
+        params['timeout'] = timeout
+    if description != None:
+        params['description'] = description
+
+    #bazel case for pre_sim
+    if pre_opts != None:
+        pre_sim_opts = sim_opts + pre_opts 
+    else:
+        pre_sim_opts = sim_opts
+
+    params['sim_opts'] = pre_sim_opts
+
+    #bazel case for pre_sim
+    #remove "gatesim" keyword in tags when pre_sim
+    temp_tags = []
+    if tags != None and "gatesim" in tags:
+        for tag in tags:
+            if tag != "gatesim":
+                temp_tags.append(tag)
+    params['tags'] = temp_tags
+    verilog_dv_test_base_cfg(**params)         
+
+    #bazel case for post_sim
+    if tags != None and "gatesim" in tags:
+        if post_opts != None:
+            post_sim_opts = sim_opts + post_opts
+        else:
+            post_sim_opts = sim_opts
+     
+        params['sim_opts'] = post_sim_opts
+        
+        #remove "ci_gate", "nightly", "weekly" keyword in tags when post_sim
+        temp_tags = []
+        for tag in tags:
+            if tag != "ci_gate" and tag != "nightly" and tag != "weekly":
+                temp_tags.append(tag)
+        params['tags'] = temp_tags 
+
+        #add suffix for name,tb,inherits according gatesim corner to create post_sim testcase
+        for corner in GATESIM_MODES: 
+            params['name'] = name + "_" + corner
+            if inherits != None:
+                for inherit in inherits:
+                    params['inherits'] = [inherit + "_" + corner]
+            #determin gatesim tb when gls_tb is transmited
+            if gls_tb != None:
+                params['tb'] = gls_tb + "_" + corner
+            elif tb != None:
+                params['tb'] = tb + "_" + corner
+            verilog_dv_test_base_cfg(**params)         
 
 def _verilog_dv_library_impl(ctx):
     if ctx.attr.incdir:

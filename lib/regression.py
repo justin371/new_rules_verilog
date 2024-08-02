@@ -135,10 +135,10 @@ class RegressionConfig():
             vcomp_path, _ = vcomp.split(':')
             test_wildcard = os.path.join(vcomp_path, "tests", "...")
             if self.options.allow_no_run:
-                cmd = 'bazel cquery "attr(abstract, 0, kind(dv_test_cfg, {test_wildcard} intersect allpaths({test_wildcard}, {vcomp})))"'.format(
+                cmd = 'bazel cquery "attr(abstract, 0, kind(dv_test_base_cfg, {test_wildcard} intersect allpaths({test_wildcard}, {vcomp})))"'.format(
                     test_wildcard=test_wildcard, vcomp=vcomp)
             else:
-                cmd = 'bazel cquery "attr(no_run, 0, attr(abstract, 0, kind(dv_test_cfg, {test_wildcard} intersect allpaths({test_wildcard}, {vcomp}))))"'.format(
+                cmd = 'bazel cquery "attr(no_run, 0, attr(abstract, 0, kind(dv_test_base_cfg, {test_wildcard} intersect allpaths({test_wildcard}, {vcomp}))))"'.format(
                     test_wildcard=test_wildcard, vcomp=vcomp)
 
             self.log.debug(" > %s", cmd)
