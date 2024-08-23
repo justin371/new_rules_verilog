@@ -70,7 +70,7 @@ def get_transitive_srcs(srcs, deps, provider, attr_name, allow_other_outputs = F
         transitive = trans,
     )
 
-def flists_to_arguments(deps, provider, field, prefix, separator = ""):
+def flists_to_arguments(deps, provider, field, prefix, separator = "", tool_name=None):
     trans = []
     for dep in deps:
         if provider in dep:
@@ -83,7 +83,17 @@ def flists_to_arguments(deps, provider, field, prefix, separator = ""):
     trans_depset = depset(trans)
     trans = trans_depset.to_list()
 
-    return separator.join([" {} {}".format(prefix, flist.short_path) for flist in trans])
+    if tool_name == "vcs":
+        formatted_args = [
+            "{} ../{}".format(prefix, flist.short_path[:-3]) if flist.short_path.endswith(".so") 
+            else " {} {}".format(prefix, flist.short_path) 
+            for flist in trans
+        ]
+    else:
+        formatted_args = [" {} {}".format(prefix, flist.short_path) for flist in trans]
+    
+    #return separator.join([" {} {}".format(prefix, flist.short_path) for flist in trans])
+    return separator.join(formatted_args)
 
 def _verilog_test_impl(ctx):
     trans_srcs = get_transitive_srcs([], ctx.attr.shells + ctx.attr.deps, VerilogInfo, "transitive_sources")

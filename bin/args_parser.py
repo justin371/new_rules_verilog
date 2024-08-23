@@ -63,6 +63,10 @@ def add_debug_arguments(parser):
                         default=False,
                         action='store_true',
                         help='run simulation in gui mode for C/DV debug, only applicable with single test')
+    gdebug.add_argument('--vip',
+                        default=False,
+                        action='store_true',
+                        help='add cdnvip compile options for VCS')
     gdebug.add_argument('--profile',
                         default=False,
                         action='store_true',
@@ -210,7 +214,10 @@ def add_regression_arguments(parser):
                         help="The number of cores to be used for sim, used with --mce")
     gregre.add_argument('--coverage',
                         action=parser_actions.CovAction,
-                        help=f'Enable Code Coverage.\n{parser_actions.CovAction.format_options(indent=0)}')
+                        help=f'Enable Code Coverage for xcelium only.\n{parser_actions.CovAction.format_options(indent=0)}')
+    gregre.add_argument('--cm',
+                        action=parser_actions.CMAction,
+                        help=f'Enable Code Coverage for vcs only.\n{parser_actions.CMAction.format_options(indent=0)}')
     gregre.add_argument('--covfile', default=COVFILE, help='Path to Coverage configuration file')
     gregre.add_argument('--junit-dump',
                         type=str,

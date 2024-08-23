@@ -80,59 +80,74 @@ class VCompJob(Job):
             enable_debug_access = 1
         if options.gui:
             enable_debug_access = 2
+        enable_cdnvip = 0
+        if options.vip:
+            enable_cdnvip = 1
 
         cov_opts = ''
         if options.coverage:
-            self.cov_work_dir = os.path.join(self.rcfg.regression_dir, self.name + "__COV_WORK")
-            os.system("mkdir -p {}".format(self.cov_work_dir))
-            merge_exec_tcl = os.path.join(self.cov_work_dir, "merge_exec.tcl")
-            merged_output = os.path.join(self.cov_work_dir, "merged_db")
-            with open(merge_exec_tcl, 'w') as filep:
-                filep.write("merge -initial_model union_all -out {} -overwrite {}".format(
-                    merged_output, os.path.join(self.cov_work_dir, "scope", "*")))
-            merge_sh = os.path.join(self.cov_work_dir, "merge.sh")
-            with open(merge_sh, 'w') as filep:
-                filep.write("".join([
-                    "#!/usr/bin/env bash\n", "runmod xrun -- imc -exec {} -verbose\n".format(merge_exec_tcl),
-                    "runmod xrun -- imc -load {}\n".format(merged_output)
-                ]))
-            st = os.stat(merge_sh)
-            os.chmod(merge_sh, st.st_mode | stat.S_IEXEC)
-            cov_opts += ' -coverage {} '.format(options.coverage)
+            if options.simulator.upper() == 'XRUN':
+                self.cov_work_dir = os.path.join(self.rcfg.regression_dir, self.name + "__COV_WORK")
+                os.system("mkdir -p {}".format(self.cov_work_dir))
+                merge_exec_tcl = os.path.join(self.cov_work_dir, "merge_exec.tcl")
+                merged_output = os.path.join(self.cov_work_dir, "merged_db")
+                with open(merge_exec_tcl, 'w') as filep:
+                    filep.write("merge -initial_model union_all -out {} -overwrite {}".format(
+                        merged_output, os.path.join(self.cov_work_dir, "scope", "*")))
+                merge_sh = os.path.join(self.cov_work_dir, "merge.sh")
+                with open(merge_sh, 'w') as filep:
+                    filep.write("".join([
+                        "#!/usr/bin/env bash\n", "runmod xrun -- imc -exec {} -verbose\n".format(merge_exec_tcl),
+                        "runmod xrun -- imc -load {}\n".format(merged_output)
+                    ]))
+                st = os.stat(merge_sh)
+                os.chmod(merge_sh, st.st_mode | stat.S_IEXEC)
+                cov_opts += ' -coverage {} '.format(options.coverage)
 
-            cmd = "bazel build {} --aspects @rules_verilog//verilog/private:dv.bzl%verilog_dv_tb_ccf_aspect".format(
-                self.bazel_vcomp_target)
-            log.debug(" > %s", cmd)
+                cmd = "bazel build {} --aspects @rules_verilog//verilog/private:dv.bzl%verilog_dv_tb_ccf_aspect".format(
+                    self.bazel_vcomp_target)
+                log.debug(" > %s", cmd)
 
-            with TemporaryFile() as stdout_fp, TemporaryFile() as stderr_fp:
-                p = subprocess.Popen(cmd, stdout=stdout_fp, stderr=stderr_fp, shell=True)
-                p.wait()
-                stdout_fp.seek(0)
-                stderr_fp.seek(0)
-                stdout = stdout_fp.read()
-                stderr = stderr_fp.read()
-                if p.returncode:
-                    log.critical("bazel coverage ccf mapping failed:\n%s", stderr.decode('ascii'))
+                with TemporaryFile() as stdout_fp, TemporaryFile() as stderr_fp:
+                    p = subprocess.Popen(cmd, stdout=stdout_fp, stderr=stderr_fp, shell=True)
+                    p.wait()
+                    stdout_fp.seek(0)
+                    stderr_fp.seek(0)
+                    stdout = stdout_fp.read()
+                    stderr = stderr_fp.read()
+                    if p.returncode:
+                        log.critical("bazel coverage ccf mapping failed:\n%s", stderr.decode('ascii'))
 
-                text = stderr.decode('ascii')
-                try:
-                    covfiles = eval(re.search(r"verilog_dv_tb_ccf\((.*)\)", text).group(1))
-                    cov_opts += " ".join([' -covfile {} '.format(ccf) for ccf in covfiles])
-                except (AttributeError):
-                    pass # No ccf file declared (bazel query results empty)
+                    text = stderr.decode('ascii')
+                    try:
+                        covfiles = eval(re.search("verilog_dv_tb_ccf\((.*)\)", text).group(1))
+                        cov_opts += " ".join([' -covfile {} '.format(ccf) for ccf in covfiles])
+                    except (AttributeError):
+                        pass # No ccf file declared (bazel query results empty)
 
-            self.rcfg.deferred_messages.append("Launch coverage with {}".format(merge_sh))
+                self.rcfg.deferred_messages.append("Launch coverage with {}".format(merge_sh))
+
+        if options.cm:
+            if options.simulator.upper() == 'VCS':
+                self.cov_work_dir = os.path.join(self.rcfg.regression_dir, self.name + "__COV_WORK_VCS")
+                cov_opts += ' -cm_dir {} '.format(self.cov_work_dir)
+                if 'A' in options.cm or 'U' in options.cm:
+                    cov_opts += ' -cm line+cond+fsm+tgl+assert+branch '
+                else:
+                    cov_opts += ' -cm {} '.format(options.cm)
+
+                merge_sh = os.path.join(self.rcfg.regression_dir, "vcs_cov_merge.sh")
+                with open(merge_sh, 'w') as filep:
+                    filep.write("".join([
+                        "#!/usr/bin/env bash\n", "#runmod vcs -- urg -full64 -flex_merge union -dir {}.vdb -report {}.vdb/cov_report -dbname {}/merged_cov.vdb\n".format(self.cov_work_dir,self.cov_work_dir,self.rcfg.regression_dir),
+                        "#runmod vcs -- verdi -cov -covdir {}/merged_cov.vdb\n".format(self.rcfg.regression_dir),
+                        "runmod vcs -- verdi -cov -covdir {}.vdb\n".format(self.cov_work_dir)
+                    ]))
+                st = os.stat(merge_sh)
+                os.chmod(merge_sh, st.st_mode | stat.S_IEXEC)
 
         additional_defines = []
-        additional_vcs_defines = [
-            'TBV',
-            'VCS',
-            'UVM_REGEX_NO_DPI',
-            'UVM_NO_DEPRECATED',
-            'UVM_OBJECT_MUST_HAVE_CONSTRUCTOR',
-            'TIMESCALE_STEP_FS=1000',
-            'TIMESCALE_PREC_FS=1000',
-        ]
+        additional_vcs_defines = []
         if options.simulator.upper() == 'VCS':
             additional_defines.extend(additional_vcs_defines)
         if options.rtl_defines is not None:
@@ -180,7 +195,8 @@ class VCompJob(Job):
                 self.bazel_runfiles_main, relpath, "{}_compile_args_{}.f".format(bazel_target,
                                                                                  options.simulator.lower()))
         self.bazel_runtime_args = os.path.join(self.bazel_runfiles_main, relpath,
-                                               "{}_runtime_args.f".format(bazel_target))
+                                               "{}_runtime_args_{}.f".format(bazel_target,
+                                                                             options.simulator.lower()))
         self.compile_warning_waivers_path = os.path.join(self.bazel_runfiles_main, relpath,
                                                          "{}_compile_warning_waivers".format(bazel_target))
         xprop_cmd = None
@@ -224,6 +240,7 @@ class VCompJob(Job):
                         bazel_runfiles_main=self.bazel_runfiles_main,
                         bazel_compile_args=self.bazel_compile_args,
                         enable_debug_access=enable_debug_access,
+                        enable_cdnvip=enable_cdnvip,
                         xprop_cmd=xprop_cmd,
                         additional_defines=additional_defines,
                         options=options,
@@ -335,6 +352,7 @@ class TestJob(Job):
         log.debug("Preparing test: %s:%s", self.vcomper.name, self.name)
 
         options = self.rcfg.options
+        vcomp_dir = self.vcomper.job_dir
 
         sim_opts = ""
 
@@ -345,7 +363,12 @@ class TestJob(Job):
             # This causes a mismatch between our directory hierarchy and theirs
             # While it doesn't break anything, it is not intuitive to track
             # Thus, only using positive seeds
-        sim_opts += " -svseed %d " % seed
+        if options.simulator.upper() == 'VCS':
+            sim_opts += " +ntb_random_seed=%0d " % seed
+            self.test_name_seed = "{}_seed{}".format(self.name,seed) # gen test_name_seed for sim.sh
+            # or you can use +ntb_random_seed_automatic for vcs
+        elif options.simulator.upper() == 'XRUN':
+            sim_opts += " -svseed %d " % seed
 
         # Using the timestamp as the name uniquifier is causing issues when trying to spawn many jobs at once
         # strdate = time.strftime("%Y_%m_%d_%H_%M_%S", time.localtime(time.time()))
@@ -370,11 +393,19 @@ class TestJob(Job):
             sockets.append((socket_name, socket_command, socket_file))
 
         if options.coverage:
-            sim_opts += ' -covoverwrite '
-            sim_opts += ' -covworkdir {} '.format(self.vcomper.cov_work_dir)
-            sim_opts += ' -covbaserun {} '.format(self.name)
-            if 'A' in options.coverage or 'U' in options.coverage:
-                sim_opts += ' +SVFCOV=1 '
+            if options.simulator.upper() == 'XRUN':
+                sim_opts += ' -covoverwrite '
+                sim_opts += ' -covworkdir {} '.format(self.vcomper.cov_work_dir)
+                sim_opts += ' -covbaserun {} '.format(self.name)
+                if 'A' in options.coverage or 'U' in options.coverage:
+                    sim_opts += ' +SVFCOV=1 '
+        if options.cm:
+            if options.simulator.upper() == 'VCS':
+                if 'A' in options.cm or 'U' in options.cm:
+                    sim_opts += ' -cm line+cond+fsm+tgl+assert+branch '
+                else:
+                    sim_opts += ' -cm {} '.format(options.cm)
+                sim_opts += ' -cm_name {}_sv{} '.format(self.name,seed)
 
         sim_opts += " +UVM_TESTNAME={uvm_testname} ".format(uvm_testname=dynamic_args['uvm_testname'], )
         # extract license tag for resources in LSF
@@ -442,7 +473,10 @@ class TestJob(Job):
             else:
                 raise ValueError("{} not allowed".format(options.wave_type))
 
-            sim_opts += " -input {} ".format(waves_tcl)
+            if options.simulator.upper() == 'VCS':
+                sim_opts += " -ucli -do {} ".format(waves_tcl)
+            elif options.simulator.upper() == 'XRUN':
+                sim_opts += " -input {} ".format(waves_tcl)
             options.probes = options.waves if options.waves != [] else [default_capture]
             if options.wave_delta is True:
                 options.delta = "-event"
@@ -454,9 +488,17 @@ class TestJob(Job):
                     filep.write(WAVE_CMD_TEMPLATE.render(**tmp))
         else:
             nwaves_tcl = os.path.join(self.job_dir, "nwaves.tcl")
-            sim_opts += " -input {} ".format(nwaves_tcl)
+            if options.simulator.upper() == 'VCS':
+                sim_opts += " -ucli -do {} ".format(nwaves_tcl)
+                # Populate tcl_commands based on options.gui condition
+                tcl_commands = ["config reversedebug on", "run"] if options.gui else ["run"]
+            elif options.simulator.upper() == 'XRUN':
+                sim_opts += " -input {} ".format(nwaves_tcl)
+                tcl_commands = [
+                    "run"
+                ]
             with open(nwaves_tcl, 'w') as filep:
-                filep.write("run")
+                filep.write("\n".join(tcl_commands))
 
         if options.uvm_set_int:
             sim_opts += ' +uvm_set_config_int=' + ' +uvm_set_config_int='.join(options.uvm_set_int)

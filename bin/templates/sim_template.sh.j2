@@ -47,7 +47,9 @@ function testFunction {
     ln -snf {{ job.vcomper.bazel_runfiles_main }} bazel_runfiles_main
     cd bazel_runfiles_main
   {% if options.simulator.upper() == 'VCS' -%}
-    time runmod -t vcs -- {{ vcomp_dir }}/simv {{ gui }} $ARGS {{ sim_opts }} | tee {{ job._logpath }}
+    mkdir {{ job.test_name_seed }}
+    cd {{ job.test_name_seed }}
+    time runmod vcs -- {{ vcomp_dir }}/simv {{ gui }} $ARGS {{ sim_opts }} | tee {{ job._log_path }}
   {% endif -%}
   {% if options.simulator.upper() == 'XRUN' -%}
     time runmod -t xrun -- -l {{ job.job_dir }}/sim.log {{ gui }} -R -xmlibdirname {{ job.vcomper.job_dir }} $ARGS {{ sim_opts }} -f external/rules_verilog/vendors/cadence/verilog_dv_default_sim_opts.f | tee {{ job._log_path }}
@@ -57,6 +59,9 @@ function testFunction {
     result+=$?
     cd ../
     echo "TEST END"
+  {% if options.simulator.upper() == 'VCS' -%}
+    rm -rf {{ job.test_name_seed }} # clear vcs simulation file
+  {% endif -%}
 
     ##################################################
     # Socket process exit code collection

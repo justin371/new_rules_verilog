@@ -79,3 +79,28 @@ class CovAction(argparse.Action):
                     "Illegal coverage value {}\nRequires a colon separated list of the following values:\n  {}".format(
                         cov_option, self.format_options()))
         setattr(args, self.dest, values)
+
+
+class CMAction(argparse.Action):
+    legal_coverage_options = {
+        'line': 'Line - For enabling line coverage',
+        'cond': 'Condition - For enabling condition coverage',
+        'fsm': 'Fsm - For enabling fsm coverage',
+        'tgl': 'Toggle - For enabling toggle coverage',
+        'branch': 'Branch - For enabling branch coverage',
+        'assert': 'Assert - For enabling assert coverage',
+        'A': 'All - For enabling all supported coverage types'
+    }
+
+    @classmethod
+    def format_options(cls, indent=2):
+        return f"\n{' '*indent}".join(["{} : {}".format(ii, jj) for ii, jj in cls.legal_coverage_options.items()])
+
+    def __call__(self, parser, args, values, option_string=None):
+        cov_options = values.split('+')
+        for cov_option in cov_options:
+            if cov_option not in self.legal_coverage_options:
+                parser.error(
+                    "Illegal coverage value {}\nRequires a colon separated list of the following values:\n  {}".format(
+                        cov_option, self.format_options()))
+        setattr(args, self.dest, values)

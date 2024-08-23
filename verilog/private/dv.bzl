@@ -335,7 +335,7 @@ def _verilog_dv_tb_impl(ctx):
         xrun_extra_compile_args.append("-compcnfg {}".format(cfg))
     vcs_extra_compile_args.append("-top {}".format(top))
     xrun_extra_compile_args.append("-top {}".format(top))
-    vcs_extra_compile_args.extend(ctx.attr.extra_compile_args)
+    vcs_extra_compile_args.extend(ctx.attr.extra_compile_args_vcs)
     xrun_extra_compile_args.extend(ctx.attr.extra_compile_args)
     pldm_ice_extra_compile_args.extend(ctx.attr.extra_compile_args)
 
@@ -345,6 +345,7 @@ def _verilog_dv_tb_impl(ctx):
         substitutions = {
             "{COMPILE_ARGS}": ctx.expand_location("\n".join(vcs_extra_compile_args), targets = ctx.attr.extra_runfiles),
             "{DEFINES}": "\n".join(["+define+{}{}".format(key, value) for key, value in defines.items()]),
+            "{DPI_LIBS}": flists_to_arguments(ctx.attr.shells + ctx.attr.deps, VerilogInfo, "transitive_dpi", " "), #for VCS-2022
             "{FLISTS}": flists_to_arguments(ctx.attr.shells + ctx.attr.deps, VerilogInfo, "transitive_flists", "\n-f"),
         },
     )
@@ -368,12 +369,20 @@ def _verilog_dv_tb_impl(ctx):
     )
     ctx.actions.expand_template(
         template = ctx.file._runtime_args_template,
-        output = ctx.outputs.runtime_args,
+        output = ctx.outputs.runtime_args_xrun,
         substitutions = {
             "{RUNTIME_ARGS}": ctx.expand_location("\n".join(ctx.attr.extra_runtime_args), targets = ctx.attr.extra_runfiles),
             "{DPI_LIBS}": flists_to_arguments(ctx.attr.shells + ctx.attr.deps, VerilogInfo, "transitive_dpi", "-sv_lib"),
         },
     )
+    ctx.actions.expand_template(
+        template = ctx.file._runtime_args_template,
+        output = ctx.outputs.runtime_args_vcs,
+        substitutions = {
+            "{RUNTIME_ARGS}": ctx.expand_location("\n".join(ctx.attr.extra_runtime_args_vcs), targets = ctx.attr.extra_runfiles),
+            "{DPI_LIBS}": flists_to_arguments(ctx.attr.shells + ctx.attr.deps, VerilogInfo, "transitive_dpi", "-sv_lib", "", "vcs"), #for VCS-2023
+        },
+    )    
     ctx.actions.write(
         output = ctx.outputs.compile_warning_waivers,
         content = "[\n" + "\n".join(["re.compile('{}'),".format(ww) for ww in ctx.attr.warning_waivers]) + "\n]\n",
@@ -387,7 +396,7 @@ def _verilog_dv_tb_impl(ctx):
 
     trans_srcs = get_transitive_srcs([], ctx.attr.deps + ctx.attr.shells, VerilogInfo, "transitive_sources", allow_other_outputs = True)
     trans_flists = get_transitive_srcs([], ctx.attr.deps + ctx.attr.shells, VerilogInfo, "transitive_flists", allow_other_outputs = False)
-    out_deps = depset([ctx.outputs.compile_args_vcs, ctx.outputs.compile_args_xrun, ctx.outputs.compile_args_pldm_ice, ctx.outputs.runtime_args, ctx.outputs.compile_warning_waivers, ctx.outputs.executable])
+    out_deps = depset([ctx.outputs.compile_args_vcs, ctx.outputs.compile_args_xrun, ctx.outputs.compile_args_pldm_ice, ctx.outputs.runtime_args_xrun, ctx.outputs.runtime_args_vcs, ctx.outputs.compile_warning_waivers, ctx.outputs.executable])
     all_files = depset([], transitive = [trans_srcs, trans_flists, out_deps])
 
     return [
@@ -445,10 +454,16 @@ verilog_dv_tb = rule(
             doc = "Coverage configuration file to provider to simmer.",
         ),
         "extra_compile_args": attr.string_list(
-            doc = "Additional flags to pass to the compiler.",
+            doc = "Additional flags to pass to the xrun compiler.",
+        ),
+        "extra_compile_args_vcs": attr.string_list(
+            doc = "Additional flags to pass to the vcs compiler.",
         ),
         "extra_runtime_args": attr.string_list(
-            doc = "Additional flags to throw to simulation run. These flags will not be provided to the compilation, but will be passed to subsequent simulation invocations.",
+            doc = "Additional flags to throw to xrun simulation run. These flags will not be provided to the compilation, but will be passed to subsequent simulation invocations.",
+        ),
+        "extra_runtime_args_vcs": attr.string_list(
+            doc = "Additional flags to throw to vcs simulation run. These flags will not be provided to the compilation, but will be passed to subsequent simulation invocations.",
         ),
         "extra_runfiles": attr.label_list(
             allow_files = True,
@@ -490,7 +505,8 @@ verilog_dv_tb = rule(
         ),
     },
     outputs = {
-        "runtime_args": "%{name}_runtime_args.f",
+        "runtime_args_xrun": "%{name}_runtime_args_xrun.f",
+        "runtime_args_vcs": "%{name}_runtime_args_vcs.f",
         "compile_args_vcs": "%{name}_compile_args_vcs.f",
         "compile_args_xrun": "%{name}_compile_args_xrun.f",
         "compile_args_pldm_ice": "%{name}_compile_args_pldm_ice.f",
