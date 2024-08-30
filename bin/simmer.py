@@ -120,7 +120,7 @@ class VCompJob(Job):
 
                     text = stderr.decode('ascii')
                     try:
-                        covfiles = eval(re.search("verilog_dv_tb_ccf\((.*)\)", text).group(1))
+                        covfiles = eval(re.search(r"verilog_dv_tb_ccf\((.*)\)", text).group(1))
                         cov_opts += " ".join([' -covfile {} '.format(ccf) for ccf in covfiles])
                     except (AttributeError):
                         pass # No ccf file declared (bazel query results empty)
