@@ -52,7 +52,7 @@ function testFunction {
     time runmod vcs -- {{ vcomp_dir }}/simv {{ gui }} $ARGS {{ sim_opts }} | tee {{ job._log_path }}
   {% endif -%}
   {% if options.simulator.upper() == 'XRUN' -%}
-    time runmod -t xrun -- -l {{ job.job_dir }}/sim.log {{ gui }} -R -xmlibdirname {{ job.vcomper.job_dir }} $ARGS {{ sim_opts }} -f external/rules_verilog/vendors/cadence/verilog_dv_default_sim_opts.f | tee {{ job._log_path }}
+    time runmod -t xrun -- -l {{ job.job_dir }}/stdout.log {{ gui }} -R -xmlibdirname {{ job.vcomper.job_dir }} $ARGS {{ sim_opts }} -f external/rules_verilog/vendors/cadence/verilog_dv_default_sim_opts.f | tee {{ job._log_path }}
   {% endif -%}
     SIMULATION_PID=$!
     wait $SIMULATION_PID

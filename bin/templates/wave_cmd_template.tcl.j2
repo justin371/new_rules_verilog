@@ -1,18 +1,14 @@
 {% if options.wave_type == 'vwdb' -%}
+{% if options.wave_start -%}
+run {{ options.wave_start }}ns
+{% endif -%}
 call xmDumpfile {{ waves_db }}
+call xmDumpLog
 {% for probe in options.probes -%}
-call xmDumpvars {{ options.wave_depth }} {{ probe }} +all +packed_limit={{ options.probe_packed }} +unpacked_limit={{ options.probe_unpacked }}
+call xmDumpvars {{ options.wave_depth }} {{ probe }} +all +packed_limit={{ options.probe_packed }} +unpacked_limit={{ options.probe_unpacked }} +dynamic $uvm:{uvm_test_top}
 {% endfor -%}
 call xmDumpSVA
-run
-exit
-{% endif -%}
-
-{% if options.wave_type == 'ida' -%}
-ida_database -open -name {{ waves_db }}
-ida_probe -log -status
-ida_probe -flow -start_time={{ options.wave_start }}ns -end_time={{ options.wave_end }}ns
-ida_probe -wave -wave_probe_args="[scope -top] -all -memories -emptyok -depth {{ options.wave_depth }} -exclude {{ options.wave_exclude }} -packed {{ options.probe_packed }} -unpacked {{ options.probe_unpacked }}"
+call xmDumpflush
 run
 exit
 {% endif -%}

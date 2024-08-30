@@ -18,8 +18,8 @@ def add_debug_arguments(parser):
                               'paths to reduce probe scope. Default is tb_top.'))
     gdebug.add_argument('--wave-type',
                         type=str,
-                        default=None,
-                        choices=[None, 'shm', 'fsdb', 'vcd', 'evcd', 'ida', 'vwdb'],
+                        default='vwdb',
+                        choices=['shm', 'fsdb', 'vcd', 'evcd', 'vwdb'],
                         help='Specify the waveform format')
     gdebug.add_argument('--wave-tcl',
                         type=str,

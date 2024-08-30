@@ -449,8 +449,6 @@ class TestJob(Job):
         if options.waves is not None:
             if options.wave_type == 'shm':
                 waves_db = os.path.join(waves_db, "waves.shm")
-            elif options.wave_type == 'ida':
-                waves_db = os.path.join(waves_db, "waves.ida")
                 sim_opts += ' -debug_opts verisium_pp '
             elif options.wave_type == 'vwdb':
                 waves_db = os.path.join(waves_db, 'waves.vwdb')
@@ -651,10 +649,8 @@ class TestJob(Job):
                 wave_path = os.path.join(wave_path, 'waves.vcd')
             elif options.wave_type == 'evcd':
                 wave_path = os.path.join(wave_path, 'waves.evcd')
-            elif options.wave_type == 'ida':
-                wave_path = os.path.join(wave_path, 'waves.ida')
             elif options.wave_type == 'vwdb':
-                wave_path = os.path.join(wave_path, 'waves.vwdb.shm')
+                wave_path = os.path.join(wave_path, 'waves.vwdb.db')
             elif options.wave_type == 'fsdb':
                 wave_path = os.path.join(wave_path, 'waves.fsdb')
             else:

@@ -3,7 +3,7 @@
 cd {{ bazel_runfiles_main }} && \
 
 runmod -t xrun -- \
-  {% if options.msie_prim is none-%}
+  {% if options.msie_prim is none -%}
   -xmlibdirname {{ VCOMP_DIR }} \
   {% endif -%}
   {% for define in additional_defines -%}
@@ -21,15 +21,17 @@ runmod -t xrun -- \
   {% if xprop_cmd is not none -%}
     {{ xprop_cmd }} \
   {% endif -%}
+
   {% if enable_debug_access > 0 -%}
-    +vpiSyncPerf \
     -debug_opts verisium_pp \
   {% endif -%}
   {% if enable_debug_access > 1 -%}
-    +fsmdebug \
+    -debug_opts verisium_interactive \
     -linedebug \
     -uvmlinedebug \
+    -ext_src_info \
   {% endif -%}
+
   {% if cov_opts is not none -%}
     {{ cov_opts }} \
   {% endif -%}
