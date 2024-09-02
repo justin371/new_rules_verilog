@@ -22,7 +22,7 @@ def _verilog_dv_test_base_cfg_impl(ctx):
     parent_tbs = [dep[DVTestInfo].tb for dep in reversed(ctx.attr.inherits) if hasattr(dep[DVTestInfo], "tb")]
     parent_timeouts = [dep[DVTestInfo].timeout for dep in reversed(ctx.attr.inherits) if hasattr(dep[DVTestInfo], "timeout")]
     parent_pre_run = [dep[DVTestInfo].pre_run for dep in reversed(ctx.attr.inherits) if hasattr(dep[DVTestInfo], "pre_run")]
-    
+
     sim_opts = {}
 
     # Each successive dependency may override previous deps
@@ -164,10 +164,10 @@ verilog_dv_test_base_cfg = rule(
 )
 
 def verilog_dv_test_cfg(name = None, tags = None, abstract = None, inherits = None, uvm_testname = None, tb = None, sim_opts = None, no_run = None, sockets = None, pre_run = None, timeout = None, description = None, gls_tb = None, pre_opts = None, post_opts = None):
-    #get testcase arguments 
+    #get testcase arguments
     params = {}
     if name != None:
-        params['name'] = name 
+        params['name'] = name
     if abstract != None:
         params['abstract'] = abstract
     if inherits != None:
@@ -189,7 +189,7 @@ def verilog_dv_test_cfg(name = None, tags = None, abstract = None, inherits = No
 
     #bazel case for pre_sim
     if pre_opts != None:
-        pre_sim_opts = sim_opts + pre_opts 
+        pre_sim_opts = sim_opts + pre_opts
     else:
         pre_sim_opts = sim_opts
 
@@ -198,12 +198,13 @@ def verilog_dv_test_cfg(name = None, tags = None, abstract = None, inherits = No
     #bazel case for pre_sim
     #remove "gatesim" keyword in tags when pre_sim
     temp_tags = []
-    if tags != None and "gatesim" in tags:
+    if tags != None:
         for tag in tags:
             if tag != "gatesim":
                 temp_tags.append(tag)
+    #replace temp_tags without "gatesim" with params['tags']
     params['tags'] = temp_tags
-    verilog_dv_test_base_cfg(**params)         
+    verilog_dv_test_base_cfg(**params)
 
     #bazel case for post_sim
     if tags != None and "gatesim" in tags:
@@ -211,18 +212,18 @@ def verilog_dv_test_cfg(name = None, tags = None, abstract = None, inherits = No
             post_sim_opts = sim_opts + post_opts
         else:
             post_sim_opts = sim_opts
-     
+
         params['sim_opts'] = post_sim_opts
-        
+
         #remove "ci_gate", "nightly", "weekly" keyword in tags when post_sim
         temp_tags = []
         for tag in tags:
             if tag != "ci_gate" and tag != "nightly" and tag != "weekly":
                 temp_tags.append(tag)
-        params['tags'] = temp_tags 
+        params['tags'] = temp_tags
 
         #add suffix for name,tb,inherits according gatesim corner to create post_sim testcase
-        for corner in GATESIM_MODES: 
+        for corner in GATESIM_MODES:
             params['name'] = name + "_" + corner
             if inherits != None:
                 for inherit in inherits:
@@ -232,7 +233,7 @@ def verilog_dv_test_cfg(name = None, tags = None, abstract = None, inherits = No
                 params['tb'] = gls_tb + "_" + corner
             elif tb != None:
                 params['tb'] = tb + "_" + corner
-            verilog_dv_test_base_cfg(**params)         
+            verilog_dv_test_base_cfg(**params)
 
 def _verilog_dv_library_impl(ctx):
     if ctx.attr.incdir:
@@ -382,7 +383,7 @@ def _verilog_dv_tb_impl(ctx):
             "{RUNTIME_ARGS}": ctx.expand_location("\n".join(ctx.attr.extra_runtime_args_vcs), targets = ctx.attr.extra_runfiles),
             "{DPI_LIBS}": flists_to_arguments(ctx.attr.shells + ctx.attr.deps, VerilogInfo, "transitive_dpi", "-sv_lib", "", "vcs"), #for VCS-2023
         },
-    )    
+    )
     ctx.actions.write(
         output = ctx.outputs.compile_warning_waivers,
         content = "[\n" + "\n".join(["re.compile('{}'),".format(ww) for ww in ctx.attr.warning_waivers]) + "\n]\n",
