@@ -19,7 +19,7 @@ run {{ options.wave_start }}ns
 {% endif -%}
 database -open shm_db -shm -into {{ waves_db }} -default {{ options.delta }}
 {% for probe in options.probes -%}
-probe -database shm_db {{ probe }} -all -memories -depth {{ options.wave_depth }} -packed {{ options.probe_packed }} -unpacked {{ options.probe_unpacked }}
+probe -database shm_db {{ probe }} -all -memories -dynamic -depth {{ options.wave_depth }} -packed {{ options.probe_packed }} -unpacked {{ options.probe_unpacked }}
 {% endfor -%}
 run
 {% endif -%}
