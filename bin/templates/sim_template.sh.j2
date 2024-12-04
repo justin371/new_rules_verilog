@@ -50,7 +50,7 @@ function testFunction {
   {% if options.simulator.upper() == 'VCS' -%}
     mkdir {{ job.test_name_seed }}
     cd {{ job.test_name_seed }}
-    time runmod vcs -- {{ vcomp_dir }}/simv {{ gui }} $ARGS {{ sim_opts }} | tee {{ job._log_path }}
+    time runmod vcs -- {{ vcomp_dir }}/simv {{ gui }} $ARGS {{ sim_opts }} -l {{ job._log_path }}
   {% endif -%}
 
   {% if options.simulator.upper() == 'XRUN' -%}

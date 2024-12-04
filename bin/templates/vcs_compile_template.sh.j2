@@ -4,49 +4,22 @@ cd {{ bazel_runfiles_main }} && \
 
 runmod -t vcs -- \
   -full64 \
-  +v2k \
-  +vpi \
-  -notice \
-  -licqueue \
-  -V -DVCS -CFLAGS -LDFLAGS \
-  -assert svaext \
-  -partcomp \
-  -pcmakeprof -j4 \
-  -reportstats \
-  -lca -lrt \
-  -ntb_opts uvm-1.2 \
-  +lint=PCWM-L,TFIPC-L,PCWM \
-  -xlrm floating_pnt_constraint \
-  -xlrm uniq_prior_final \
   -Mdir={{ VCOMP_DIR }}/csrc \
   -Mlib={{ VCOMP_DIR }}/csrc \
-  -Mupdate \
-  +libext+.sv+.svh+.v+.vams \
-  +systemverilogext+.sv+.svh \
-  -ams \
-  -sv_interconnect \
-  -xlrm nettype_array \
-  -timescale=1ps/1ps \
-  {% if enable_cdnvip > 0 -%}
-    +vcs+lic+wait -sverilog \
-	  -Mupdate=1 +vpi -ucli -LDFLAGS -Wl,-E \
-	  +define+DENALI_UVM +define+VCS -CFLAGS \'-DVCS=1\' \
-	  -CFLAGS \'-DVCS -DDENALI_SV_VCS=1 -I../ -I/usr/local/include -I'${DENALI}' -I'${DENALI}'/ddvapi -O2 -c\' \
-	  -LDFLAGS \'-rdynamic '${DENALI}'/verilog/libcdnsv.so\' \
-	  -LDFLAGS \'-rdynamic '${DENALI}'/lib/libviputil.so\' \
-  {% endif -%}
+  -p1800_macro_expansion \
+  -file {{ bazel_compile_args }} \
   {% for define in additional_defines -%}
     +define+{{ define }} \
   {% endfor -%}
   {% if enable_debug_access == 0 -%}
     -debug_access+pp+fwn \
   {% endif -%}
-  {% if enable_debug_access > 0 -%}
+  {% if enable_debug_access == 1 -%}
     -kdb \
     -debug_access+all+designer+simctrl \
     +define+UVM_VERDI_COMPWAVE \
   {% endif -%}
-  {% if enable_debug_access > 1 -%}
+  {% if enable_debug_access == 2 -%}
     +fsmdebug \
     -uvmlinedebug \
     -debug_access+reverse \
@@ -54,6 +27,15 @@ runmod -t vcs -- \
   {% if cov_opts is not none -%}
     {{ cov_opts }} \
   {% endif -%}
-  -f {{ bazel_compile_args }} \
+  {% if enable_cdnvip == 1 -%}
+	  -LDFLAGS -Wl,-E \
+	  +define+DENALI_UVM +define+DENALI_SV_VCS -CFLAGS \'-DVCS=1\' \
+    '${DENALI}'/ddvapi/sv/denaliMemSvIf.c \
+    -CFLAGS \'-DVCS -DDENALI_SV_VCS=1 -I../ -I/usr/local/include -I'${DENALI}' -I'${DENALI}'/ddvapi -O2 -c\' \
+	  -LDFLAGS \'-rdynamic '${DENALI}'/verilog/libcdnsv.so\' \
+	  -LDFLAGS \'-rdynamic '${DENALI}'/lib/libviputil.so\' \
+    -XVpiCbAutoRelease=libcdnsv.so \
+    -P '${DENALI}'/verilog/cdnsv.tab \
+  {% endif -%}
   -l {{ VCOMP_DIR }}/cmp.log \
   -o {{ VCOMP_DIR }}/simv

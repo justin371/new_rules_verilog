@@ -85,13 +85,13 @@ def flists_to_arguments(deps, provider, field, prefix, separator = "", tool_name
 
     if tool_name == "vcs":
         formatted_args = [
-            "{} ../{}".format(prefix, flist.short_path[:-3]) if flist.short_path.endswith(".so") 
-            else " {} {}".format(prefix, flist.short_path) 
+            " {} ../{}".format(prefix, flist.short_path[:-3]) if flist.short_path.endswith(".so")
+            else " {} {}".format(prefix, flist.short_path)
             for flist in trans
         ]
     else:
         formatted_args = [" {} {}".format(prefix, flist.short_path) for flist in trans]
-    
+
     #return separator.join([" {} {}".format(prefix, flist.short_path) for flist in trans])
     return separator.join(formatted_args)
 

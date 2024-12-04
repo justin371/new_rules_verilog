@@ -80,8 +80,9 @@ class VCompJob(Job):
             enable_debug_access = 1
         if options.gui:
             enable_debug_access = 2
+
         enable_cdnvip = 0
-        if options.vip:
+        if options.cdn_vip:
             enable_cdnvip = 1
 
         cov_opts = ''

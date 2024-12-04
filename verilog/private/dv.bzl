@@ -346,7 +346,7 @@ def _verilog_dv_tb_impl(ctx):
         substitutions = {
             "{COMPILE_ARGS}": ctx.expand_location("\n".join(vcs_extra_compile_args), targets = ctx.attr.extra_runfiles),
             "{DEFINES}": "\n".join(["+define+{}{}".format(key, value) for key, value in defines.items()]),
-            "{DPI_LIBS}": flists_to_arguments(ctx.attr.shells + ctx.attr.deps, VerilogInfo, "transitive_dpi", " "), #for VCS-2022
+            #"{DPI_LIBS}": flists_to_arguments(ctx.attr.shells + ctx.attr.deps, VerilogInfo, "transitive_dpi", "-sv_lib", "", "vcs"),
             "{FLISTS}": flists_to_arguments(ctx.attr.shells + ctx.attr.deps, VerilogInfo, "transitive_flists", "\n-f"),
         },
     )
@@ -369,7 +369,8 @@ def _verilog_dv_tb_impl(ctx):
         },
     )
     ctx.actions.expand_template(
-        template = ctx.file._runtime_args_template,
+        #template = ctx.file._runtime_args_template,
+        template = ctx.file._default_sim_opts_xrun,
         output = ctx.outputs.runtime_args_xrun,
         substitutions = {
             "{RUNTIME_ARGS}": ctx.expand_location("\n".join(ctx.attr.extra_runtime_args), targets = ctx.attr.extra_runfiles),
@@ -377,11 +378,12 @@ def _verilog_dv_tb_impl(ctx):
         },
     )
     ctx.actions.expand_template(
-        template = ctx.file._runtime_args_template,
+        #template = ctx.file._runtime_args_template,
+        template = ctx.file._default_sim_opts_vcs,
         output = ctx.outputs.runtime_args_vcs,
         substitutions = {
             "{RUNTIME_ARGS}": ctx.expand_location("\n".join(ctx.attr.extra_runtime_args_vcs), targets = ctx.attr.extra_runfiles),
-            "{DPI_LIBS}": flists_to_arguments(ctx.attr.shells + ctx.attr.deps, VerilogInfo, "transitive_dpi", "-sv_lib", "", "vcs"), #for VCS-2023
+            "{DPI_LIBS}": flists_to_arguments(ctx.attr.shells + ctx.attr.deps, VerilogInfo, "transitive_dpi", "-sv_lib", "", "vcs"),
         },
     )
     ctx.actions.write(
@@ -397,13 +399,29 @@ def _verilog_dv_tb_impl(ctx):
 
     trans_srcs = get_transitive_srcs([], ctx.attr.deps + ctx.attr.shells, VerilogInfo, "transitive_sources", allow_other_outputs = True)
     trans_flists = get_transitive_srcs([], ctx.attr.deps + ctx.attr.shells, VerilogInfo, "transitive_flists", allow_other_outputs = False)
-    out_deps = depset([ctx.outputs.compile_args_vcs, ctx.outputs.compile_args_xrun, ctx.outputs.compile_args_pldm_ice, ctx.outputs.runtime_args_xrun, ctx.outputs.runtime_args_vcs, ctx.outputs.compile_warning_waivers, ctx.outputs.executable])
+    out_deps = depset([
+        ctx.outputs.compile_args_vcs,
+        ctx.outputs.compile_args_xrun,
+        ctx.outputs.compile_args_pldm_ice,
+        ctx.outputs.runtime_args_xrun,
+        ctx.outputs.runtime_args_vcs,
+        ctx.outputs.compile_warning_waivers,
+        ctx.outputs.executable
+    ])
     all_files = depset([], transitive = [trans_srcs, trans_flists, out_deps])
 
     return [
         DefaultInfo(
             files = all_files,
-            runfiles = ctx.runfiles(files = trans_srcs.to_list() + trans_flists.to_list() + out_deps.to_list() + ctx.files.ccf + ctx.files.extra_runfiles + [ctx.file._default_sim_opts_xrun] + [ctx.file._default_sim_opts_vcs]),
+            runfiles = ctx.runfiles(files =
+                trans_srcs.to_list() +
+                trans_flists.to_list() +
+                out_deps.to_list() +
+                ctx.files.ccf +
+                ctx.files.extra_runfiles +
+                [ctx.file._default_sim_opts_xrun] +
+                [ctx.file._default_sim_opts_vcs]
+            ),
         ),
         DVTBInfo(
             ccf = ctx.files.ccf,

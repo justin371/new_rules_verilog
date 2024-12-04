@@ -63,10 +63,10 @@ def add_debug_arguments(parser):
                         default=False,
                         action='store_true',
                         help='run simulation in gui mode for C/DV debug, only applicable with single test')
-    gdebug.add_argument('--vip',
+    gdebug.add_argument('--cdn-vip',
                         default=False,
                         action='store_true',
-                        help='add cdnvip compile options for VCS')
+                        help='add CDNS vip compile options for VCS simulator')
     gdebug.add_argument('--profile',
                         default=False,
                         action='store_true',
