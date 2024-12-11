@@ -585,7 +585,7 @@ verilog_dv_unit_test = rule(
         ),
         "default_sim_opts": attr.label(
             allow_single_file = True,
-            default = "@rules_verilog//vendors/cadence:verilog_dv_default_sim_opts.f",
+            default = "@rules_verilog//vendors/cadence:verilog_dv_unit_test_opts.f",
             doc = "Default simulator options to pass to the simulator.",
             # TODO remove this and just make it part of the template?
         ),
