@@ -98,7 +98,7 @@ class HalMessage(object):
             source_line = ""
         try:
             file_info = soup.file_info.text.strip()
-            match = re.search(r'{"([^"]+)" ([0-9]+) [0-9]+}', file_info)
+            match = re.search(r"{"([^"]+)" ([0-9]+) [0-9]+}", file_info)
             filename = match.group(1)
             lineno = match.group(2)
         except AttributeError:

@@ -534,6 +534,9 @@ class TestJob(Job):
             sim_opts += " -gui "
             if options.simulator.upper() == 'XRUN':
                 sim_opts += " -R "
+            else:
+                if options.simulator.upper() == 'VCS':
+                    sim_opts += "-gui=apex +UVM_VERDI_TRACE=UVM_AWARE +UVM_CONFIG_TRACE +UVM_PHASE_TRACE +UVM_OBJECTION_TRACE +UVM_RESOURCE_DB_TRACE +UVM_LOG_TRACE"
         if options.mce:
             sim_opts += " -mce "
             sim_opts += " -mce_pie "
