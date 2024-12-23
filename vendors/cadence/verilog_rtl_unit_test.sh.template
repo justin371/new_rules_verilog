@@ -38,6 +38,8 @@ then
 fi
 
 {SIMULATOR_COMMAND} \
+    -newsv \
+    -plussv \
     -define TBV \
     -libext .sv \
     -libext .svh \
