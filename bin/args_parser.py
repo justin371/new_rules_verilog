@@ -364,6 +364,16 @@ def add_basic_arguments(parser):
                         default=set(),
                         action=parser_actions.GlobalTagAction,
                         help='Exclude tests that match this tag. Affects all test globs')
+    parser.add_argument('--emulator',
+                        type=str,
+                        default='',
+                        choices=['pldm_sa', 'pldm_sim', 'sim', 'clean'],
+                        help='Declares the platform to use for compile and emulation.\n'
+                             'pldm_sa: clean the database, run palladium synthesis, tb compilation, then run the cases\n'
+                             'pldm_sim: kept the synthesis database, run palladium tb compilation, then run the cases\n'
+                             'sim: without palladium synthesis, compile the emualtion env with simulator, then run the cases with simulator\n'
+                             'clean: clean the synthesis database\n'
+                             )
     parser.add_argument('--simulator',
                         type=str,
                         default='XRUN',

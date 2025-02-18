@@ -329,6 +329,7 @@ def _verilog_dv_tb_impl(ctx):
     vcs_extra_compile_args = []
     xrun_extra_compile_args = []
     pldm_ice_extra_compile_args = []
+    pldm_sa_extra_compile_args = []
     if len(ctx.attr.verilog_config):
         top = ctx.attr.verilog_config.keys()[0]
         cfg = ctx.attr.verilog_config[top]
@@ -339,6 +340,7 @@ def _verilog_dv_tb_impl(ctx):
     vcs_extra_compile_args.extend(ctx.attr.extra_compile_args_vcs)
     xrun_extra_compile_args.extend(ctx.attr.extra_compile_args)
     pldm_ice_extra_compile_args.extend(ctx.attr.extra_compile_args)
+    pldm_sa_extra_compile_args.extend(ctx.attr.extra_compile_args)
 
     ctx.actions.expand_template(
         template = ctx.file._compile_args_template_vcs,
@@ -386,6 +388,15 @@ def _verilog_dv_tb_impl(ctx):
             "{DPI_LIBS}": flists_to_arguments(ctx.attr.shells + ctx.attr.deps, VerilogInfo, "transitive_dpi", "-sv_lib", "", "vcs"),
         },
     )
+    ctx.actions.expand_template(
+        template = ctx.file._compile_args_template_pldm_sa,
+        output = ctx.outputs.compile_args_pldm_sa,
+        substitutions = {
+            "{COMPILE_ARGS}": ctx.expand_location("\n".join(pldm_sa_extra_compile_args), targets = ctx.attr.extra_runfiles),
+            "{DEFINES}": "\n".join(["-define {}{}".format(key, value) for key, value in defines.items()]),
+            "{FLISTS}": flists_to_arguments(ctx.attr.shells + ctx.attr.deps, VerilogInfo, "transitive_flists", "\n-f"),
+        },
+    )
     ctx.actions.write(
         output = ctx.outputs.compile_warning_waivers,
         content = "[\n" + "\n".join(["re.compile('{}'),".format(ww) for ww in ctx.attr.warning_waivers]) + "\n]\n",
@@ -403,6 +414,7 @@ def _verilog_dv_tb_impl(ctx):
         ctx.outputs.compile_args_vcs,
         ctx.outputs.compile_args_xrun,
         ctx.outputs.compile_args_pldm_ice,
+	ctx.outputs.compile_args_pldm_sa,
         ctx.outputs.runtime_args_xrun,
         ctx.outputs.runtime_args_vcs,
         ctx.outputs.compile_warning_waivers,
@@ -517,6 +529,11 @@ verilog_dv_tb = rule(
             allow_single_file = True,
             doc = "Template to generate compilation arguments flist.",
         ),
+        "_compile_args_template_pldm_sa": attr.label(
+            default = Label("@rules_verilog//vendors/cadence:verilog_dv_tb_compile_args_pldm_sa.f.template"),
+            allow_single_file = True,
+            doc = "Template to generate compilation arguments flist.",
+        ),
         "_runtime_args_template": attr.label(
             default = Label("@rules_verilog//vendors/common:verilog_dv_tb_runtime_args.f.template"),
             allow_single_file = True,
@@ -529,6 +546,7 @@ verilog_dv_tb = rule(
         "compile_args_vcs": "%{name}_compile_args_vcs.f",
         "compile_args_xrun": "%{name}_compile_args_xrun.f",
         "compile_args_pldm_ice": "%{name}_compile_args_pldm_ice.f",
+        "compile_args_pldm_sa": "%{name}_compile_args_pldm_sa.f",
         "compile_warning_waivers": "%{name}_compile_warning_waivers",
     },
     # TODO does this still need to be executable with a empty command?

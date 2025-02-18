@@ -46,6 +46,10 @@ BUGGER_TEMPLATE = env.get_template('bugger_template.sh.j2')
 # For publishing test results to azure pipeline or jenkins
 JUNIT_TEMPLATE = env.get_template('junit_tempalte.j2')
 
+# Get the path from the environment variable EMU_JINJA2_PATH
+# xrun_emu_compile_template.sh.j2 located here
+emu_template_path = os.getenv('EMU_JINJA2_PATH')
+
 
 class VCompJob(Job):
     # All found vcomp names to prevent collisions
@@ -192,9 +196,18 @@ class VCompJob(Job):
             self.bazel_compile_args = os.path.join(options.proj_dir, relpath,
                                                    "{}/{}/msie/{}_incr.f".format(options.proj_dir, relpath, tb_name))
         else:
-            self.bazel_compile_args = os.path.join(
-                self.bazel_runfiles_main, relpath, "{}_compile_args_{}.f".format(bazel_target,
+
+            if ( options.emulator == 'pldm_sa' ) :
+                self.bazel_compile_args = os.path.join(self.bazel_runfiles_main, relpath, "{}_compile_args".format(
+                    bazel_target))
+            else:
+            	self.bazel_compile_args = os.path.join(
+                	self.bazel_runfiles_main, relpath, "{}_compile_args_{}.f".format(bazel_target,
                                                                                  options.simulator.lower()))
+
+            #RTL file list for Vlan
+            self.bazel_compile_args_emu_rtl = os.path.join(self.bazel_runfiles_main, relpath, "{}_rtl_compile_args".format(
+                bazel_target))
         self.bazel_runtime_args = os.path.join(self.bazel_runfiles_main, relpath,
                                                "{}_runtime_args_{}.f".format(bazel_target,
                                                                              options.simulator.lower()))
@@ -220,12 +233,28 @@ class VCompJob(Job):
 
         with open(vcomp_sh_path, 'w') as filep:
             if options.simulator.upper() == 'XRUN':
+                if options.emulator.upper() != '':
+                    if emu_template_path:
+                        # fetch xrun_emu_compile_template.sh.j2 from project specific folder
+                        emu_loader      = jinja2.FileSystemLoader(searchpath=emu_template_path)
+                        emu_env         = jinja2.Environment(loader=emu_loader)
+                        EMU_COMPILE_TEMPLATE = emu_env.get_template('xrun_emu_compile_template.sh.j2')
+                    else:
+                        log.error(("%s EMU_JINJA2_PATH environment variable is not set, please set the path "
+                                    "where xrun_emu_compile_template.sh.j2 is located, "
+                                    "default path is in digital/emu/script"), self)
+
+                    CDN_COMPILE_TEMPLATE = EMU_COMPILE_TEMPLATE
+                else:
+                    CDN_COMPILE_TEMPLATE = XRUN_COMPILE_TEMPLATE
+                    
                 filep.write(
-                    XRUN_COMPILE_TEMPLATE.render(
+                    CDN_COMPILE_TEMPLATE.render(
                         VCOMP_DIR=self.job_dir,
                         cov_opts=cov_opts,
                         bazel_runfiles_main=self.bazel_runfiles_main,
                         bazel_compile_args=self.bazel_compile_args,
+						bazel_compile_args_rtl=self.bazel_compile_args_emu_rtl, #only used for emulation
                         enable_debug_access=enable_debug_access,
                         xprop_cmd=xprop_cmd,
                         relpath=relpath,

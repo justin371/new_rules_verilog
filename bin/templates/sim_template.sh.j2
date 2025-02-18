@@ -53,8 +53,16 @@ function testFunction {
     time runmod vcs -- {{ vcomp_dir }}/simv {{ gui }} $ARGS {{ sim_opts }} -l {{ job._log_path }}
   {% endif -%}
 
-  {% if options.simulator.upper() == 'XRUN' -%}
+  {% if options.simulator.upper() == 'XRUN' and options.emulator == '' -%}
     time runmod -t xrun -- {{ gui }} -R -xmlibdirname {{ job.vcomper.job_dir }} $ARGS {{ sim_opts }} | tee {{ job._log_path }}
+  {% elif options.simulator.upper() == 'XRUN' and (options.emulator.upper() == 'PLDM_SA' or options.emulator.upper() == 'PLDM_SIM')-%}
+    xrun -R -64 -xmfatal NOTEXP -l user_work/{{job.simname}}/sim.log {{ gui }} \
+    -R -xmlibdirname hw_lib -sv_lib digital/dv/common/global/liblibwc_time_dpi.so $ARGS {{ sim_opts }}  | tee {{ job._log_path }}
+  {% elif options.simulator.upper() == 'XRUN' and options.emulator.upper() == 'SIM' -%}
+    xrun -R -64 -xmfatal NOTEXP -l user_work/{{job.simname}}/sim.log {{ gui }} \
+    -R -xmlibdirname sw_lib -sv_lib digital/dv/common/global/liblibwc_time_dpi.so $ARGS {{ sim_opts }}  | tee {{ job._log_path }}
+  {% else -%}
+    Error input pararameters. 
   {% endif -%}
 
     SIMULATION_PID=$!
