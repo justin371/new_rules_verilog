@@ -168,7 +168,7 @@ def calc_simresults_location(checkout_path):
     # If username is in the checkout_path try to reduce the name
     # Assume username is somewhere is path
     try:
-        checkout_path = re.search(r"{}/(.*)".format(username), checkout_path).group(1)
+        checkout_path = re.search(r'{}/(.*)'.format(username), checkout_path).group(1)
     except AttributeError:
         pass
     checkout_path = checkout_path.replace('/', '_')

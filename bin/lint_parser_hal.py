@@ -58,7 +58,7 @@ def find_bazel_runfiles(relpath, bazel_target):
     p.wait()
     assert p.returncode == 0
     stdout, stderr = p.communicate()
-    bazel_bin = re.search(r"bazel-bin: (.*)", stdout.decode('ascii')).group(1)
+    bazel_bin = re.search(r'bazel-bin: (.*)', stdout.decode('ascii')).group(1)
     runfiles_main = os.path.join(bazel_bin, relpath, "{}.runfiles".format(bazel_target), "_main")
     return runfiles_main
 
@@ -98,7 +98,7 @@ class HalMessage(object):
             source_line = ""
         try:
             file_info = soup.file_info.text.strip()
-            match = re.search(r"{"([^"]+)" ([0-9]+) [0-9]+}", file_info)
+            match = re.search(r'{"([^"]+)" ([0-9]+) [0-9]+}', file_info)
             filename = match.group(1)
             lineno = match.group(2)
         except AttributeError:

@@ -125,7 +125,7 @@ class VCompJob(Job):
 
                     text = stderr.decode('ascii')
                     try:
-                        covfiles = eval(re.search(r"verilog_dv_tb_ccf\((.*)\)", text).group(1))
+                        covfiles = eval(re.search(r'verilog_dv_tb_ccf\((.*)\)', text).group(1))
                         cov_opts += " ".join([' -covfile {} '.format(ccf) for ccf in covfiles])
                     except (AttributeError):
                         pass # No ccf file declared (bazel query results empty)
@@ -184,7 +184,7 @@ class VCompJob(Job):
         p.wait()
         assert p.returncode == 0
         stdout, stderr = p.communicate()
-        bazel_bin = re.search(r"bazel-bin: (.*)", stdout.decode('ascii')).group(1)
+        bazel_bin = re.search(r'bazel-bin: (.*)', stdout.decode('ascii')).group(1)
         # This is a gross assumption, but I can't see an easier way to find this in bazel
         self.bazel_runfiles_main = os.path.join(bazel_bin, relpath, "{}.runfiles".format(bazel_target), "_main")
 
@@ -368,7 +368,7 @@ class TestJob(Job):
         with open(path) as filep:
             rw = self.RegexWrap()
             for line in filep.readlines():
-                if rw.search(r"^<INCLUDE>(.*)", line):
+                if rw.search(r'^<INCLUDE>(.*)', line):
                     include = rw.match.group(1).strip()
                     include = os.path.join(os.path.dirname(path), include)
                     flattened.append("# Jumping into {}\n".format(include))

@@ -12,7 +12,7 @@ runmod -t vcs -- \
     +define+{{ define }} \
   {% endfor -%}
   {% if enable_debug_access == 0 -%}
-    -debug_access+pp+fwn \
+    -debug_access+f \
   {% endif -%}
   {% if enable_debug_access == 1 -%}
     -kdb \
