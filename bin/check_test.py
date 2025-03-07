@@ -49,6 +49,7 @@ error_signature = [
     r"UVM_WARNING .*uvm_reg_map.*RegModel.*In map .*maps to same address as memory",
     r"\*W,RMEMNOF",
     r"\*W,ASRTST .*has failed",
+    r"ERROR:",
 ]
 
 # Signatures indicating a successful test completion
