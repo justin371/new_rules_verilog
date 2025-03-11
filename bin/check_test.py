@@ -37,6 +37,8 @@ error_signature = [
     r"Error-",
     r"UVM_ERROR [@/]",
     r"UVM_FATAL [@/]",
+    r"UVM_ERROR .*[@/]",
+    r"UVM_FATAL .*[@/]",
     r"WARNING.FAILURE",
     r" \*E,",
     r" \*F,",
