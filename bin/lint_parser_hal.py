@@ -59,7 +59,7 @@ def find_bazel_runfiles(relpath, bazel_target):
     assert p.returncode == 0
     stdout, stderr = p.communicate()
     bazel_bin = re.search(r'bazel-bin: (.*)', stdout.decode('ascii')).group(1)
-    runfiles_main = os.path.join(bazel_bin, relpath, "{}.runfiles".format(bazel_target), "_main")
+    runfiles_main = os.path.join(bazel_bin, relpath, "{}.runfiles".format(bazel_target), "__main__")
     return runfiles_main
 
 

@@ -186,7 +186,7 @@ class VCompJob(Job):
         stdout, stderr = p.communicate()
         bazel_bin = re.search(r'bazel-bin: (.*)', stdout.decode('ascii')).group(1)
         # This is a gross assumption, but I can't see an easier way to find this in bazel
-        self.bazel_runfiles_main = os.path.join(bazel_bin, relpath, "{}.runfiles".format(bazel_target), "_main")
+        self.bazel_runfiles_main = os.path.join(bazel_bin, relpath, "{}.runfiles".format(bazel_target), "__main__")
 
         for ta in options.tests:
             tb_name = ta.btiglob.split(":")[0]
