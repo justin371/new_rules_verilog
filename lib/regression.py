@@ -183,7 +183,8 @@ class RegressionConfig():
             text = stdout.decode('ascii').split('\n') + stderr.decode('ascii').split('\n')
 
             ttv = [
-                re.search(r'verilog_dv_test_cfg_info\(@(?P<test>.*), (@(?P<vcomp>.*)), \[(?P<tags>.*)\]\)', line)
+                #re.search(r'verilog_dv_test_cfg_info\(@(?P<test>.*), (@(?P<vcomp>.*)), \[(?P<tags>.*)\]\)', line)
+                re.search(r'verilog_dv_test_cfg_info\(@(?:@)?(?P<test>.*), @(?:@)?(?P<vcomp>.*), \[(?P<tags>.*)\]\)', line)
                 for line in text
             ]
             ttv = [match for match in ttv if match]
