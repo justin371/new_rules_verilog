@@ -466,7 +466,7 @@ class TestJob(Job):
 
         pre_run = dynamic_args['pre_run']
 
-        default_capture = 'tb_top'
+        default_capture = 'hdl_top'
         waves_db = self.job_dir
         if options.wave_tcl:
             if os.path.exists(options.wave_tcl):
@@ -484,10 +484,10 @@ class TestJob(Job):
                 waves_db = os.path.join(waves_db, 'waves.vwdb')
                 #sim_opts += ' +vwdb+strength '
             elif options.wave_type == 'vcd':
-                default_capture = 'tb_top.dut'
+                default_capture = 'hdl_top.dut'
                 waves_db = os.path.join(waves_db, "waves.vcd")
             elif options.wave_type == 'evcd':
-                default_capture = 'tb_top.dut'
+                default_capture = 'hdl_top.dut'
                 waves_db = os.path.join(waves_db, "waves.evcd")
             elif options.wave_type == 'fsdb':
                 waves_db = os.path.join(waves_db, "waves.fsdb")

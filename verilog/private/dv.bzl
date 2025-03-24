@@ -335,8 +335,10 @@ def _verilog_dv_tb_impl(ctx):
         cfg = ctx.attr.verilog_config[top]
         vcs_extra_compile_args.append(cfg)
         xrun_extra_compile_args.append("-compcnfg {}".format(cfg))
-    vcs_extra_compile_args.append("-top {}".format(top))
-    xrun_extra_compile_args.append("-top {}".format(top))
+    #vcs_extra_compile_args.append("-top {}".format(top))
+    #xrun_extra_compile_args.append("-top {}".format(top))
+    vcs_extra_compile_args.append("-top hdl_top -top hvl_top")
+    xrun_extra_compile_args.append("-top hdl_top -top hvl_top")    
     vcs_extra_compile_args.extend(ctx.attr.extra_compile_args_vcs)
     xrun_extra_compile_args.extend(ctx.attr.extra_compile_args)
     pldm_ice_extra_compile_args.extend(ctx.attr.extra_compile_args)
