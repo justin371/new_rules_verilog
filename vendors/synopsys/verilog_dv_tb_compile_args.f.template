@@ -17,7 +17,7 @@
 # Enable the checker endchecker' construct
 -assert checker
 
-#-timescale=1ns/1fs
+-timescale=1ps/1ps
 
 #-pcmakeprof -reportstats
 #-fastcomp=0
