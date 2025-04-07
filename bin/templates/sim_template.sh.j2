@@ -1,112 +1,248 @@
 #!/usr/bin/env bash
 
+# Set shell options for safety
+set -o errexit
+set -o nounset
+set -o pipefail
+
+# Export variables that might be useful for sub-processes or debugging
 export PROJ_DIR={{ job.vcomper.rcfg.proj_dir }}
 export SIMRESULTS={{ job.job_dir }}
+export TEST_LOG_PATH={{ job._log_path }} # Export log path
 
-ARGS=$@
+# Store user arguments safely
+ARGS=("$@")
 
+# --- Main Test Function ---
 function testFunction {
-    # Variable to accumulate return codes
-    declare -i result=0
+    # Variable to accumulate return codes (0 = success)
+    declare -i final_result=0
 
+    # --- Socket Handling ---
  {%- for socket_name, socket_command, socket_file in sockets %}
-
-    ##################################################
+    echo "--- Handling Socket: {{ socket_name }} ---"
     # Remove previous socket file if it exists
-    rm -f {{ socket_file }}
-    # spawn {{ socket_name }} socket
-    {{ socket_command }} > {{ job.job_dir }}/{{ socket_name }}.log 2>&1 &
-    {{ socket_name|upper }}_PID=$!
-    echo "Socket {{ socket_name }} process: ${{ socket_name|upper }}_PID"
-    # Wait for socket to actually be created
-    while [ ! -e {{ socket_file }} ];
-    do
-        echo "Waiting for {{ socket_name }} to create {{ socket_file }}"
+    rm -f "{{ socket_file }}"
+    # Spawn socket process
+    echo "Spawning: {{ socket_command }}"
+    {{ socket_command }} > "{{ job.job_dir }}/{{ socket_name }}.log" 2>&1 &
+    # Store PID using uppercase name convention
+    declare {{ socket_name|upper }}_PID=$!
+    echo "Socket {{ socket_name }} started with PID ${{ socket_name|upper }}_PID (Log: {{ job.job_dir }}/{{ socket_name }}.log)"
+
+    # Wait for socket file to be created by the process
+    local wait_count=0
+    local max_wait=30 # Max seconds to wait
+    while [ ! -e "{{ socket_file }}" ]; do
+        echo "Waiting for {{ socket_name }} (PID ${{ socket_name|upper }}_PID) to create {{ socket_file }}..."
         sleep 1
-        if ! ps -p ${{ socket_name|upper }}_PID > /dev/null
-        then
-           echo "Error {{ socket_name }} returned without creating {{ socket_file }} see {{ job.job_dir }}/{{ socket_name }}.log"
-           exit 1
+        # Check if the socket process is still running
+        if ! ps -p ${{ socket_name|upper }}_PID > /dev/null; then
+           echo "%E- ERROR: Socket process {{ socket_name }} (PID ${{ socket_name|upper }}_PID) exited prematurely without creating {{ socket_file }}."
+           echo "Check log: {{ job.job_dir }}/{{ socket_name }}.log"
+           # Decide whether to exit immediately or continue and let failure be caught later
+           # exit 1 # Exit immediately
+           final_result=1 # Mark failure and continue for now
+           break # Stop waiting for this socket
+        fi
+        # Timeout check
+        wait_count=$((wait_count + 1))
+        if [ "$wait_count" -ge "$max_wait" ]; then
+            echo "%E- ERROR: Timeout waiting for socket {{ socket_name }} (PID ${{ socket_name|upper }}_PID) to create {{ socket_file }}."
+            final_result=1
+            break
         fi
     done
+    if [ -e "{{ socket_file }}" ]; then
+        echo "Socket file {{ socket_file }} created."
+    fi
+    echo "-------------------------------------"
  {%- endfor %}
 
- {%- if pre_run is not none %}
 
-    ##################################################
-    # Pre Simulation Command
-    cd $PROJ_DIR
-    bazel run {{ pre_run }} | tee {{ job.job_dir }}/pre_run.stdout
+    # --- Pre-Simulation Bazel Command (if specified) ---
+ {%- if pre_run_cmd %} # Use pre_run_cmd variable passed from Python
+    echo "--- Running Pre-Simulation Command ---"
+    # Run from project directory as before
+    cd "$PROJ_DIR"
+    echo "Executing: bazel run {{ pre_run_cmd }}"
+    # Capture exit code
+    set +o errexit
+    bazel run {{ pre_run_cmd }} | tee "{{ job.job_dir }}/pre_run.stdout"
+    local pre_run_exit_code=$?
+    set -o errexit
+    echo "Pre-simulation command finished with exit code: $pre_run_exit_code"
+    if [ $pre_run_exit_code -ne 0 ]; then
+        echo "%E- ERROR: Pre-simulation command failed."
+        final_result=1
+        # Decide if failure here is fatal
+        # return $final_result
+    fi
+    echo "-------------------------------------"
  {%- endif %}
 
-    ##################################################
-    # Main Simulation
-    cd $SIMRESULTS
-    uname -n
-    echo -n "# " >> {{ testscript }} ; uname -n >> {{ testscript }}
-    ln -snf {{ job.vcomper.bazel_runfiles_main }} bazel_runfiles_main
+
+    # --- Main Simulation ---
+    echo "--- Starting Main Simulation ---"
+    echo "Host: $(uname -n)"
+    echo "Time: $(date)"
+    #echo "Simulation working directory: {{ sim_working_dir }}"
+    #echo "Simulation log file: {{ job._log_path }}" # Already exported as TEST_LOG_PATH
+
+    # Go back to sim results dir for main simulation
+    cd "$SIMRESULTS"
+
+    # Enter the simulation working directory
+    echo "Current directory: $(pwd)"
+
+    # Create symlink to runfiles (useful for debug/manual runs)
+    ln -snf "{{ job.vcomper.bazel_runfiles_main }}" bazel_runfiles_main
     cd bazel_runfiles_main
 
-  {% if options.simulator.upper() == 'VCS' -%}
-    mkdir {{ job.test_name_seed }}
-    cd {{ job.test_name_seed }}
-    time runmod vcs -- {{ vcomp_dir }}/simv {{ gui }} $ARGS {{ sim_opts }} -l {{ job._log_path }}
-  {% endif -%}
-
-  {% if options.simulator.upper() == 'XRUN' and options.emulator == '' -%}
-    time runmod -t xrun -- {{ gui }} -R -xmlibdirname {{ job.vcomper.job_dir }} $ARGS {{ sim_opts }} | tee {{ job._log_path }}
-  {% elif options.simulator.upper() == 'XRUN' and (options.emulator.upper() == 'PLDM_SA' or options.emulator.upper() == 'PLDM_SIM')-%}
-    xrun -R -64 -xmfatal NOTEXP -l user_work/{{job.simname}}/sim.log {{ gui }} \
-    -R -xmlibdirname hw_lib -sv_lib digital/dv/common/global/liblibwc_time_dpi.so $ARGS {{ sim_opts }}  | tee {{ job._log_path }}
-  {% elif options.simulator.upper() == 'XRUN' and options.emulator.upper() == 'SIM' -%}
-    xrun -R -64 -xmfatal NOTEXP -l user_work/{{job.simname}}/sim.log {{ gui }} \
-    -R -xmlibdirname sw_lib -sv_lib digital/dv/common/global/liblibwc_time_dpi.so $ARGS {{ sim_opts }}  | tee {{ job._log_path }}
-  {% endif -%}
-
-    SIMULATION_PID=$!
-    wait $SIMULATION_PID
-    result+=$?
-    cd ../
-    echo "TEST END"
-  {% if options.simulator.upper() == 'VCS' -%}
-    rm -rf {{ job.test_name_seed }} # clear vcs simulation file
-  {% endif -%}
-
-    ##################################################
-    # Socket process exit code collection
-    declare -i socket_result=0
- {%- for socket_name, socket_command, socket_file in sockets %}
-    wait ${{ socket_name|upper }}_PID
-    socket_result=$?
-    echo "socket {{ socket_name }} result: $socket_result"
-    if [ $socket_result -ne 0 ]; then
-      echo "%E- ERROR: {{ socket_name }} returned non-zero status"
+    # Execute any simulator-specific pre-commands
+    {% for cmd in pre_sim_commands %}
+    # echo "Executing pre-sim command: {{ cmd }}"
+    set +o errexit
+    eval "{{ cmd }}" # Use eval in case the command has pipes/redirects etc.
+    local pre_cmd_exit_code=$?
+    set -o errexit
+    if [ $pre_cmd_exit_code -ne 0 ]; then
+        echo "%E- ERROR: Pre-sim command failed: {{ cmd }}"
+        final_result=1
     fi
-    result+=socket_result
+    {% endfor %}
+
+    # Execute the main simulation command with timing
+    set +o errexit # Disable errexit to capture the simulation's exit code
+    time eval "{{ simulation_command }}" # Use eval to correctly interpret the command string
+    local sim_exit_code=$?
+    set -o errexit # Re-enable errexit
+    echo "Simulation finished with exit code: $sim_exit_code"
+    final_result=$((final_result + sim_exit_code)) # Add sim exit code to final result
+
+    # Execute any simulator-specific post-commands
+    {% for cmd in post_sim_commands %}
+    echo "Executing post-sim command: {{ cmd }}"
+    set +o errexit
+    eval "{{ cmd }}"
+    local post_cmd_exit_code=$?
+    set -o errexit
+    if [ $post_cmd_exit_code -ne 0 ]; then
+        echo "%W- WARNING: Post-sim command failed: {{ cmd }}"
+        # Typically don't add to final_result unless cleanup failure is critical
+    fi
+    {% endfor %}
+
+    # Return to the main job directory for subsequent steps
+    cd "$SIMRESULTS"
+    # echo "Current directory: $(pwd)"
+    echo "--- Main Simulation Finished ---"
+
+
+    # --- Socket Process Cleanup and Exit Code Collection ---
+    # echo "--- Cleaning Up Sockets ---"
+    declare -i sockets_exit_code=0
+ {%- for socket_name, _, _ in sockets %}
+    SOCKET_PID_VARNAME="{{ socket_name|upper }}_PID"
+    # Check if PID variable is set and non-empty
+    if [ -n "${!SOCKET_PID_VARNAME:-}" ]; then
+        local current_pid="${!SOCKET_PID_VARNAME}"
+        echo "Waiting for socket {{ socket_name }} (PID $current_pid) to exit..."
+        # Wait for the specific PID
+        set +o errexit
+        wait $current_pid
+        local socket_exit_code=$?
+        set -o errexit
+        echo "Socket {{ socket_name }} exited with code: $socket_exit_code"
+        if [ $socket_exit_code -ne 0 ]; then
+            echo "%E- ERROR: Socket process {{ socket_name }} (PID $current_pid) returned non-zero exit code $socket_exit_code."
+            echo "Check log: {{ job.job_dir }}/{{ socket_name }}.log"
+            sockets_exit_code=$((sockets_exit_code + socket_exit_code)) # Accumulate socket errors
+        fi
+    else
+        echo "%W- WARNING: PID variable '$SOCKET_PID_VARNAME' not found for socket {{ socket_name }}. Cannot wait/check status."
+    fi
  {% endfor %}
+    # Add accumulated socket exit codes to the final result
+    # Optional: decide if socket failures should make the whole test fail
+    if [ $sockets_exit_code -ne 0 ]; then
+       echo "%E- At least one socket process failed."
+       # Make the overall test fail if any socket failed:
+       if [ $final_result -eq 0 ]; then final_result=1; fi
+    fi
+    # echo "--- Socket Cleanup Finished ---"
 
- {% if options.skip_parse_sim_log == 0 -%}
-    ##################################################
-    # Parse simulation log
-    cd {{ job.job_dir }}
-    $PROJ_DIR/bazel-bin/external/rules_verilog/bin/check_test {{ job._log_path }}
-    result+=$?
- {% endif -%}
 
-    return $result
+    # --- Simulation Log Parsing ---
+ {%- if options.skip_parse_sim_log == 0 %}
+    # echo "--- Parsing Simulation Log ---"
+    # Ensure we are in the job directory
+    cd "$SIMRESULTS"
+    local check_test_script="$PROJ_DIR/bazel-bin/external/rules_verilog/bin/check_test" # Path to checker script
+    local log_file_to_check="{{ job._log_path }}" # Log file path
+
+    if [ -f "$check_test_script" ] && [ -f "$log_file_to_check" ]; then
+        # echo "Running: $check_test_script $log_file_to_check"
+        set +o errexit
+        "$check_test_script" "$log_file_to_check"
+        local parse_exit_code=$?
+        set -o errexit
+        # echo "Log parsing finished with exit code: $parse_exit_code"
+        if [ $parse_exit_code -ne 0 ]; then
+            # echo "%E- ERROR: Log parsing reported errors."
+            # Add parsing exit code to final result ONLY IF simulation itself passed
+            # Avoid masking the original simulation failure code
+            if [ $sim_exit_code -eq 0 ]; then
+                 final_result=$((final_result + parse_exit_code))
+            fi
+        fi
+    elif [ ! -f "$check_test_script" ]; then
+        echo "%E- ERROR: check_test script not found at $check_test_script. Skipping log parsing."
+        final_result=1 # Fail the test if checker script is missing
+    else # Log file missing
+         echo "%E- ERROR: Simulation log file not found at $log_file_to_check. Cannot parse."
+         # Fail if log is missing and sim *should* have produced one (sim might have failed early)
+         if [ $sim_exit_code -eq 0 ]; then final_result=1; fi
+    fi
+    # echo "--- Log Parsing Finished ---"
+ {% else %}
+    # echo "--- Skipping Simulation Log Parsing (options.skip_parse_sim_log != 0) ---"
+ {% endif %}
+
+
+    # echo "--- Test Function End ---"
+    # echo "Final combined exit code: $final_result"
+    # Return the accumulated result code
+    return $final_result
 }
 
+# --- Signal Handling ---
 function signal_exit {
-	echo  "CTRL-C trapped. Waiting for $myPID"
+    # This function is called when specific signals are received
+    echo "$(date): TRAPPED SIGNAL. Terminating script."
+    # Optional: Add cleanup here if needed, e.g., kill background jobs
+    # Find and kill background socket processes? Be careful not to kill unrelated processes.
+    # pkill -P $$ # Kills children of this script (use with caution)
+    exit 1 # Exit with a non-zero status
 }
 
-trap "echo trap_signal; signal_exit" TERM HUP INT USR1 USR2 1 2 3 15
-ps -p $$
+# Trap common termination signals
+trap "signal_exit" TERM HUP INT QUIT USR1 USR2 PIPE
 
-# This needs to be last in file or result shell returns will not be test pass/fail
+# Display own process ID for debugging
+# echo "Script PID: $$"
+
+
+# --- Main Execution ---
+# This needs to be the final execution step in the script
+# so the script's exit code reflects the test result.
 testFunction
-#sleep 20
+TEST_EXIT_CODE=$? # Capture the return code from the function
+
+# echo "$(date): Script finished with exit code $TEST_EXIT_CODE"
+exit $TEST_EXIT_CODE
 
 ##################
 # Run invocations
 ##################
+# (Original comment - no commands should follow the final exit)

@@ -150,7 +150,7 @@ class Job():
     def post_run(self):
         self.job_stop_time = datetime.datetime.now()
         self.log.debug("post_run %s %s duration %s", self.__class__.__name__, self.name, self.duration_s)
-        self.completed = True
+        #self.completed = True
 
     @property
     def duration_s(self):

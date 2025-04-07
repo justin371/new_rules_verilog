@@ -68,13 +68,26 @@ class RegressionConfig():
         self.deferred_messages = []
 
     def table_format(self, b, t, c, indent=' ' * LOGGER_INDENT):
-        return "{}{:{}s}  {:{}s}  {:{}s}".format(indent, b, self.max_bench_name_length, t, self.max_test_name_length, c, 6)
+        return "{}{:{}s}  {:{}s}  {:{}s}".format(indent, b, self.max_bench_name_length, t, self.max_test_name_length, c,
+                                                 6)
 
     def table_format_summary_line(self, bench, test, passed, skipped, failed, indent=' ' * LOGGER_INDENT):
         return f"{indent}{bench:{self.max_bench_name_length}s}  {test:{self.max_test_name_length}s}  {passed:{6}s}  {skipped:{6}s}  {failed:{6}s}"
 
-    def format_test_name(self, b, t, i):
-        return "{:{}s}  {:{}s}  {:-4d}".format(b, self.max_bench_name_length, t, self.max_test_name_length, i)
+    # Inside RegressionConfig class in lib/regression.py
+    def format_test_name(self, b, t, i, sim='???'): # Add 'sim', give default
+        # Example: Add simulator name at the end
+        max_sim_len = 5 # Adjust as needed
+        sim_short = sim[:max_sim_len]
+        return "{:{}s}  {:{}s}  {:-4d}  {:{}s}".format(
+            b,
+            self.max_bench_name_length,
+            t,
+            self.max_test_name_length,
+            i,
+            sim_short,
+            max_sim_len # Add simulator to format string
+        )
 
     def dict_to_json(self, d, j):
         try:
@@ -184,8 +197,8 @@ class RegressionConfig():
 
             ttv = [
                 #re.search(r'verilog_dv_test_cfg_info\(@(?P<test>.*), (@(?P<vcomp>.*)), \[(?P<tags>.*)\]\)', line)
-                re.search(r'verilog_dv_test_cfg_info\(@(?:@)?(?P<test>.*), @(?:@)?(?P<vcomp>.*), \[(?P<tags>.*)\]\)', line)
-                for line in text
+                re.search(r'verilog_dv_test_cfg_info\(@(?:@)?(?P<test>.*), @(?:@)?(?P<vcomp>.*), \[(?P<tags>.*)\]\)',
+                          line) for line in text
             ]
             ttv = [match for match in ttv if match]
 

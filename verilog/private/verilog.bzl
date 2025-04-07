@@ -79,16 +79,25 @@ def flists_to_arguments(deps, provider, field, prefix, separator = "", tool_name
         # else:
         #     trans.extend(dep[DefaultInfo].files.to_list())
 
-    #return "".join([" -f {}".format(flist.path) for flist in trans])
     trans_depset = depset(trans)
     trans = trans_depset.to_list()
 
     if tool_name == "vcs":
-        formatted_args = [
-            " {} ../{}".format(prefix, flist.short_path[:-3]) if flist.short_path.endswith(".so")
-            else " {} {}".format(prefix, flist.short_path)
-            for flist in trans
-        ]
+        #formatted_args = [
+        #    " {} ../{}".format(prefix, flist.short_path[:-3]) if flist.short_path.endswith(".so")
+        #    else " {} {}".format(prefix, flist.short_path)
+        #    for flist in trans
+        #]
+        formatted_args = []
+        for flist in trans:
+            if flist.path.endswith(".so"):
+                # flist.path = "bazel-out/k8-fastbuild/bin/external/dv_common/global/libwc_time_dpi.so"
+                # "external/dv_common/global/libwc_time_dpi" = flist.path[27:-3]
+                base_path_no_so = flist.path[27:-3]
+                arg = " {} {}".format(prefix, base_path_no_so)
+                #print("Desired base path for {}: {}".format(flist.short_path, base_path_no_so))
+                print("Desired base path for {}: {}".format(flist.path, base_path_no_so))
+                formatted_args.append(arg)
     else:
         formatted_args = [" {} {}".format(prefix, flist.short_path) for flist in trans]
 

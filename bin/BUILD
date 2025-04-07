@@ -25,6 +25,7 @@ py_binary(
         "//lib:parser_actions",
         "//lib:regression",
         "//lib:rv_utils",
+        "//lib/simulators:simulators",
     ],
 )
 

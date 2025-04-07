@@ -416,9 +416,9 @@ def _verilog_dv_tb_impl(ctx):
         ctx.outputs.compile_args_vcs,
         ctx.outputs.compile_args_xrun,
         ctx.outputs.compile_args_pldm_ice,
-	ctx.outputs.compile_args_pldm_sa,
-        ctx.outputs.runtime_args_xrun,
+        ctx.outputs.compile_args_pldm_sa,
         ctx.outputs.runtime_args_vcs,
+        ctx.outputs.runtime_args_xrun,
         ctx.outputs.compile_warning_waivers,
         ctx.outputs.executable
     ])
