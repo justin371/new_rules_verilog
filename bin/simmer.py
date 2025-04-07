@@ -43,14 +43,12 @@ SIM_TEMPLATE = env.get_template('sim_template.sh.j2')
 WAVE_CMD_TEMPLATE = env.get_template('wave_cmd_template.tcl.j2')
 RERUN_TEMPLATE = env.get_template('rerun_template.sh.j2')
 BUGGER_TEMPLATE = env.get_template('bugger_template.sh.j2')
-# For publishing test results to azure pipeline or jenkins
-JUNIT_TEMPLATE = env.get_template('junit_tempalte.j2')
 
 # Get the path from the environment variable EMU_JINJA2_PATH
 # xrun_emu_compile_template.sh.j2 located here
 emu_template_path = os.getenv('EMU_JINJA2_PATH')
 
-
+# The jobs of the verification compilation and elaboration stages
 class VCompJob(Job):
     # All found vcomp names to prevent collisions
     all_names = {}
@@ -395,7 +393,7 @@ class TestJob(Job):
             # Thus, only using positive seeds
         if options.simulator.upper() == 'VCS':
             sim_opts += " +ntb_random_seed=%0d " % seed
-            self.test_name_seed = "{}_seed{}".format(self.name,seed) # gen test_name_seed for sim.sh
+            self.test_name_seed = "{}_seed_{}".format(self.name,seed) # gen test_name_seed for sim.sh
             # or you can use +ntb_random_seed_automatic for vcs
         elif options.simulator.upper() == 'XRUN':
             sim_opts += " -svseed %d " % seed
@@ -854,11 +852,6 @@ def main(rcfg):
     failures = {}
     for bench, (icfgs, test_list) in rcfg.all_vcomp.items():
         failures[bench] = sum([not j.jobstatus.successful for icfg in icfgs for j in icfg.jobs])
-
-    if options.junit_dump:
-        with open(options.junit_dump, 'w') as junit_f:
-            junit_f.write(JUNIT_TEMPLATE.render(failures=failures, benches=rcfg.all_vcomp))
-            log.info("Wrote junit results to %s", options.junit_dump)
 
     for message in rcfg.deferred_messages:
         log.info(message)
