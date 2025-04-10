@@ -1,5 +1,10 @@
 #!/usr/bin/env bash
 
+export PROJ_DIR="$(git rev-parse --show-toplevel)"
+
+export SIMRESULTS="/nfs/regression"
+export TEST_TMPDIR=${SIMRESULTS}
+
 GLOBAL_TOOLS=/global/tools
 
 module load git/2.44

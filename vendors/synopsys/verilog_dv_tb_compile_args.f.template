@@ -19,11 +19,10 @@
 
 -timescale=1ps/1ps
 
-#-pcmakeprof -reportstats
-#-fastcomp=0
-#-partcomp -fastpartcomp=j4
-# Compile 4 partitions in parallel
--parallelcomp=j4
+-pcmakeprof -reportstats
+-partcomp=adaptive_sched -fastpartcomp=j4
+-fgp
+-Mupdate
 
 # Support MDA of interface/module instances and interface ports
 -mda_inst
