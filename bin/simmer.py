@@ -46,6 +46,7 @@ env = jinja2.Environment(loader=file_loader)
 #WAVE_CMD_TEMPLATE = env.get_template('wave_cmd_template.tcl.j2')
 RERUN_TEMPLATE = env.get_template('rerun_template.sh.j2')
 #BUGGER_TEMPLATE = env.get_template('bugger_template.sh.j2')
+RUN_WAVE_TEMPLATE = env.get_template('run_waves_template.sh.j2')
 
 # Get the path from the environment variable EMU_JINJA2_PATH
 # xrun_emu_compile_template.sh.j2 located here
@@ -778,23 +779,44 @@ class TestJob(Job):
             wave_type = options.wave_type.lower()
 
             if wave_type == 'shm':
-                wave_path = os.path.join(wave_path, 'waves.shm')
+                abs_wave_path = os.path.join(wave_path, 'waves.shm')
             elif wave_type == 'vcd':
-                wave_path = os.path.join(wave_path, 'waves.vcd')
+                abs_wave_path = os.path.join(wave_path, 'waves.vcd')
             elif wave_type == 'evcd':
-                wave_path = os.path.join(wave_path, 'waves.evcd')
+                abs_wave_path = os.path.join(wave_path, 'waves.evcd')
             elif wave_type == 'vwdb':
-                wave_path = os.path.join(wave_path, 'waves.db')
+                abs_wave_path = os.path.join(wave_path, 'waves.db')
             elif wave_type == 'fsdb':
-                wave_path = os.path.join(wave_path, 'waves.fsdb')
+                abs_wave_path = os.path.join(wave_path, 'waves.fsdb')
             else:
                 raise ValueError("Not allowed wave: {}".format(options.wave_type))
 
-            if os.path.exists(wave_path):
-                log.info("Waves available: {}".format(wave_path))
-                os.system("chmod -R 755 {}".format(wave_path))
+            if os.path.exists(abs_wave_path):
+                #log.info("Waves available: {}".format(abs_wave_path))
+                os.system("chmod -R 755 {}".format(abs_wave_path))
             else:
                 log.error("Dumped waves, but waves file doesn't exist.")
+
+            # Create the bash scripts using Jinja2 template
+            run_wave_script_name = "run_waves.sh"
+            run_wave_script_path = os.path.join(wave_path, run_wave_script_name)
+
+            bazel_runfiles_dir = os.path.join(wave_path, 'bazel_runfiles_main')
+            absolute_wave_path = os.path.abspath(abs_wave_path)
+
+            # Variables needed by the template
+            run_wave_template_vars = {
+                "job_dir": wave_path,
+                "wave_file_path": absolute_wave_path,
+                "bazel_runfiles_dir": bazel_runfiles_dir,
+            }
+            run_wave_script_content = RUN_WAVE_TEMPLATE.render(run_wave_template_vars)
+
+            with open(run_wave_script_path, 'w') as f:
+                f.write(run_wave_script_content)
+
+            os.chmod(run_wave_script_path, stat.S_IRWXU | stat.S_IRGRP | stat.S_IXGRP | stat.S_IROTH | stat.S_IXOTH)
+            log.info(f"Run wave: {run_wave_script_path}")
 
         sys.stdout.flush()
 
