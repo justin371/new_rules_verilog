@@ -77,14 +77,21 @@ class XrunSimulator(SimulatorInterface):
             vcomp_job.cov_work_dir = os.path.join(self.rcfg.regression_dir, vcomp_job.name + "__COV_WORK")
             os.makedirs(vcomp_job.cov_work_dir, exist_ok=True) # Use makedirs
             merge_exec_tcl = os.path.join(vcomp_job.cov_work_dir, "merge_exec.tcl")
+            imc_report_tcl = os.path.join(vcomp_job.cov_work_dir, "imc_report.tcl")
             merged_output = os.path.join(vcomp_job.cov_work_dir, "merged_db")
             with open(merge_exec_tcl, 'w') as filep:
                 filep.write("merge -initial_model union_all -out {} -overwrite {}".format(
                     merged_output, os.path.join(vcomp_job.cov_work_dir, "scope", "*")))
+            report_output = os.path.join(vcomp_job.cov_work_dir, "imc_report")
+            with open(imc_report_tcl, 'w') as filep:
+                filep.write("".join([
+                    "load {}\n".format(merged_output),
+                    "report -html -out {} -grading both -overwrite\n".format(report_output),
+                ]))
             merge_sh = os.path.join(vcomp_job.cov_work_dir, "merge.sh")
             with open(merge_sh, 'w') as filep:
                 filep.write("".join([
-                    "#!/usr/bin/env bash\n", "runmod xrun -- imc -exec {} -verbose\n".format(merge_exec_tcl),
+                    "#!/usr/bin/env bash\n",
                     "runmod xrun -- imc -load {}\n".format(merged_output)
                 ]))
             st = os.stat(merge_sh)

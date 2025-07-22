@@ -33,6 +33,7 @@ from lib import rv_utils
 from lib.simulators.base import SimulatorInterface
 from lib.simulators.xrun import XrunSimulator
 from lib.simulators.vcs import VcsSimulator
+from lib import regression_report
 
 log = None
 
@@ -391,6 +392,7 @@ class TestJob(Job):
         self.iteration = icfg.spawn_count
         self.icfg.inc(self)
         self.btcj = btcj
+        self.job_time = 0
 
         super(TestJob, self).__init__(rcfg, name)
         self.rcfg = rcfg
@@ -734,6 +736,7 @@ class TestJob(Job):
         net_time_str, cps_str = self._get_stats_from_log_file()
         total_time_str = self._get_total_time_str()
         time_stats_str = "({} cps / {} net_time / {} total_time)".format(cps_str, net_time_str, total_time_str)
+        self.job_time = int(self.duration_s)
 
         if self.job_lib.returncode != 0:
             # Use relative path for symlink for portability
@@ -847,6 +850,8 @@ class TestJob(Job):
             for line in log_file:
                 match = stats_re.match(line)
                 if match:
+                    h, m, s = map(int, match.group('duration').split(':'))
+                    self.net_time = 3600 * h + 60 * m + s
                     return match.group('duration'), match.group('cps')
         return '???', '???'
 
@@ -883,6 +888,9 @@ def main(rcfg, options):
     vcomp_jobs = {}
     btcj_jobs = []
     btbj_jobs = []
+    trd = []
+    cov = {} 
+    webroot_path = "/nfs/regression/webroot/"
 
     bazel_shutdown_job = job_lib.BazelShutdownJob(rcfg)
 
@@ -990,7 +998,23 @@ def main(rcfg, options):
         jm.kill()
         log.critical("Exiting due to keyboard interrupt")
 
-    rv_utils.print_summary(rcfg, vcomp_jobs, icfgs, jm)
+    rv_utils.print_summary(rcfg, vcomp_jobs, icfgs, jm, trd)
+
+    if options.coverage:
+        sim_name = options.simulator.lower()
+        if sim_name == 'xrun': 
+            for vcomp in vcomp_jobs.values():
+                cmd = 'runmod xrun -- imc -exec {} -verbose'.format(os.path.join(vcomp.cov_work_dir, "merge_exec.tcl"))
+                p = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, shell=True)
+                p.wait()
+                assert p.returncode == 0
+        elif sim_name == 'vcs':
+            pass #pass for now
+        else:
+            raise ValueError(f"Unsupported simulator specified: {options.simulator}")
+    if options.report:
+        rrt = regression_report.RegressionReport(rcfg, env, webroot_path)
+        rrt.run(rv_utils.get_report_header(rcfg), trd, rv_utils.get_coverage_data(rcfg, vcomp_jobs))
 
     failures = {}
     for bench, (icfgs, test_list) in rcfg.all_vcomp.items():

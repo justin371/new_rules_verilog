@@ -1,0 +1,433 @@
+<!DOCTYPE html>
+<html class="writer-html5" lang="en">
+<head>
+  <meta charset="utf-8" /><meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>{{bench_name}} &mdash; Regression Report</title>
+  <link rel="stylesheet" type="text/css" href="../../_static/pygments.css?v=80d5e7a1" />
+  <link rel="stylesheet" type="text/css" href="../../_static/css/theme.css?v=19f00094" />
+  <link rel="stylesheet" type="text/css" href="../../_static/theme.css?v=7b4bccae" />
+  <!--[if lt IE 9]>
+    <script src="../../_static/js/html5shiv.min.js"></script>
+  <![endif]-->
+  <script src="../../_static/jquery.js?v=5d32c60e"></script>
+  <script src="../../_static/_sphinx_javascript_frameworks_compat.js?v=2cd50e6c"></script>
+  <script data-url_root="../../" id="documentation_options" src="../../_static/documentation_options.js?v=b3ba4146"></script>
+  <script src="../../_static/doctools.js?v=888ff710"></script>
+  <script src="../../_static/sphinx_highlight.js?v=4825356b"></script>
+  <script src="../../_static/js/theme.js"></script>
+  <script src="../../_static/Chart.js"></script>
+  <style>
+        canvas {
+            max-width: 1200px;
+            margin: 20px 0;
+            display: block;
+        }
+        .tooltip {
+            position: absolute;
+            background-color: rgba(0, 0, 0, 0.7);
+            color: #fff;
+            padding: 5px;
+            border-radius: 5px;
+            pointer-events: none;
+            display: none;
+        }
+        #dataCount {
+            margin: 20px;
+        }
+  </style>
+  <link rel="search" title="Search" href="../../search.html" />
+  <link rel="prev" title="Project" href="../index.html" /> 
+</head>
+
+<body class="wy-body-for-nav"> 
+  <div class="wy-grid-for-nav">
+    <nav data-toggle="wy-nav-shift" class="wy-nav-side">
+      <div class="wy-side-scroll">
+        <div class="wy-side-nav-search" >
+          <a href="../../index.html" class="icon icon-home">
+            Regression
+          </a>
+          <div role="search">
+            <form id="rtd-search-form" class="wy-form" action="../../search.html" method="get">
+              <input type="text" name="q" placeholder="Search docs" aria-label="Search docs" />
+              <input type="hidden" name="check_keywords" value="yes" />
+              <input type="hidden" name="area" value="default" />
+            </form>
+          </div>
+        </div>
+        <div class="wy-menu wy-menu-vertical" data-spy="affix" role="navigation" aria-label="Navigation menu">
+          <p class="caption" role="heading"><span class="caption-text">UserGuide:</span></p>
+          <ul>
+            <li class="toctree-l1"><a class="reference internal" href="../../README.html">How to Edit this Repository</a></li>
+            <li class="toctree-l1"><a class="reference internal" href="../../README.html#motivation">Motivation</a></li>
+            <li class="toctree-l1"><a class="reference internal" href="../../README.html#direct-pushes-to-master-are-blocked">Direct pushes to master are blocked</a></li>
+            <li class="toctree-l1"><a class="reference internal" href="../../README.html#what-is-our-ci-gate">What is our CI gate?</a></li>
+            <li class="toctree-l1"><a class="reference internal" href="../../README.html#infrastructure-documentation">Infrastructure Documentation</a></li>
+            <li class="toctree-l1"><a class="reference internal" href="../../README.html#tapeout-tags">Tapeout Tags</a></li>
+          </ul>
+          <p class="caption" role="heading"><span class="caption-text">Projects:</span></p>
+          <ul class="current">
+            {% for proj, benchs in project.items() %}
+            <li class="toctree-l1 current"><a class="current reference internal" href="#">{{proj|capitalize}}</a>
+              <ul>
+              {% for b in benchs %}
+                <li class="toctree-l2"><a class="reference internal" href="../{{b}}/index.html">{{b}}</a></li>
+              {% endfor %}
+              </ul>
+            </li>
+            {% endfor %}
+          </ul>
+        </div>
+      </div>
+    </nav>
+
+    <section data-toggle="wy-nav-shift" class="wy-nav-content-wrap">
+      <nav class="wy-nav-top" aria-label="Mobile navigation menu" >
+          <i data-toggle="wy-nav-top" class="fa fa-bars"></i>
+          <a href="../../index.html">Regression Report</a>
+      </nav>
+      <div class="wy-nav-content">
+        <div class="rst-content">
+          <div role="navigation" aria-label="Page navigation">
+            <ul class="wy-breadcrumbs">
+              <li><a href="../../index.html" class="icon icon-home" aria-label="Home"></a></li>
+              <li class="breadcrumb-item"><a href="../index.html">{{header["project_name"]|capitalize}}</a></li>
+              <li class="breadcrumb-item active">{{bench_name}}</li>
+              <li class="wy-breadcrumbs-aside"><a href="../../_sources/{{header["project_name"]}}/{{bench_name}}/index.rst.txt" rel="nofollow"> View page source</a></li>
+            </ul>
+            <hr/>
+          </div>
+          <div role="main" class="document" itemscope="itemscope" itemtype="http://schema.org/Article">
+            <div itemprop="articleBody">
+              <section id="{{bench_name}}">
+                <h1>{{bench_name}}<a class="headerlink" href="#{{header["project_name"]}}" title="Permalink to this heading"></a></h1>
+                <div class="toctree-wrapper compound"></div>
+                <div class="toctree-wrapper compound"></div>
+                <h3>Regression Info</h3>
+                <table class="docutils align-default">
+                  <thead>
+                    <tr>
+                      <th align="center" style="border:1px solid #f2f2f2; padding:8px">User</th>
+                      <th align="center" style="border:1px solid #f2f2f2; padding:8px">Time</th>
+                      <th align="center" style="border:1px solid #f2f2f2; padding:8px">Git Revision</th>
+                      <th align="center" style="border:1px solid #f2f2f2; padding:8px">Git Branch</th>
+                      <th align="center" style="border:1px solid #f2f2f2; padding:8px">Simulator</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    <tr>
+                      <td align="center" style="border:1px solid #f2f2f2; padding:8px">{{header["username"]}}</td>
+                      <td align="center" style="border:1px solid #f2f2f2; padding:8px">{{header["time"]}}</td>
+                      <td align="center" style="border:1px solid #f2f2f2; padding:8px"><a href="{{header["commit"]}}"><code>{{header["revision"]}}</code></a></td>
+                      <td align="center" style="border:1px solid #f2f2f2; padding:8px">{{header["branch"]}}</td>
+                      <td align="center" style="border:1px solid #f2f2f2; padding:8px">{{header["simulator"]|upper}}</td>
+                    </tr>
+                  </tbody>
+                </table>
+                <br>
+                <h3>Passrate Trend</h3>
+                <select id="dataCountSelect">
+                    <option value="30">30</option>
+                    <option value="20">20</option>
+                    <option value="10">10</option>
+                </select>
+                <canvas id="PassrateChart"></canvas>
+                <div class="tooltip" id="tooltip"></div>
+                <br>
+                <h3>Q1 Test Results</h3>
+                <table id="q1res" class="docutils align-default">
+                  <thead>
+                    <tr>
+                      {% for key in q1_regression_details.keys() %}
+                      <th align="center" style="background-color:#3D1067; color:white; padding-bottom:12px; padding-top:12px; text-transform:uppercase; border:1px solid #f2f2f2; padding:8px" bgcolor="#3D1067">{{key}}</th>
+                      {% endfor %}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    <tr>
+                      <td align="center" style="border:1px solid #f2f2f2; padding:8px">{{q1_regression_details["Total_Q1"]}}</td>
+                      <td align="center" style="border:1px solid #f2f2f2; padding:8px">{{q1_regression_details["Pass_Q1"]}}</td>
+                      {% set q1_passrate = q1_regression_details["Passrate_Q1"] | float %}
+                      {% if q1_passrate == 100 %}
+                        <td align="center"
+                            style="border:1px solid #f2f2f2; padding:8px; background-color:#37b671">{{ q1_regression_details["Passrate_Q1"] }}</td>
+                      {% elif q1_passrate >= 90 %}
+                        <td align="center"
+                            style="border:1px solid #f2f2f2; padding:8px; background-color:#c1d422">{{ q1_regression_details["Passrate_Q1"] }}</td>
+                      {% else %}
+                        <td align="center"
+                            style="border:1px solid #f2f2f2; padding:8px; background-color:#be2e25">{{ q1_regression_details["Passrate_Q1"] }}</td>
+                      {% endif %}
+                    </tr>
+                  </tbody>
+                </table>
+                <br>
+                <h3>Test Results</h3>
+                <table id="Testcase" class="docutils align-default">
+                  <thead>
+                    <tr>
+                      <th align="center" style="background-color:#3D1067; color:white; padding-bottom:12px; padding-top:12px; text-transform:uppercase; border:1px solid #f2f2f2; padding:8px" bgcolor="#3D1067">Bench</th>
+                      <th align="left" style="background-color:#3D1067; color:white; padding-bottom:12px; padding-top:12px; text-transform:uppercase; border:1px solid #f2f2f2; padding:8px" bgcolor="#3D1067">Tests</th>
+                      <th align="center" style="background-color:#3D1067; color:white; padding-bottom:12px; padding-top:12px; text-transform:uppercase; border:1px solid #f2f2f2; padding:8px" bgcolor="#3D1067">Tag</th>
+                      <th align="center" style="background-color:#3D1067; color:white; padding-bottom:12px; padding-top:12px; text-transform:uppercase; border:1px solid #f2f2f2; padding:8px" bgcolor="#3D1067">Max job time</th>
+                      <th align="center" style="background-color:#3D1067; color:white; padding-bottom:12px; padding-top:12px; text-transform:uppercase; border:1px solid #f2f2f2; padding:8px" bgcolor="#3D1067">Passed</th>
+                      <th align="center" style="background-color:#3D1067; color:white; padding-bottom:12px; padding-top:12px; text-transform:uppercase; border:1px solid #f2f2f2; padding:8px" bgcolor="#3D1067">Sikpped</th>
+                      <th align="center" style="background-color:#3D1067; color:white; padding-bottom:12px; padding-top:12px; text-transform:uppercase; border:1px solid #f2f2f2; padding:8px" bgcolor="#3D1067">Failed</th>
+                      <th align="center" style="background-color:#3D1067; color:white; padding-bottom:12px; padding-top:12px; text-transform:uppercase; border:1px solid #f2f2f2; padding:8px" bgcolor="#3D1067">Total</th>
+                      <th align="center" style="background-color:#3D1067; color:white; padding-bottom:12px; padding-top:12px; text-transform:uppercase; border:1px solid #f2f2f2; padding:8px" bgcolor="#3D1067">Pass Rate</th>
+                      <th align="center" style="background-color:#3D1067; color:white; padding-bottom:12px; padding-top:12px; text-transform:uppercase; border:1px solid #f2f2f2; padding:8px" bgcolor="#3D1067">Logs</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {% for bench, test, tsim, pass, skip, fail, total, pass_rate, logs, tags, logs_html in regression_details %}
+                    <tr>
+                      <td align="center" style="border:1px solid #f2f2f2; padding:8px">{{bench}}</td>
+                      <td align="left" style="border:1px solid #f2f2f2; padding:8px">{{test}}</td>
+                      <td align="center" style="border:1px solid #f2f2f2; padding:8px">{{tags}}</td>
+                      <td align="center" style="border:1px solid #f2f2f2; padding:8px">{{tsim}}</td>
+                      <td align="center" style="border:1px solid #f2f2f2; padding:8px">{{pass}}</td>
+                      <td align="center" style="border:1px solid #f2f2f2; padding:8px">{{skip}}</td>
+                      <td align="center" style="border:1px solid #f2f2f2; padding:8px">{{fail}}</td>
+                      <td align="center" style="border:1px solid #f2f2f2; padding:8px">{{total}}</td>
+                      {% if pass_rate|float == 100 %}
+                      <td align="center" style="border:1px solid #f2f2f2; padding:8px; background-color:#37b671">{{pass_rate}}</td>
+                      {% elif pass_rate|float >= 90 %}
+                      <td align="center" style="border:1px solid #f2f2f2; padding:8px; background-color:#c1d422">{{pass_rate}}</td>
+                      {% else %}
+                      <td align="center" style="border:1px solid #f2f2f2; padding:8px;background-color:#be2e25">{{pass_rate}}</td>
+                      {% endif %}
+                      {% if logs != "" %}
+                      <td align="center" style="border:1px solid #f2f2f2; padding:8px; border-top: 1px solid #f2f2f2"><button onclick="openLocalFolderOrFile('logs/{{logs_html}}')">logs</botton></td>
+                      {% else %}
+                      <td align="center" style="border:1px solid #f2f2f2; padding:8px"></td>
+                      {% endif %}
+                    </tr>
+                    {% endfor %}
+                  </tbody>
+                </table>
+                <br>
+                {% if cc_info %}
+                <h3>Code Coverage Results</h3>
+                <table id="ccCOV" class="docutils align-default">
+                  <thead>
+                    <tr>
+                      {% for key in cc_info.keys() %}
+                      <th align="center" style="background-color:#3D1067; color:white; padding-bottom:12px; padding-top:12px; text-transform:uppercase; border:1px solid #f2f2f2; padding:8px" bgcolor="#3D1067">{{key}}</th>
+                      {% endfor %}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    <tr>
+                    {% for value in cc_info.values() %}
+                      <td align="center" style="border:1px solid #f2f2f2; padding:8px">{{value}}</td>
+                    {% endfor %}
+                    </tr>
+                  </tbody>
+                </table>
+                <br>
+                {% endif %}
+                {% if cf_info %}
+                <h3>Functional Coverage Results</h3>
+                <table id="cfCOV" class="docutils align-default">
+                  <thead>
+                    <tr>
+                      {% for key in cf_info.keys() %}
+                      <th align="center" style="background-color:#3D1067; color:white; padding-bottom:12px; padding-top:12px; text-transform:uppercase; border:1px solid #f2f2f2; padding:8px" bgcolor="#3D1067">{{key}}</th>
+                      {% endfor %}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    <tr>
+                    {% for value in cf_info.values() %}
+                      <td align="center" style="border:1px solid #f2f2f2; padding:8px">{{value}}</td>
+                    {% endfor %}
+                    </tr>
+                  </tbody>
+                </table>
+                <br>
+                {% endif %}
+                <h3>Past Result </h3>
+                <ul>
+                  <li><a href="index.html">Latest</a></li>
+                  <!-- update past result -->
+                  {% set reversed_regression_list = regressions|reverse %}
+                  {% set reversed_passrate_list = passrate_list|reverse %}
+                  {% set reversed_cov_code_list = cov_code_list|reverse %}
+                  {% set reversed_cov_func_list = cov_func_list|reverse %}
+                  {% set zippped = reversed_regression_list|zip(reversed_passrate_list, reversed_cov_code_list, reversed_cov_func_list) %}
+                  {% set zip_list = zippped|list %}
+                  {% for time, pr, cc, cf in zip_list[1:] %}
+                  <li><a href="{{time}}.html">{{time}}_{{pr}}%_{{cc}}_{{cf}}</a></li>
+                  {% endfor %}
+                  <!-- update past result -->
+                </ul>
+              </section>
+            </div>
+          </div>
+          <footer>
+            <div class="rst-footer-buttons" role="navigation" aria-label="Footer">
+              <a href="../index.html" class="btn btn-neutral float-left" title="{{header["project_name"]|capitalize}}" accesskey="p" rel="prev"><span class="fa fa-arrow-circle-left" aria-hidden="true"></span> Previous</a>
+            </div>
+            <hr/>
+            <div role="contentinfo">
+              <p>&#169; Copyright 2024, Lightelligence.</p>
+            </div>
+            Built with <a href="https://www.sphinx-doc.org/">Sphinx</a> using a
+            <a href="https://github.com/readthedocs/sphinx_rtd_theme">theme</a>
+            provided by <a href="https://readthedocs.org">Read the Docs</a>.
+          </footer>
+        </div>
+      </div>
+    </section>
+  </div>
+  <script>
+      jQuery(function () {
+          SphinxRtdTheme.Navigation.enable(true);
+      });
+  </script> 
+  <script>
+      function openLocalFolderOrFile(path) {
+          window.open(
+              path, 
+              '_blank', 
+              'width=1400,height=600,left=200,top=100,scrollbars=yes,resizable=yes'
+          );
+      }
+  </script>
+  <script>
+      const ctx = document.getElementById('PassrateChart').getContext('2d');
+      <!-- update chart -->
+      const labels = {{regressions}};
+      const data0 = {{passrate_list}};
+      const data1 = {{q1_passrate_list}};
+      <!-- update chart -->
+
+      let myChart;
+    
+      function updateChart(dataCount) {
+          const filteredLabels = labels.slice(-dataCount);
+          const filteredData0 = data0.slice(-dataCount);
+          const filteredData1 = data1.slice(-dataCount);
+
+          if (myChart) {
+              myChart.data.labels = filteredLabels;
+              myChart.data.datasets[0].data = filteredData0;
+              myChart.data.datasets[1].data = filteredData1;
+              myChart.update();
+          } else {
+              myChart = new Chart(ctx, {
+                  type: 'line',
+                  data: {
+                      labels: filteredLabels,
+                      datasets: [
+                          {
+                              label: 'All Testcase Passrate',
+                              data: filteredData0,
+                              borderColor: 'rgba(75, 192, 192, 1)',
+                              backgroundColor: 'rgba(75, 192, 192, 0.2)',
+                              borderWidth: 2,
+                              pointHoverRadius: 5,
+                              pointRadius: 3,
+                              fill: false,
+                          },
+                          {
+                              label: 'Q1 Testcase Passrate',
+                              data: filteredData1,
+                              borderColor: 'rgba(255, 99, 132, 1)',
+                              backgroundColor: 'rgba(255, 99, 132, 0.2)',
+                              borderWidth: 2,
+                              pointHoverRadius: 5,
+                              pointRadius: 3,
+                              fill: false,
+                          },
+
+                      ]
+                  },
+                  options: {
+                      responsive: true,
+                      scales: {
+                          yAxes: [{
+                              ticks: {
+                                  beginAtZero: true
+                              }
+                          }],
+                          xAxes: [{
+                              scaleLabel: {
+                                  display: true,
+                                  labelString: 'Date'
+                              }
+                          }]
+                      },
+                      tooltips: {
+                          enabled: true
+                      }
+                  }
+              });
+          }
+      }
+
+      const defaultDataCount = 30;
+      updateChart(defaultDataCount);
+
+      document.getElementById('dataCountSelect').addEventListener('change', (event) => {
+          const dataCount = parseInt(event.target.value, 10);
+          updateChart(dataCount);
+      });
+
+      ctx.canvas.addEventListener('click', (e) => {
+          const points = myChart.getElementsAtEvent(e);
+          if (points.length > 0) {
+              const firstPoint = points[0];
+              const labelIndex = firstPoint._index;
+              if (labelIndex >= 0 && labelIndex < myChart.data.labels.length) {
+                  const label = myChart.data.labels[labelIndex];
+                  const pageUrl = `${label}.html`;
+                  window.location.href = pageUrl;
+              }
+          }
+      });
+</script>
+<script>
+    const cellsTestcase = document.querySelectorAll('#Testcase td:nth-child(9)');
+    const cellsccCov = document.querySelectorAll('#ccCOV td');
+    const cellscfCov = document.querySelectorAll('#cfCOV td');
+    cellsTestcase.forEach(cell => {
+        const percentage = parseFloat(cell.textContent);
+        if (percentage < 50) {
+            cell.style.backgroundColor = '#FFCCCB';
+        } else if (percentage >= 50 && percentage < 80) {
+            cell.style.backgroundColor = '#FFFF99';
+        } else if (percentage >= 80 && percentage < 100) {
+            cell.style.backgroundColor = '#CCFFCC';
+        } else if (percentage === 100) {
+            cell.style.backgroundColor = '#99FF99';
+        }
+    });
+    cellsccCov.forEach(cell => {
+        const percentage = parseFloat(cell.textContent);
+        if (percentage < 50) {
+            cell.style.backgroundColor = '#FFCCCB';
+        } else if (percentage >= 50 && percentage < 80) {
+            cell.style.backgroundColor = '#FFFF99';
+        } else if (percentage >= 80 && percentage < 100) {
+            cell.style.backgroundColor = '#CCFFCC';
+        } else if (percentage === 100) {
+            cell.style.backgroundColor = '#99FF99';
+        }
+    });
+    cellscfCov.forEach(cell => {
+        const percentage = parseFloat(cell.textContent);
+        if (percentage < 50) {
+            cell.style.backgroundColor = '#FFCCCB';
+        } else if (percentage >= 50 && percentage < 80) {
+            cell.style.backgroundColor = '#FFFF99';
+        } else if (percentage >= 80 && percentage < 100) {
+            cell.style.backgroundColor = '#CCFFCC';
+        } else if (percentage === 100) {
+            cell.style.backgroundColor = '#99FF99';
+        }
+    });
+</script>
+</body>
+</html>

@@ -26,6 +26,7 @@ py_binary(
         "//lib:regression",
         "//lib:rv_utils",
         "//lib/simulators:simulators",
+        "//lib:regression_report",
     ],
 )
 

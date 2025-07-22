@@ -27,3 +27,8 @@ py_library(
     name = "rv_utils",
     srcs = ["rv_utils.py"],
 )
+
+py_library(
+    name = "regression_report",
+    srcs = ["regression_report.py"],
+)

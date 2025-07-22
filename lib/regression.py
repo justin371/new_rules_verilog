@@ -66,6 +66,7 @@ class RegressionConfig():
                 self.tidy)
 
         self.deferred_messages = []
+        self.current_time = 0
 
     def table_format(self, b, t, c, indent=' ' * LOGGER_INDENT):
         return "{}{:{}s}  {:{}s}  {:{}s}".format(indent, b, self.max_bench_name_length, t, self.max_test_name_length, c,
