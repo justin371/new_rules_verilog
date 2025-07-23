@@ -71,9 +71,11 @@
             {% for proj, benchs in project.items() %}
             <li class="toctree-l1 current"><a class="current reference internal" href="#">{{proj|capitalize}}</a>
               <ul>
+              <!-- update navigation -->
               {% for b in benchs %}
                 <li class="toctree-l2"><a class="reference internal" href="../{{b}}/index.html">{{b}}</a></li>
               {% endfor %}
+              <!-- update navigation -->
               </ul>
             </li>
             {% endfor %}

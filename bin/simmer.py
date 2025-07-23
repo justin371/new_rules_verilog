@@ -1012,9 +1012,12 @@ def main(rcfg, options):
             pass #pass for now
         else:
             raise ValueError(f"Unsupported simulator specified: {options.simulator}")
+        
+    report_header = {}
     if options.report:
+        report_header = rv_utils.get_report_header(rcfg)
         rrt = regression_report.RegressionReport(rcfg, env, webroot_path)
-        rrt.run(rv_utils.get_report_header(rcfg), trd, rv_utils.get_coverage_data(rcfg, vcomp_jobs))
+        rrt.run(report_header, trd, rv_utils.get_coverage_data(rcfg, vcomp_jobs))
 
     failures = {}
     for bench, (icfgs, test_list) in rcfg.all_vcomp.items():
@@ -1022,6 +1025,8 @@ def main(rcfg, options):
         # Count failures directly from the job objects stored in test_jobs_list
         #num_failed = sum(1 for j in test_jobs_list if j.jobstatus and not j.jobstatus.successful)
         #failures[bench] = num_failed
+        if options.report:
+            log.info("Report at: http://dv-sh.rd.lgt.ai/regression_report/{0}/{1}".format(report_header['project_name'], bench.split(":")[1]))
 
     for message in rcfg.deferred_messages:
         log.info(message)
@@ -1036,7 +1041,6 @@ def main(rcfg, options):
     else:
         log.info("All tests passed.")
         sys.exit(0)
-
 
 if __name__ == '__main__':
     options = parse_args(sys.argv[1:])

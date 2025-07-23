@@ -137,6 +137,46 @@ class RegressionReport():
                 with open(phtml + '/' + pr + '.html', 'w', encoding='utf-8') as file:
                     file.writelines(updated_lines)
 
+    def update_all_tb_navigation(self, bpath):
+        navigation_info = [f'                <li class="toctree-l2"><a class="reference internal" href="../{b}/index.html">{b}</a></li>\n' for b in self.project_info[self.proj_name]]
+
+        ppath = os.path.dirname(bpath)
+        for b in self.project_info[self.proj_name]:
+            b_dir = os.path.join(ppath, b)
+            if not os.path.isdir(b_dir):
+                continue
+
+            for rh in os.listdir(b_dir):
+                if not rh.endswith('.html'):
+                    continue
+
+                rp = os.path.join(b_dir, rh)
+
+                with open(rp, 'r', encoding='utf-8') as f:
+                    lines = f.readlines()
+
+                start_index = None
+                end_index = None
+                for i, line in enumerate(lines):
+                    if line.strip() == "<!-- update navigation -->":
+                        if start_index is None:
+                            start_index = i
+                        else:
+                            end_index = i
+                            break
+
+                if start_index is None or end_index is None:
+                    continue
+
+                updated_lines = (
+                    lines[:start_index + 1] +
+                    navigation_info +
+                    lines[end_index:]
+                )
+
+                with open(rp, 'w', encoding='utf-8') as f:
+                    f.writelines(updated_lines)
+
     def run(self, header, trd, cov):
         """
         API for simmer to create report page
@@ -352,3 +392,5 @@ class RegressionReport():
             # Update regressions json
             with open(json_file_path, 'w', encoding='utf-8') as f:
                 json.dump(regressions, f, ensure_ascii=False, indent=4)
+
+        self.update_all_tb_navigation(bench_path)
