@@ -91,7 +91,7 @@ class XrunSimulator(SimulatorInterface):
             merge_sh = os.path.join(vcomp_job.cov_work_dir, "merge.sh")
             with open(merge_sh, 'w') as filep:
                 filep.write("".join([
-                    "#!/usr/bin/env bash\n",
+                    "#!/usr/bin/env bash\n", "runmod xrun -- imc -exec {} -verbose\n".format(merge_exec_tcl) if self.options.no_run else "",
                     "runmod xrun -- imc -load {}\n".format(merged_output)
                 ]))
             st = os.stat(merge_sh)

@@ -1002,16 +1002,19 @@ def main(rcfg, options):
 
     if options.coverage:
         sim_name = options.simulator.lower()
-        if sim_name == 'xrun': 
-            for vcomp in vcomp_jobs.values():
-                cmd = 'runmod xrun -- imc -exec {} -verbose'.format(os.path.join(vcomp.cov_work_dir, "merge_exec.tcl"))
-                p = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, shell=True)
-                p.wait()
-                assert p.returncode == 0
-        elif sim_name == 'vcs':
-            pass #pass for now
+        if options.no_run:
+            pass
         else:
-            raise ValueError(f"Unsupported simulator specified: {options.simulator}")
+            if sim_name == 'xrun': 
+                for vcomp in vcomp_jobs.values():
+                    cmd = 'runmod xrun -- imc -exec {} -verbose'.format(os.path.join(vcomp.cov_work_dir, "merge_exec.tcl"))
+                    p = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, shell=True)
+                    p.wait()
+                    assert p.returncode == 0
+            elif sim_name == 'vcs':
+                pass #pass for now
+            else:
+                raise ValueError(f"Unsupported simulator specified: {options.simulator}")
         
     report_header = {}
     if options.report:
