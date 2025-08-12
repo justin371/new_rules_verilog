@@ -177,6 +177,22 @@ class RegressionReport():
                 with open(rp, 'w', encoding='utf-8') as f:
                     f.writelines(updated_lines)
 
+    def change_permissions_recursively(self, bpath):
+        for root, dirs, files in os.walk(bpath):
+            try:
+                os.chmod(root, 0o777)
+            except PermissionError as e:
+                self.rcfg.log.info(f"P Error!!! Cannot chmod dir {root}: {e}")
+            except Exception as e:
+                self.rcfg.log.info(f"E Error!!! Cannot chmod dir {root}: {e}")
+            for file in files:
+                try:
+                    os.chmod(os.path.join(root, file), 0o777)
+                except PermissionError as e:
+                    self.rcfg.log.info(f"P Error!!! Cannot chmod dir {root}/{file}: {e}")
+                except Exception as e:
+                    self.rcfg.log.info(f"E Error!!! Cannot chmod dir {root}/{file}: {e}")
+
     def run(self, header, trd, cov):
         """
         API for simmer to create report page
@@ -393,4 +409,6 @@ class RegressionReport():
             with open(json_file_path, 'w', encoding='utf-8') as f:
                 json.dump(regressions, f, ensure_ascii=False, indent=4)
 
+        #self.rcfg.log.summary("bench path is {}".format(bench_path))
         self.update_all_tb_navigation(bench_path)
+        #self.change_permissions_recursively(bench_path)

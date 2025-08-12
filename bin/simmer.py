@@ -1000,13 +1000,13 @@ def main(rcfg, options):
 
     rv_utils.print_summary(rcfg, vcomp_jobs, icfgs, jm, trd)
 
-    if options.coverage:
-        sim_name = options.simulator.lower()
-        if options.no_run:
-            pass
-        else:
+    report_header = {}
+    if options.report:
+        if options.coverage:
+            sim_name = options.simulator.lower()
             if sim_name == 'xrun': 
                 for vcomp in vcomp_jobs.values():
+                    log.info("Before merge: Vcomp {}.".format(vcomp))
                     cmd = 'runmod xrun -- imc -exec {} -verbose'.format(os.path.join(vcomp.cov_work_dir, "merge_exec.tcl"))
                     p = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, shell=True)
                     p.wait()
@@ -1016,8 +1016,6 @@ def main(rcfg, options):
             else:
                 raise ValueError(f"Unsupported simulator specified: {options.simulator}")
         
-    report_header = {}
-    if options.report:
         report_header = rv_utils.get_report_header(rcfg)
         rrt = regression_report.RegressionReport(rcfg, env, webroot_path)
         rrt.run(report_header, trd, rv_utils.get_coverage_data(rcfg, vcomp_jobs))
@@ -1029,6 +1027,7 @@ def main(rcfg, options):
         #num_failed = sum(1 for j in test_jobs_list if j.jobstatus and not j.jobstatus.successful)
         #failures[bench] = num_failed
         if options.report:
+            rrt.change_permissions_recursively(os.path.join(webroot_path, "regression_report", report_header['project_name'], bench.split(":")[1]))
             log.info("Report at: http://dv-sh.rd.lgt.ai/regression_report/{0}/{1}".format(report_header['project_name'], bench.split(":")[1]))
 
     for message in rcfg.deferred_messages:
