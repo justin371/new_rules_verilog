@@ -51,5 +51,10 @@ runmod -t xrun -- \
     -primtop {{ options.msie }} \
     -top incr_pkg \
   {% endif -%}
+
+  {% if options.compile_args_file -%}
+    -file {{ options.compile_args_file }} \
+  {% endif -%}
+
   -f {{ bazel_compile_args }} \
   -l {{ VCOMP_DIR }}/cmp.log

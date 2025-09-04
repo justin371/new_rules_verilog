@@ -7,6 +7,11 @@ runmod -t vcs -- \
   -Mdir={{ VCOMP_DIR }}/csrc \
   -Mlib={{ VCOMP_DIR }}/csrc \
   -p1800_macro_expansion \
+
+  {% if options.compile_args_file -%}
+    -file {{ options.compile_args_file }} \
+  {% endif -%}
+
   -file {{ bazel_compile_args }} \
   {% for define in additional_defines -%}
     +define+{{ define }} \

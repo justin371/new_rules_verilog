@@ -133,6 +133,10 @@ class VCompJob(Job):
             if not os.path.exists(self.job_dir):
                 os.mkdir(self.job_dir)
 
+        if options.compile_args_file and not os.path.exists(options.compile_args_file):
+            rcfg.log.critical(f"The specified compile arguments file does not exist: {options.compile_args_file}")
+            sys.exit(1)
+
         if options.recompile:
             log.info("Removing vcomp library %s due to --recompile flag", self.job_dir)
             #os.system("rm -rf {0}; mkdir -p {0}".format(self.job_dir))
