@@ -218,7 +218,7 @@ class XrunSimulator(SimulatorInterface):
             # Specific EMU command structure (adjust paths/libs as needed)
             # Note: Original template used `xrun` directly, not `runmod`
             base_exec = "xrun"
-            emu_libs = "-sv_lib digital/dv/common/global/liblibwc_time_dpi.so" # Example lib path
+            emu_libs = "-sv_lib dv_common/global/libwc_time_dpi.so" # Example lib path
             emu_xmlib = "-xmlibdirname hw_lib" # Example xmlib for this emu type
             # Construct specific command parts for this EMU type
             cmd_parts = [
@@ -237,7 +237,7 @@ class XrunSimulator(SimulatorInterface):
 
         elif emu_type == 'SIM': # Another emulator type from original template
             base_exec = "xrun"
-            emu_libs = "-sv_lib digital/dv/common/global/liblibwc_time_dpi.so"
+            emu_libs = "-sv_lib dv_common/global/libwc_time_dpi.so"
             emu_xmlib = "-xmlibdirname sw_lib"
             cmd_parts = [base_exec, "-R -64 -xmfatal NOTEXP", emu_xmlib, emu_libs, sim_opts]
             log_handling = f"| tee {log_path}" # Use pipe tee

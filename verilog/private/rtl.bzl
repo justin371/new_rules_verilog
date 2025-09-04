@@ -32,6 +32,11 @@ def create_flist_content(ctx, gumi_path, allow_library_discovery, no_synth = Fal
     """
     flist_content = []
 
+    # if using makelib, start here
+    if len(makelib):
+        flist_content.append("-makelib")
+        flist_content.append(makelib)
+
     # Using dirname may result in bazel-out included in path
     incdir = depset([f.short_path[:-len(f.basename) - 1] for f in ctx.files.headers]).to_list()
     for d in incdir:
@@ -41,11 +46,6 @@ def create_flist_content(ctx, gumi_path, allow_library_discovery, no_synth = Fal
     libdir = depset([f.short_path[:-len(f.basename) - 1] for f in ctx.files.modules]).to_list()
 
     flist_content.append(gumi_path)
-
-    # if using makelib, start here
-    if len(makelib):
-        flist_content.append("-makelib")
-        flist_content.append(makelib)
 
     if not no_synth:
         if allow_library_discovery:
