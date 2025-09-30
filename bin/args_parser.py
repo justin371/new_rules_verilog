@@ -297,6 +297,11 @@ def add_regression_arguments(parser):
                         nargs='?',
                         default=None,
                         help='Compile incr, need define prim top, default is tb_top')
+    gregre.add_argument('--category-cfg',
+                        type=str, 
+                        nargs='?',
+                        default=None,
+                        help="Path to category configuration JSON file (default: proj_dir/category_config.json)")
 
 
 def add_flow_control_arguments(parser):

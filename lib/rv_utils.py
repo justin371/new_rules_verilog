@@ -1,51 +1,64 @@
 #!/usr/bin/env python
-"""Utility class definitions."""
+"""Utility class definitions for regression testing."""
 
 import datetime
 import getpass
 import os
 import re
+import json
+import shlex
 import jinja2
 import subprocess
+from typing import Dict, Optional, List
 from bs4 import BeautifulSoup
+from tempfile import TemporaryFile
 
-# I'd rather create a "plain" message in the logger
-# that doesn't format, but more work than its worth
 LOGGER_INDENT = 8
 SIMRESULTS = os.environ.get('SIMRESULTS', '')
 
 
 class DatetimePrinter():
+    """Utility class for tracking and printing time intervals"""
 
     def __init__(self, log):
         self.ts = datetime.datetime.now()
         self.log = log
 
     def reset(self):
+        """Reset the start time to current time"""
         self.ts = datetime.datetime.now()
 
     def stop_and_print(self):
+        """Calculate elapsed time since last reset and log it"""
         stop = datetime.datetime.now()
         delta = stop - self.ts
         self.log.debug("Last time check: %d", delta.total_seconds())
 
 
 class IterationCfg():
+    """Configuration class for test iterations"""
 
     def __init__(self, target):
-        self.target = target
-        self.spawn_count = 1
-        self.jobs = []
+        self.target = target  # Total number of iterations to spawn
+        self.spawn_count = 1  # Current count of spawned iterations
+        self.jobs = []  # List of jobs associated with this iteration config
 
     def inc(self, job):
+        """Increment spawn count and add a job to the iteration"""
         self.spawn_count += 1
         self.jobs.append(job)
 
     def __lt__(self, other):
+        """Comparison method for sorting iterations by job name"""
         return self.jobs[0].name < other.jobs[0].name
 
 
 def create_regression_log_file(rcfg):
+    """
+    Create a log file for regression results
+    :param rcfg: Regression configuration object
+    :return: Path to the created log file
+    """
     target_folder = os.path.join(rcfg.regression_dir, 'regression_results')
 
     if not os.path.exists(target_folder):
@@ -71,6 +84,14 @@ def create_regression_log_file(rcfg):
 
 
 def print_summary(rcfg, vcomp_jobs, icfgs, jm, trd):
+    """
+    Print a summary of regression results
+    :param rcfg: Regression configuration object
+    :param vcomp_jobs: Dictionary of vcomponent jobs
+    :param icfgs: List of iteration configurations
+    :param jm: Job manager instance
+    :param trd: List to store test results data
+    """
     trd.clear()
     total_tests = sum([icfg.target for _, (icfgs, _) in rcfg.all_vcomp.items() for icfg in icfgs])
     if total_tests > 1:
@@ -143,16 +164,10 @@ def print_summary(rcfg, vcomp_jobs, icfgs, jm, trd):
                 for j in passed:
                     table_data.append(("", "", "", "", "", "", "", j.log_path if j.log_path else ''))
                     trd.append(("", "", "", "", "", "", "", j.log_path if j.log_path else ''))
-            #if rcfg.options.nt:
-            #    for j in passed or failed:
-            #        table_data.append(("", "", "", "", "", j.log_path if j.log_path else ''))
-            #else:
-            #    for j in failed:
-            #        table_data.append(("", "", "", "", "", j.log_path if j.log_path else ''))
+        
         if i != last:
             table_data.append(separator)
 
-    # add tags to trd
     trdl = [list(entry) for entry in trd]
     for i, entry in enumerate(trdl):
         if i != 0:
@@ -174,7 +189,7 @@ def print_summary(rcfg, vcomp_jobs, icfgs, jm, trd):
             entry.append("")
     trd.clear()
     trd.extend([tuple(entry) for entry in trdl])
-    # Check that entries are consistent
+
     assert all(len(i) == len(table_data[0]) for i in table_data)
     columns = list(zip(*table_data))
     column_widths = [max([len(cell) for cell in col]) for col in columns]
@@ -185,6 +200,7 @@ def print_summary(rcfg, vcomp_jobs, icfgs, jm, trd):
             table_data[i] = ['-' * cw for cw in column_widths]
     table_data_formatted = [formatter.format(*i) for i in table_data]
     rcfg.log.summary("Job Results\n%s", "\n".join(table_data_formatted))
+    
     if total_tests > 1 and not rcfg.options.no_run:
         with open(REGRESSION_LOG_PATH, 'a') as file:
             formatted_string = "Job Results\n" + "\n".join(map(str, table_data_formatted))
@@ -195,6 +211,7 @@ def print_summary(rcfg, vcomp_jobs, icfgs, jm, trd):
     table_data.append(("", "", "", str(total_passed), str(total_skipped), str(total_failed), str(total), ""))
     table_data_formatted = [formatter.format(*i) for i in table_data]
     rcfg.log.summary("Simulation Summary\n%s", "\n".join(table_data_formatted))
+    
     if total_tests > 1 and not rcfg.options.no_run:
         with open(REGRESSION_LOG_PATH, 'a') as file:
             formatted_string = "\n" + "Simulation Summary\n" + "\n".join(map(str, table_data_formatted))
@@ -202,35 +219,35 @@ def print_summary(rcfg, vcomp_jobs, icfgs, jm, trd):
 
 
 def calc_simresults_location(checkout_path):
-    """Calculate the path to put regression results."""
+    """
+    Calculate the path for storing regression results
+    :param checkout_path: Path to the code checkout directory
+    :return: Calculated results directory path
+    """
     username = getpass.getuser()
 
-    # FIXME, we may want to detect who owns the check to allow
-    # for rerunning in someone else's area? # pylint: disable=fixme
     sim_results_home = os.path.join(SIMRESULTS, username)
     if not os.path.exists(sim_results_home):
         os.mkdir(sim_results_home)
 
-    # If username is in the checkout_path try to reduce the name
-    # Assume username is somewhere is path
     try:
         checkout_path = re.search(r'{}/(.*)'.format(username), checkout_path).group(1)
     except AttributeError:
         pass
     checkout_path = checkout_path.replace('/', '_')
-    # Adding the datetime into the regression directory will force a recompile.
-    # Ideally, the vcomp directory will need to have the same name
-    # strdate = time.strftime("%Y_%m_%d_%H_%M_%S", time.localtime(time.time()))
-    # regression_directory = '{}__{}'.format(checkout_path, strdate)
     regression_directory = checkout_path
     regression_directory = os.path.join(sim_results_home, regression_directory)
     return regression_directory
 
+
 def get_report_header(rcfg):
-    """Get report header from regression"""
+    """
+    Get header information for regression report
+    :param rcfg: Regression configuration object
+    :return: Dictionary containing report header information
+    """
     header = {}
 
-    # Header
     header['username'] = getpass.getuser()
     header['simulator'] = rcfg.options.simulator
     header['time'] = rcfg.current_time
@@ -252,27 +269,36 @@ def get_report_header(rcfg):
         return None
     return header
 
+
 def process_value(value):
+    """
+    Process coverage values to remove extra percentage symbols
+    :param value: Coverage value string
+    :return: Processed value string
+    """
     if '%' in value:
         return value.split('%')[0] + '%'
     return value
 
+
 def get_coverage_data(rcfg, vcomp_jobs):
-    """Get coverage data from regression"""
+    """
+    Collect coverage data from regression results
+    :param rcfg: Regression configuration object
+    :param vcomp_jobs: Dictionary of vcomponent jobs
+    :return: Dictionary containing coverage data
+    """
     cov = {}
 
-    # file info
     include = 'summ'
     dut_pattern = 'hdl_top</A>.dut'
     env_pattern = 'uvm_pkg</A>.uvm_test_top'
 
-    # IMC report(html)
     for vcomp, job in vcomp_jobs.items():
         vcomp_name = vcomp.split(":")[-1]
         cov[vcomp_name] = {}
         if rcfg.options.coverage:
             report_dir = os.path.join(job.cov_work_dir, "imc_report")
-            # Generate IMC report dir
             cmd = 'runmod xrun -- imc -exec {} -verbose'.format(os.path.join(job.cov_work_dir, "imc_report.tcl"))
             p = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, shell=True)
             p.wait()
@@ -290,13 +316,13 @@ def get_coverage_data(rcfg, vcomp_jobs):
                     table = soup.find('table', id='totalTable')
                     if table:
                         rows = table.find_all('tr')
-                        if len(rows) >= 2:  # Must have at least 2 rows for header and data
+                        if len(rows) >= 2:
                             header = [th.get_text(strip=True).replace('\u00a0', '') for th in rows[0].find_all('th')]
                             for row in rows[1:]:
                                 cells = [td.get_text(strip=True).replace('\u00a0', '') for td in row.find_all('td')]
-                                # Check if the last cell in the row contains 'Cumulative'
                                 if 'Cumulative' in cells:
-                                    cov[vcomp_name]['cc'] =  dict(zip(header, cells))  # Return dictionary for the Cumulative row
+                                    cov[vcomp_name]['cc'] =  dict(zip(header, cells))
+        
             result = subprocess.run(['grep', '-rl', env_pattern, report_dir], capture_output=True, text=True)
             grep_files = result.stdout.splitlines()
             env_file = [f for f in grep_files if include in f]
@@ -309,13 +335,12 @@ def get_coverage_data(rcfg, vcomp_jobs):
                     table = soup.find('table', id='totalTable')
                     if table:
                         rows = table.find_all('tr')
-                        if len(rows) >= 2:  # Must have at least 2 rows for header and data
+                        if len(rows) >= 2:
                             header = [th.get_text(strip=True).replace('\u00a0', '') for th in rows[0].find_all('th')]
                             for row in rows[1:]:
                                 cells = [td.get_text(strip=True).replace('\u00a0', '') for td in row.find_all('td')]
-                                # Check if the last cell in the row contains 'Cumulative'
                                 if 'Cumulative' in cells:
-                                    cov[vcomp_name]['cf'] =  dict(zip(header, cells))  # Return dictionary for the Cumulative row
+                                    cov[vcomp_name]['cf'] =  dict(zip(header, cells))
 
             cc_filtered = {
                 k.split(' ')[0]: process_value(v)
@@ -330,7 +355,166 @@ def get_coverage_data(rcfg, vcomp_jobs):
             cov[vcomp_name]['cc'] = cc_filtered
             cov[vcomp_name]['cf'] = cf_filtered
 
-            # Remove imc report dir
             subprocess.run(['rm', '-rf', report_dir])
 
     return cov
+
+
+def load_category_total_cases(cfg_path: Optional[str] = None) -> Dict[str, Dict]:
+    """
+    Load subsystem configuration including total cases and associated tags
+    Format: {subsystem_name: {"total": int, "tags": [tag1, tag2, ...]}}
+    :param cfg_path: Path to JSON config file (optional)
+    :return: Subsystem configuration dictionary
+    """
+    default_cfg = {
+        "ci_gate": {
+            "total": 50,
+            "tags": ["ci_gate", "ci"]
+        },
+        "nightly": {
+            "total": 200,
+            "tags": ["nightly", "nl"]
+        },
+        "weekly": {
+            "total": 20,
+            "tags": ["weekly", "wl"]
+        }
+    }
+
+    if cfg_path and os.path.exists(cfg_path):
+        try:
+            with open(cfg_path, "r", encoding="utf-8") as f:
+                return json.load(f)
+        except json.JSONDecodeError:
+            print(f"Warning: Invalid JSON in subsystem config {cfg_path}, using default")
+            return default_cfg
+    return default_cfg
+
+
+def calc_category_stats(rcfg) -> Dict[str, Dict[str, int]]:
+    """
+    Calculate category statistics with multi-iteration handling (strict mode)
+    - 1 test = 1 execution regardless of iteration count
+    - Test is counted as 'passed' ONLY if ALL iterations are successful
+    :param rcfg: Regression configuration object
+    :return: Statistics dictionary with executed/passed counts per category
+    """
+    category_stats = {
+        category: {
+            "total": config["total"],
+            "executed": 0,
+            "passed": 0,
+            "test_records": set()  # Track unique tests to avoid duplicate counting
+        } for category, config in rcfg.category_total_cases.items()
+    }
+
+    if rcfg.options.no_run:
+        # Remove internal tracking field before returning
+        for stats in category_stats.values():
+            del stats["test_records"]
+        return category_stats
+
+    # Process all test iterations and aggregate results
+    for _, (icfgs, _) in rcfg.all_vcomp.items():
+        for icfg in icfgs:
+            # Map: test base name → {tags, all_iteration_statuses}
+            test_aggregator = {}
+
+            # Step 1: Collect all iterations for each test
+            for job in icfg.jobs:
+                # Extract base test name (remove iteration suffix like "_1", "_2")
+                test_full_name = job.name
+                test_base_name = re.sub(r'_\d+$', '', test_full_name)
+
+                # Get tags associated with this test
+                test_tags = set()
+                for test_key, tags in rcfg.tests_to_tags.items():
+                    if test_base_name in test_key:
+                        test_tags = set(tags)
+                        break
+
+                if not test_tags:
+                    continue  # Skip tests with no tags
+
+                # Initialize entry if not exists
+                if test_base_name not in test_aggregator:
+                    test_aggregator[test_base_name] = {
+                        "tags": test_tags,
+                        "iterations_successful": []  # Track success status of each iteration
+                    }
+
+                # Record success status of current iteration
+                is_successful = job.jobstatus.successful if job.jobstatus else False
+                test_aggregator[test_base_name]["iterations_successful"].append(is_successful)
+
+            # Step 2: Deduplicate and calculate stats (strict mode)
+            for test_name, test_data in test_aggregator.items():
+                test_tags = test_data["tags"]
+                all_iterations = test_data["iterations_successful"]
+
+                # Check each category for tag matches
+                for category, stats in category_stats.items():
+                    category_tags = set(rcfg.category_total_cases[category]["tags"])
+                    if not (test_tags & category_tags):
+                        continue  # No tag overlap, skip
+
+                    # Count as executed only once per unique test
+                    if test_name not in stats["test_records"]:
+                        stats["test_records"].add(test_name)
+                        stats["executed"] += 1  # 1 execution regardless of iteration count
+
+                        # Strict mode: Passed only if ALL iterations are successful
+                        if all(all_iterations):
+                            stats["passed"] += 1
+
+    # Clean up internal tracking field
+    for stats in category_stats.values():
+        del stats["test_records"]
+
+    return category_stats
+
+
+def print_category_summary(
+    category_stats: Dict[str, Dict[str, int]],
+    log,
+    LOGGER_INDENT: int = 8
+):
+    """
+    Print summary statistics for subsystems
+    :param subsys_stats: Statistics from calc_subsys_stats
+    :param log: Logger object
+    :param LOGGER_INDENT: Indentation for formatting
+    """
+    table_data = [
+        ("Category", "Total Cases", "Executed", "Completion", "Passed", "Pass Rate"),
+        ("-" * 10, "-" * 11, "-" * 8, "-" * 10, "-" * 6, "-" * 9)
+    ]
+
+    for category, stats in category_stats.items():
+        total = stats["total"]
+        executed = stats["executed"]
+        passed = stats["passed"]
+
+        completion_rate = f"{(executed / total) * 100:.1f}%" if total > 0 else "N/A"
+        pass_rate = f"{(passed / executed) * 100:.1f}%" if executed > 0 else "N/A"
+
+        table_data.append((
+            category,
+            str(total),
+            str(executed),
+            completion_rate,
+            str(passed),
+            pass_rate
+        ))
+
+    columns = list(zip(*table_data))
+    column_widths = [max(len(cell) for cell in col) for col in columns]
+    formatter = " " * LOGGER_INDENT + "  ".join(
+        [f"{{:{cw}s}}" for cw in column_widths]
+    )
+
+    log.summary("\n===== Category Test Statistics =====")
+    for row in table_data:
+        log.summary(formatter.format(*row))
+    log.summary("=====================================\n")
