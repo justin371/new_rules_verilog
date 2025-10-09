@@ -43,6 +43,10 @@ class RegressionReport():
         self.proj_name = ""
         self.project_info = {}
 
+        # category info
+        self.category_stats = {} 
+        self.processed_category_stats = []
+
     def process_trd(self, trd):
         """
         Process test result data
@@ -193,13 +197,44 @@ class RegressionReport():
                 except Exception as e:
                     self.rcfg.log.info(f"E Error!!! Cannot chmod dir {root}/{file}: {e}")
 
-    def run(self, header, trd, cov):
+    def process_category_stats(self):
+        """
+        Process category statistics (strict mode) into template-friendly format
+        Convert {category: {total, executed, passed}} to list of [category, total, executed, completion, passed, pass_rate]
+        """
+        if not self.category_stats:
+            self.processed_category_stats = []
+            return
+
+        for category, stats in self.category_stats.items():
+            total = stats["total"]
+            executed = stats["executed"]
+            passed = stats["passed"]
+
+            # Calculate completion rate (executed / total)
+            completion_rate = f"{(executed / total) * 100:.2f}%" if total > 0 else "N/A"
+            # Calculate pass rate (passed / executed, strict mode: only if all iterations passed)
+            pass_rate = f"{(passed / executed) * 100:.2f}%" if executed > 0 else "N/A"
+
+            # Append processed data (match table columns in template)
+            self.processed_category_stats.append([
+                category,          # name（like module_func_reset、soc_path_ddr）
+                str(total),        # total case number
+                str(executed),     # finished case number
+                completion_rate,   # rate of completion
+                str(passed),       # pass rate
+                pass_rate          
+            ])
+
+    def run(self, header, trd, cov, category_stats):
         """
         API for simmer to create report page
         """
         self.header = header
         self.cov = cov
+        self.category_stats = category_stats
         self.process_trd(trd)
+        self.process_category_stats()
         self.proj_name = self.header["project_name"]
         # Create html
         self.render_home_page()
@@ -397,6 +432,7 @@ class RegressionReport():
                 project=self.project_info,
                 cc_info=c['cc'] if c != {} else {},
                 cf_info=c['cf'] if c != {} else {},
+                processed_category_stats=self.processed_category_stats
             )
 
             # Write html

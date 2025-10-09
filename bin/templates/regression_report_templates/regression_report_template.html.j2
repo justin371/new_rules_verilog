@@ -165,6 +165,40 @@
                   </tbody>
                 </table>
                 <br>
+                <h3>Category Test Results (Strict Mode)</h3>
+                <p><em>Note: 1 test = 1 execution (deduplicated); Passed only if all iterations succeed.</em></p>
+                <table id="categoryres" class="docutils align-default">
+                  <thead>
+                    <tr>
+                      <th align="center" style="background-color:#3D1067; color:white; padding-bottom:12px; padding-top:12px; text-transform:uppercase; border:1px solid #f2f2f2; padding:8px" bgcolor="#3D1067">Category</th>
+                      <th align="center" style="background-color:#3D1067; color:white; padding-bottom:12px; padding-top:12px; text-transform:uppercase; border:1px solid #f2f2f2; padding:8px" bgcolor="#3D1067">Total Cases</th>
+                      <th align="center" style="background-color:#3D1067; color:white; padding-bottom:12px; padding-top:12px; text-transform:uppercase; border:1px solid #f2f2f2; padding:8px" bgcolor="#3D1067">Executed</th>
+                      <th align="center" style="background-color:#3D1067; color:white; padding-bottom:12px; padding-top:12px; text-transform:uppercase; border:1px solid #f2f2f2; padding:8px" bgcolor="#3D1067">Completion Rate</th>
+                      <th align="center" style="background-color:#3D1067; color:white; padding-bottom:12px; padding-top:12px; text-transform:uppercase; border:1px solid #f2f2f2; padding:8px" bgcolor="#3D1067">Passed</th>
+                      <th align="center" style="background-color:#3D1067; color:white; padding-bottom:12px; padding-top:12px; text-transform:uppercase; border:1px solid #f2f2f2; padding:8px" bgcolor="#3D1067">Pass Rate</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {% for category, total, executed, completion_rate, passed, pass_rate in processed_category_stats %}
+                    <tr>
+                      <td align="center" style="border:1px solid #f2f2f2; padding:8px">{{ category }}</td>
+                      <td align="center" style="border:1px solid #f2f2f2; padding:8px">{{ total }}</td>
+                      <td align="center" style="border:1px solid #f2f2f2; padding:8px">{{ executed }}</td>
+                      <td align="center" style="border:1px solid #f2f2f2; padding:8px">{{ completion_rate }}</td>
+                      <td align="center" style="border:1px solid #f2f2f2; padding:8px">{{ passed }}</td>
+                      {% set pass_rate_float = pass_rate | replace('%', '') | float %}
+                      {% if pass_rate_float == 100 %}
+                        <td align="center" style="border:1px solid #f2f2f2; padding:8px; background-color:#37b671">{{ pass_rate }}</td>
+                      {% elif pass_rate_float >= 90 %}
+                        <td align="center" style="border:1px solid #f2f2f2; padding:8px; background-color:#c1d422">{{ pass_rate }}</td>
+                      {% else %}
+                        <td align="center" style="border:1px solid #f2f2f2; padding:8px; background-color:#be2e25">{{ pass_rate }}</td>
+                      {% endif %}
+                    </tr>
+                    {% endfor %}
+                  </tbody>
+                </table>
+                <br>
                 <h3>Test Results</h3>
                 <table id="Testcase" class="docutils align-default">
                   <thead>

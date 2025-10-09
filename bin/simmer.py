@@ -1025,7 +1025,7 @@ def main(rcfg, options):
         
         report_header = rv_utils.get_report_header(rcfg)
         rrt = regression_report.RegressionReport(rcfg, env, webroot_path)
-        rrt.run(report_header, trd, rv_utils.get_coverage_data(rcfg, vcomp_jobs))
+        rrt.run(report_header, trd, rv_utils.get_coverage_data(rcfg, vcomp_jobs), category_stats)
 
     failures = {}
     for bench, (icfgs, test_list) in rcfg.all_vcomp.items():
