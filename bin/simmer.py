@@ -1004,8 +1004,10 @@ def main(rcfg, options):
 
     rv_utils.print_summary(rcfg, vcomp_jobs, icfgs, jm, trd)
     # add category_stats for soc
-    category_stats = rv_utils.calc_category_stats(rcfg)
-    rv_utils.print_category_summary(category_stats, rcfg.log, rv_utils.LOGGER_INDENT)
+    category_stats = None
+    if options.category_cfg is not None:
+        category_stats = rv_utils.calc_category_stats(rcfg)
+        rv_utils.print_category_summary(category_stats, rcfg.log, rv_utils.LOGGER_INDENT)
 
     report_header = {}
     if options.report:
