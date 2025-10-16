@@ -93,7 +93,7 @@ class RegressionReport():
                                 "" if failed == 0 else str(failed), "" if total == 0 else str(total),
                                 f"{passed / total * 100:.2f}", "", ""])
 
-    def update_past_report_page(self, phtml, rlist, prlist, q1_prlist, cclist, cflist, ori_rlist, ori_prlist, ori_q1_prlist):
+    def update_past_report_page(self, phtml, rlist, prlist, cclist, cflist, ori_rlist, ori_prlist):
         """
         Update 'Past Result' part of regression report page
         """
@@ -101,14 +101,13 @@ class RegressionReport():
         # Reverser for date order
         rlist.reverse()
         prlist.reverse()
-        q1_prlist.reverse()
         cclist.reverse()
         cflist.reverse()
 
         if len(rlist) > 0:
             # new page index
             page_info = [f'                  <li><a href="{r}.html">{r}_{pr}%_{cc}_{cf}</a></li>\n' for r, pr, cc, cf in zip(rlist, prlist, cclist, cflist)]
-            chart_info = [f'      const labels = {ori_rlist};\n      const data0 = {ori_prlist}\n      const data1 = {ori_q1_prlist}\n']
+            chart_info = [f'      const labels = {ori_rlist};\n      const data0 = {ori_prlist}\n']
 
             for pr in rlist:
                 start_index_0 = None
@@ -359,27 +358,6 @@ class RegressionReport():
                 regression_summary['cov_code'] = 0
                 regression_summary['cov_func'] = 0
 
-            # Create Q1 case pass rate
-            q1_regr = {}
-            q1_total = 0
-            q1_pass = 0
-            q1_passrate = 0.0
-            for l in t[1:]:
-                if l[-2] == "Q1":
-                    if l[3] == '':
-                        q1_pass += 0
-                    else:
-                        q1_pass += int(l[3])
-                    q1_total += int(l[6])
-            if q1_total == 0:
-                q1_passrate = 0
-            else:
-                q1_passrate = round((q1_pass / q1_total) * 100, 2)
-            q1_regr["Total_Q1"] = q1_total
-            q1_regr["Pass_Q1"] = q1_pass
-            q1_regr["Passrate_Q1"] = q1_passrate
-            regression_summary['q1_passrate'] = q1_passrate
-
             # Record and update regressions info
             if not os.path.exists(json_file_path):
                 regressions[self.header['time']] = regression_summary
@@ -393,7 +371,7 @@ class RegressionReport():
             regression_list = regressions.keys()
             sorted_list = sorted(regression_list, key=lambda ts: datetime.strptime(ts.split("_")[0], "%Y%m%d"))
             if len(sorted_list) > 30:
-                remain_list.sorted_list[-30:]
+                remain_list = sorted_list[-30:]
                 removed_list = [ts for ts in regression_list if ts not in remain_list]
                 for removed_key in removed_list:
                     if removed_key in regressions:
@@ -411,12 +389,11 @@ class RegressionReport():
             passrate_list = [regressions[ts]['passrate'] for ts in remain_list if ts in regressions.keys()]
             cov_code_list = [regressions[ts]['cov_func'] for ts in remain_list if ts in regressions.keys()]
             cov_func_list = [regressions[ts]['cov_func'] for ts in remain_list if ts in regressions.keys()]
-            q1_passrate_list = [regressions[ts]['q1_passrate'] for ts in remain_list if ts in regressions.keys()]
 
             # Update old regression report page
             self.update_past_report_page(bench_path, 
-                                        remain_list[:-1], passrate_list[:-1], q1_passrate_list[:-1], cov_code_list[:-1], cov_func_list[:-1],
-                                        remain_list, passrate_list, q1_passrate_list) 
+                                        remain_list[:-1], passrate_list[:-1], cov_code_list[:-1], cov_func_list[:-1],
+                                        remain_list, passrate_list) 
 
             # Render
             rendered_html = self.REGRESSION_REPORT_TEMPLATE.render(
@@ -424,9 +401,7 @@ class RegressionReport():
                 bench_name=b,
                 regression_details=t,
                 regressions=remain_list,
-                q1_regression_details=q1_regr,
                 passrate_list=passrate_list,
-                q1_passrate_list=q1_passrate_list,
                 cov_code_list=cov_code_list,
                 cov_func_list=cov_func_list,
                 project=self.project_info,

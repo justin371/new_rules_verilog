@@ -137,34 +137,6 @@
                 <canvas id="PassrateChart"></canvas>
                 <div class="tooltip" id="tooltip"></div>
                 <br>
-                <h3>Q1 Test Results</h3>
-                <table id="q1res" class="docutils align-default">
-                  <thead>
-                    <tr>
-                      {% for key in q1_regression_details.keys() %}
-                      <th align="center" style="background-color:#3D1067; color:white; padding-bottom:12px; padding-top:12px; text-transform:uppercase; border:1px solid #f2f2f2; padding:8px" bgcolor="#3D1067">{{key}}</th>
-                      {% endfor %}
-                    </tr>
-                  </thead>
-                  <tbody>
-                    <tr>
-                      <td align="center" style="border:1px solid #f2f2f2; padding:8px">{{q1_regression_details["Total_Q1"]}}</td>
-                      <td align="center" style="border:1px solid #f2f2f2; padding:8px">{{q1_regression_details["Pass_Q1"]}}</td>
-                      {% set q1_passrate = q1_regression_details["Passrate_Q1"] | float %}
-                      {% if q1_passrate == 100 %}
-                        <td align="center"
-                            style="border:1px solid #f2f2f2; padding:8px; background-color:#37b671">{{ q1_regression_details["Passrate_Q1"] }}</td>
-                      {% elif q1_passrate >= 90 %}
-                        <td align="center"
-                            style="border:1px solid #f2f2f2; padding:8px; background-color:#c1d422">{{ q1_regression_details["Passrate_Q1"] }}</td>
-                      {% else %}
-                        <td align="center"
-                            style="border:1px solid #f2f2f2; padding:8px; background-color:#be2e25">{{ q1_regression_details["Passrate_Q1"] }}</td>
-                      {% endif %}
-                    </tr>
-                  </tbody>
-                </table>
-                <br>
                 <h3>Category Test Results (Strict Mode)</h3>
                 <p><em>Note: 1 test = 1 execution (deduplicated); Passed only if all iterations succeed.</em></p>
                 <table id="categoryres" class="docutils align-default">
@@ -336,7 +308,6 @@
       <!-- update chart -->
       const labels = {{regressions}};
       const data0 = {{passrate_list}};
-      const data1 = {{q1_passrate_list}};
       <!-- update chart -->
 
       let myChart;
@@ -344,12 +315,10 @@
       function updateChart(dataCount) {
           const filteredLabels = labels.slice(-dataCount);
           const filteredData0 = data0.slice(-dataCount);
-          const filteredData1 = data1.slice(-dataCount);
 
           if (myChart) {
               myChart.data.labels = filteredLabels;
               myChart.data.datasets[0].data = filteredData0;
-              myChart.data.datasets[1].data = filteredData1;
               myChart.update();
           } else {
               myChart = new Chart(ctx, {
@@ -367,17 +336,6 @@
                               pointRadius: 3,
                               fill: false,
                           },
-                          {
-                              label: 'Q1 Testcase Passrate',
-                              data: filteredData1,
-                              borderColor: 'rgba(255, 99, 132, 1)',
-                              backgroundColor: 'rgba(255, 99, 132, 0.2)',
-                              borderWidth: 2,
-                              pointHoverRadius: 5,
-                              pointRadius: 3,
-                              fill: false,
-                          },
-
                       ]
                   },
                   options: {
