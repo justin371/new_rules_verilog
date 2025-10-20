@@ -370,6 +370,7 @@ class RegressionReport():
             # Only remain 30days regression info
             regression_list = regressions.keys()
             sorted_list = sorted(regression_list, key=lambda ts: datetime.strptime(ts.split("_")[0], "%Y%m%d"))
+            remain_list = []
             if len(sorted_list) > 30:
                 remain_list = sorted_list[-30:]
                 removed_list = [ts for ts in regression_list if ts not in remain_list]
