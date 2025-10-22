@@ -149,7 +149,7 @@ def print_summary(rcfg, vcomp_jobs, icfgs, jm, trd):
                 assert len(passed) + len(failed) + len(skipped) == len(icfg.jobs), print(
                     len(passed), len(failed), len(skipped), len(icfg.jobs))
             except AssertionError as exc:
-                if not jm.exited_prematurely:
+                if not jm.exceeded_prematurely:
                     raise exc
 
             test_set = ("", icfg.jobs[0].name, str(max_job_time), str(len(passed)) if passed else "", str(len(skipped)) if skipped else "",
@@ -427,12 +427,14 @@ def calc_category_stats(rcfg) -> Dict[str, Dict[str, int]]:
                 test_full_name = job.name
                 test_base_name = re.sub(r'_\d+$', '', test_full_name)
 
-                # Get tags associated with this test
+                # Get tags associated with this test —— FIXED: EXACT MATCH
                 test_tags = set()
                 for test_key, tags in rcfg.tests_to_tags.items():
-                    if test_base_name in test_key:
-                        test_tags = set(tags)
-                        break
+                    if ':' in test_key:
+                        key_test_name = test_key.split(':', 1)[1]  # Only split on first ':'
+                        if key_test_name == test_base_name:
+                            test_tags = set(tags)
+                            break  # Exact match found
 
                 if not test_tags:
                     continue  # Skip tests with no tags
