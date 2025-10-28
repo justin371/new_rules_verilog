@@ -253,6 +253,7 @@ def get_report_header(rcfg):
     header['time'] = rcfg.current_time
     try:
         branch = subprocess.check_output(['git', 'rev-parse', '--abbrev-ref', 'HEAD'], text=True).strip()
+        tag_info = subprocess.check_output(['git', 'describe', '--tags'], text=True).strip()
         commit_id = subprocess.check_output(['git', 'rev-parse', 'HEAD'], text=True).strip()
         short_revision = subprocess.check_output(['git', 'rev-parse', '--short', 'HEAD'], text=True).strip()
         repo_url = subprocess.check_output(['git', 'remote', 'get-url', 'origin'], text=True).strip().replace(":", "/").replace("git@", "https://")
@@ -260,8 +261,9 @@ def get_report_header(rcfg):
         if match:
             header['project_name'] = match.group(1)
         else:
-            print("Error: Invalid Git URL format or .git suffix missing.")
+            print("Error: Invalid Git URL format or .git suffix missing.")                
         header["branch"] = branch
+        header['tag'] = tag_info
         header["revision"] = short_revision
         header["commit"] = repo_url.rstrip(".git") + "/commit/" + commit_id
     except subprocess.CalledProcessError as e:
