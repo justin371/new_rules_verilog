@@ -53,11 +53,11 @@ def add_debug_arguments(parser):
                         help='Probe hirarchical depth. Only used with --waves. Default is all hierarchies')
     gdebug.add_argument('--probe-packed',
                         type=int,
-                        default=1024,
+                        default=128,
                         help='Packed probe depth. Only used with --waves. Default is 1024.')
     gdebug.add_argument('--probe-unpacked',
                         type=int,
-                        default=1024,
+                        default=128,
                         help='Unpacked probe depth. Only used with --waves. Default is 1024.')
     gdebug.add_argument('--gui',
                         default=False,

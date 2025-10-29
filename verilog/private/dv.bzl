@@ -251,12 +251,21 @@ def _verilog_dv_library_impl(ctx):
         in_flist = ctx.files.srcs
 
     content = []
+    # If using makelib, start here
+    if ctx.attr.makelib:
+        content.append("-makelib")
+        content.append(ctx.attr.makelib)
+
     for d in directories:
         if d == "":
             d = "."
         content.append("+incdir+{}".format(d))
     for f in in_flist:
         content.append(f.short_path)
+
+    # if using makelib, terminate here
+    if ctx.attr.makelib:
+        content.append("-endlib")
 
     all_sos = []
     for dpi in ctx.attr.dpi:
@@ -315,6 +324,11 @@ verilog_dv_library = rule(
         "incdir": attr.bool(
             default = True,
             doc = "Generate a +incdir in generated flist for every file's directory declared in 'srcs' attribute.",
+        ),
+        "makelib": attr.string(
+            default = "",
+            doc = "Used to specify that this DV lib should be compiled into its own library.\n" +
+                  "String value specified here is used as the name of the compile lib.",
         ),
     },
     outputs = {"out": "%{name}.f"},
