@@ -1026,6 +1026,9 @@ def main(rcfg, options):
                 raise ValueError(f"Unsupported simulator specified: {options.simulator}")
         
         report_header = rv_utils.get_report_header(rcfg)
+        if report_header is not None and 'tag' in report_header:
+            if '-' in report_header['tag']:
+                report_header['tag'] = ''
         rrt = regression_report.RegressionReport(rcfg, env, webroot_path)
         rrt.run(report_header, trd, rv_utils.get_coverage_data(rcfg, vcomp_jobs), category_stats)
 
