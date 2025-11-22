@@ -82,7 +82,15 @@ class VcsSimulator(SimulatorInterface):
 
         # Waves
         if self.options.waves is not None:
-            waves_tcl = os.path.join(test_job.job_dir, "waves.tcl") # Assumes wave tcl name is standard
+            if self.options.wave_tcl:
+                if os.path.exists(self.options.wave_tcl):
+                    waves_tcl = self.options.wave_tcl
+                    log.info(f"Using user-provided wave Tcl: {waves_tcl}")
+                else:
+                    raise ValueError("{} not exists".format(self.options.wave_tcl))
+            else:
+                waves_tcl = os.path.join(test_job.job_dir, "waves.tcl") # Assumes wave tcl name is standard
+
             sim_opts += " -ucli -do {} ".format(waves_tcl)
 
         return sim_opts

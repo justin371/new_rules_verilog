@@ -140,7 +140,15 @@ class XrunSimulator(SimulatorInterface):
                 sim_opts += ' +SVFCOV=1 '
         # Waves
         if self.options.waves is not None:
-            waves_tcl = os.path.join(test_job.job_dir, "waves.tcl") # Assumes wave tcl name is standard
+            if self.options.wave_tcl:
+                if os.path.exists(self.options.wave_tcl):
+                    waves_tcl = self.options.wave_tcl
+                    log.info(f"Using user-provided wave Tcl: {waves_tcl}")
+                else:
+                    raise ValueError("{} not exists".format(self.options.wave_tcl))
+            else:
+                waves_tcl = os.path.join(test_job.job_dir, "waves.tcl") # Assumes wave tcl name is standard
+
             sim_opts += " -input {} ".format(waves_tcl)
             if self.options.wave_type == 'shm':
                 sim_opts += ' -debug_opts verisium_pp '

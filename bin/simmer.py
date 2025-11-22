@@ -517,16 +517,7 @@ class TestJob(Job):
         waves_db = self.job_dir
 
         wave_cmd_template = self.simulator.get_wave_cmd_template()
-        #wave_tcl_path = os.path.join(self.job_dir, "waves.tcl") # Standard name
-
-        if options.wave_tcl:
-            if os.path.exists(options.wave_tcl):
-                wave_tcl_path = options.wave_tcl
-                log.info(f"Using user-provided wave Tcl: {wave_tcl_path}")
-            else:
-                raise ValueError("{} not exists".format(options.wave_tcl))
-        else:
-            wave_tcl_path = os.path.join(self.job_dir, "waves.tcl")
+        wave_tcl_path = os.path.join(self.job_dir, "waves.tcl") # Standard name
 
         if options.waves is not None:
             wave_type = options.wave_type.lower()
