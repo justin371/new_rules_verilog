@@ -7,7 +7,7 @@
 -lca
 -lrt
 +vpi
-+libext+.sv+.svh+.v+.vh+.vams
++libext+.sv+.svh+.v+.vh+.vams+.vp+.svp
 +systemverilogext+.sv+.svh
 
 +vcs+flush+log

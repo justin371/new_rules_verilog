@@ -255,7 +255,7 @@ class XrunSimulator(SimulatorInterface):
             if user_args_list:
                 cmd_parts.extend(user_args_list)
             # Standard XRUN uses pipe tee for logging based on original template
-            log_handling = f"| tee {log_path}"
+            log_handling = f"-l {log_path}"
 
         # Join command parts into a single string
         base_command = " ".join(filter(None, cmd_parts)) # Filter removes empty strings

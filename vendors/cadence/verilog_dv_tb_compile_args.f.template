@@ -2,8 +2,8 @@
 -uvm
 -64bit
 -verbose
--newperf
 -licqueue
+-newperf
 -plusperf
 -elaborate
 -access rwc
@@ -24,7 +24,7 @@
 -vtimescale 1ps/1ps
 -define UVM_REGEX_NO_DPI
 -define UVM_NO_DEPRECATED
--libext .sv+.svh+.v+.vams
+-libext .sv+.svh+.v+.vams+.vp+.svp
 -vlog_ext +.vh+.vm+.vp+.udp
 -define TIMESCALE_STEP_FS=1000
 -define TIMESCALE_PREC_FS=1000

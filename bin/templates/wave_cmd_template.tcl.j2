@@ -5,7 +5,7 @@ run {{ options.wave_start }}ns
 call xmDumpfile {{ waves_db }}
 call xmDumpLog
 {% for probe in options.probes -%}
-call xmDumpvars {{ probe }} {{ options.wave_depth }} +all +packed_limit={{ options.probe_packed }} +unpacked_limit={{ options.probe_unpacked }} +dynamic $uvm:{uvm_test_top}
+call xmDumpvars {{ probe }} {{ options.wave_depth }} +all +packed_limit={{ options.probe_packed }} +unpacked_limit={{ options.probe_unpacked }}
 {% endfor -%}
 call xmDumpSVA +assertdebug
 call xmDumpflush
