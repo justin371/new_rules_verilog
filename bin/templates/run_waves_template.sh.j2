@@ -35,7 +35,7 @@ FULL_XRUN_COMMAND="${XRUN_BASE_COMMAND} -db \"{{ wave_file_path }}\""
 
 echo "Executing bsub command:"
 echo "${BSUB_COMMAND_PATH} ${BSUB_OPTIONS} ${FULL_XRUN_COMMAND}"
-${BSUB_COMMAND_PATH} ${BSUB_OPTIONS} ${FULL_XRUN_COMMAND}
+${BSUB_COMMAND_PATH} ${BSUB_OPTIONS} ${FULL_XRUN_COMMAND} &
 
 echo "Returning to previous directory."
 cd - > /dev/null # Suppress output of 'cd -'

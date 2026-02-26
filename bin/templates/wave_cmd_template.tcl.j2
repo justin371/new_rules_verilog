@@ -3,10 +3,11 @@
 run {{ options.wave_start }}ns
 {% endif -%}
 call xmDumpfile {{ waves_db }}
-call xmDumpLog
 {% for probe in options.probes -%}
-call xmDumpvars {{ probe }} {{ options.wave_depth }} +all +packed_limit={{ options.probe_packed }} +unpacked_limit={{ options.probe_unpacked }}
+call xmDumpvars {{ probe }} {{ options.wave_depth }} +all +packedmda+struct +struct +parameter +cell_instance=0 +packed_limit={{ options.probe_packed }} +unpacked_limit={{ options.probe_unpacked }}
 {% endfor -%}
+call xmDumpLog
+call xmDumpMDA
 call xmDumpSVA +assertdebug
 call xmDumpflush
 run
