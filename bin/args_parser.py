@@ -218,6 +218,11 @@ def add_regression_arguments(parser):
                         default='single-socket',
                         choices=['single-socket', 'single-threaded', 'partial-socket', 'all-cores'],
                         help="The number of cores to be used for sim, used with --mce")
+    gregre.add_argument('--mce_split_max_size',
+                        type=int,
+                        default=500000,
+                        help=("Size of spilt to be used for mce sim. "
+                              "used with --mce"))
     gregre.add_argument('--coverage',
                         action=parser_actions.CovAction,
                         help=f'Enable Code Coverage for xcelium only.\n{parser_actions.CovAction.format_options(indent=0)}')

@@ -233,6 +233,8 @@ def verilog_dv_test_cfg(name = None, tags = None, abstract = None, inherits = No
                 params['tb'] = gls_tb + "_" + corner
             elif tb != None:
                 params['tb'] = tb + "_" + corner
+            if uvm_testname != None:
+                params['uvm_testname'] = uvm_testname
             verilog_dv_test_base_cfg(**params)
 
 def _verilog_dv_library_impl(ctx):
