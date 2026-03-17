@@ -173,6 +173,7 @@ class XrunSimulator(SimulatorInterface):
             sim_opts += " -mce_parallel_probing 0 "
             sim_opts += " -mce_sim_cpu_configuration {} ".format(self.options.mce_sim_cfg)
             sim_opts += " -mce_sim_thread_count {} ".format(self.options.mce_sim_count)
+            sim_opts += " -mce_split_max_size {} ".format(self.options.mce_split_max_size)
         # Profile
         if self.options.profile:
             sim_opts += " -profile "

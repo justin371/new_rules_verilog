@@ -218,7 +218,7 @@ def add_regression_arguments(parser):
                         default='single-socket',
                         choices=['single-socket', 'single-threaded', 'partial-socket', 'all-cores'],
                         help="The number of cores to be used for sim, used with --mce")
-    gregre.add_argument('--mce_split_max_size',
+    gregre.add_argument('--mce-split-max-size',
                         type=int,
                         default=500000,
                         help=("Size of spilt to be used for mce sim. "
