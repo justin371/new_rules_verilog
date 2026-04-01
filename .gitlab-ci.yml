@@ -23,6 +23,7 @@ default:
     - set -e
     - echo "Source the env"
     - source env.sh
+    - module list
   tags:
     - sh-grun
 
@@ -88,7 +89,7 @@ bazel_git_clean:
     - echo "Cleaning Bazel cache"
     - bazel clean --expunge
     - echo "Cleaning Git working tree"
-    - git clean -dxf
+    - /global/tools/freeware/git/2.33/bin/git clean -dxf
 
 yapf-bin-check:
   stage: build

@@ -17,6 +17,7 @@ runmod -t xrun -- \
     -mce_newperf \
     -mce_build_cpu_configuration {{ options.mce_build_cfg }} \
     -mce_build_thread_count {{ options.mce_build_count }} \
+    -mce_split_max_size {{ options.mce_split_max_size }} \
   {% endif -%}
   {% if xprop_cmd is not none -%}
     {{ xprop_cmd }} \

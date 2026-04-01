@@ -7,7 +7,7 @@ export TEST_TMPDIR=${SIMRESULTS}
 
 GLOBAL_TOOLS=/global/tools
 
-module load git/2.44
+module load git/2.33
 module load lsf/10.1
 module load bazel/7.5.0
 

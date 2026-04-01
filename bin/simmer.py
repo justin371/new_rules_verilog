@@ -614,6 +614,7 @@ class TestJob(Job):
             sim_opts += " -mce_parallel_probing 0 "
             sim_opts += " -mce_sim_cpu_configuration {} ".format(options.mce_sim_cfg)
             sim_opts += " -mce_sim_thread_count {} ".format(options.mce_sim_count)
+            sim_opts += " -mce_split_max_size {} ".format(self.rcfg.options.mce_split_max_size)
         if options.profile:
             sim_opts += " -profile "
 
