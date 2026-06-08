@@ -93,11 +93,10 @@ function testFunction {
     cd "$SIMRESULTS"
 
     # Enter the simulation working directory
+    mkdir -p "{{ sim_working_dir }}"
+    ln -snf "{{ job.vcomper.bazel_runfiles_main }}" "{{ sim_working_dir }}/bazel_runfiles_main"
+    cd "{{ sim_working_dir }}"
     echo "Current directory: $(pwd)"
-
-    # Create symlink to runfiles (useful for debug/manual runs)
-    ln -snf "{{ job.vcomper.bazel_runfiles_main }}" bazel_runfiles_main
-    cd bazel_runfiles_main
 
     # Execute any simulator-specific pre-commands
     {% for cmd in pre_sim_commands %}

@@ -64,6 +64,9 @@ Load rules into your `BUILD` files from [@rules_verilog//verilog:defs.bzl](veril
 
 - [verilog_test](docs/defs.md#verilog_test)
 
+### Migration Notes
+- [Simulator migration checklist](docs/simulator_migration_checklist.md)
+
 ## Caveats
 - The SVUnit package always adds svunit_pkg.sv to the compiler command line after the user flists.  Without compiler library discovery, user flists cannot include/import anything that depends on svunit_pkg.
     - To work around this ordering dependency, the project Bazel rules must create the verilog_rtl_lib using the module files as headers, and use a dummy .sv file as the top module.

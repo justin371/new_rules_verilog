@@ -1,0 +1,18 @@
+#!/usr/bin/bash
+# This is a template for the bazel verilog_dv_unit_test rule
+# It is not intended to be run stand-alone
+set -e
+
+{SIMULATOR_COMMAND} \
+    -sverilog \
+    -std=1800-2023 \
+    +libext+.sv+.svh+.v+.vams \
+    -timescale=1ns/1ps \
+    +define+TIMESCALE_STEP_FS=1000 \
+    +define+TIMESCALE_PREC_FS=1000 \
+    {DPI_LIBS} \
+    {DEFAULT_SIM_OPTS} \
+    {FLISTS} \
+    {SIM_ARGS} \
+    -R \
+    $@

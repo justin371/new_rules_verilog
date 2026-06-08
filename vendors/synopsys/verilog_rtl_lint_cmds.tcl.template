@@ -1,0 +1,10 @@
+# Default VCS lint options for verilog_rtl_lint_test.
+# Despite the historical file name, this is a VCS argument file rather than Tcl.
+-full64
+-sverilog
+-lca
+-notice
+{DEFINES}
+{FLISTS}
+-top {INST_TOP}
+-f {RULEFILE}

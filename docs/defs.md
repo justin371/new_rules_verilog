@@ -14,6 +14,26 @@ A DV Library.
     
     Creates a generated flist file from a list of source files.
     
+    Generated paths use Bazel short_path form so the flist is rooted at the
+    runfiles tree (for example `hw/...` and `external/...`). Hand-authored nested
+    filelists should prefer the same style and avoid `../` upward traversals.
+    
+    Recommended DPI usage is to keep SystemVerilog files in `srcs`/`in_flist` and
+    provide shared libraries through the `dpi` attribute, for example:
+
+```python
+cc_library(
+    name = "dpi",
+    srcs = glob(["*.c"]),
+)
+
+verilog_dv_library(
+    name = "pkg",
+    srcs = glob(["*.sv"]),
+    dpi = [":dpi"],
+)
+```
+    
 
 **ATTRIBUTES**
 
@@ -22,7 +42,7 @@ A DV Library.
 | :------------- | :------------- | :------------- | :------------- | :------------- |
 | <a id="verilog_dv_library-name"></a>name |  A unique name for this target.   | <a href="https://bazel.build/docs/build-ref.html#name">Name</a> | required |  |
 | <a id="verilog_dv_library-deps"></a>deps |  verilog_dv_library targets that this target is dependent on.   | <a href="https://bazel.build/docs/build-ref.html#labels">List of labels</a> | optional | [] |
-| <a id="verilog_dv_library-dpi"></a>dpi |  cc_libraries to link in through the DPI. Currently, cc_import is not supported for precompiled shared libraries.   | <a href="https://bazel.build/docs/build-ref.html#labels">List of labels</a> | optional | [] |
+| <a id="verilog_dv_library-dpi"></a>dpi |  cc_libraries to link in through the DPI. Currently, cc_import is not supported for precompiled shared libraries. Prefer placing shared libraries here rather than globbing `.so` files into `srcs`. Example: `cc_library(name = "dpi", srcs = glob(["*.c"]))` then `verilog_dv_library(name = "pkg", srcs = glob(["*.sv"]), dpi = [":dpi"])`.   | <a href="https://bazel.build/docs/build-ref.html#labels">List of labels</a> | optional | [] |
 | <a id="verilog_dv_library-in_flist"></a>in_flist |  Files to be placed directly in the generated flist. Best practice recommends 'pkg' and 'interface' files be declared here. If this attribute is empty (default), all srcs will put into the flist instead.   | <a href="https://bazel.build/docs/build-ref.html#labels">List of labels</a> | optional | [] |
 | <a id="verilog_dv_library-incdir"></a>incdir |  Generate a +incdir in generated flist for every file's directory declared in 'srcs' attribute.   | Boolean | optional | True |
 | <a id="verilog_dv_library-srcs"></a>srcs |  Systemverilog source files. Files are assumed to be \<code>included inside another file (e.g. the package file) and will not be placed on directly in the flist unless declared in the 'in_flist' attribute.   | <a href="https://bazel.build/docs/build-ref.html#labels">List of labels</a> | required |  |
@@ -34,7 +54,7 @@ A DV Library.
 
 <pre>
 verilog_dv_tb(<a href="#verilog_dv_tb-name">name</a>, <a href="#verilog_dv_tb-ccf">ccf</a>, <a href="#verilog_dv_tb-defines">defines</a>, <a href="#verilog_dv_tb-deps">deps</a>, <a href="#verilog_dv_tb-extra_compile_args">extra_compile_args</a>, <a href="#verilog_dv_tb-extra_runfiles">extra_runfiles</a>, <a href="#verilog_dv_tb-extra_runtime_args">extra_runtime_args</a>,
-              <a href="#verilog_dv_tb-shells">shells</a>, <a href="#verilog_dv_tb-warning_waivers">warning_waivers</a>)
+              <a href="#verilog_dv_tb-shells">shells</a>, <a href="#verilog_dv_tb-simulator">simulator</a>, <a href="#verilog_dv_tb-warning_waivers">warning_waivers</a>)
 </pre>
 
 A DV Testbench.
@@ -47,6 +67,10 @@ A DV Testbench.
     standalone executable bazel rule. It is intended to provide simmer (a
     higher level simulation spawning tool) hooks to execute the compile and
     subsequent simulations.
+
+    The compile and runtime filelists are generated according to the selected
+    simulator. The generated file names are `<name>_compile_args.f` and
+    `<name>_runtime_args.f`.
     
 
 **ATTRIBUTES**
@@ -58,10 +82,11 @@ A DV Testbench.
 | <a id="verilog_dv_tb-ccf"></a>ccf |  Coverage configuration file to provider to simmer.   | <a href="https://bazel.build/docs/build-ref.html#labels">List of labels</a> | optional | [] |
 | <a id="verilog_dv_tb-defines"></a>defines |  Additional preprocessor defines to throw for this testbench compile. Key, value pairs are joined without additional characters. If it is a unary flag, set the value portion to be the empty string. For binary flags, add an '=' as a suffix to the key.   | <a href="https://bazel.build/docs/skylark/lib/dict.html">Dictionary: String -> String</a> | optional | {} |
 | <a id="verilog_dv_tb-deps"></a>deps |  A list of verilog_dv_library or verilog_rtl_library labels that the testbench is dependent on. Dependency ordering within this label list is not necessary if dependencies are consistently declared in all other rules.   | <a href="https://bazel.build/docs/build-ref.html#labels">List of labels</a> | required |  |
-| <a id="verilog_dv_tb-extra_compile_args"></a>extra_compile_args |  Additional flags to pass to the compiler.   | List of strings | optional | [] |
+| <a id="verilog_dv_tb-extra_compile_args"></a>extra_compile_args |  Additional flags to pass to the Xcelium compile/elaboration step.   | List of strings | optional | [] |
 | <a id="verilog_dv_tb-extra_runfiles"></a>extra_runfiles |  Additional files that need to be passed as runfiles to bazel. Most commonly used for files referred to by extra_compile_args or extra_runtime_args.   | <a href="https://bazel.build/docs/build-ref.html#labels">List of labels</a> | optional | [] |
-| <a id="verilog_dv_tb-extra_runtime_args"></a>extra_runtime_args |  Additional flags to throw to simulation run. These flags will not be provided to the compilation, but will be passed to subsequent simulation invocations.   | List of strings | optional | [] |
+| <a id="verilog_dv_tb-extra_runtime_args"></a>extra_runtime_args |  Additional flags to pass to Xcelium simulation runs. These flags will not be provided to compilation.   | List of strings | optional | [] |
 | <a id="verilog_dv_tb-shells"></a>shells |  List of shells to use. Each label must be a verilog_rtl_shell instance. Each shell thrown will create two defines:  \<code>define gumi_{module} {module}_shell  \</code>define gumi_use_{module}_shell The shell module declaration must be guarded by the gumi_use_{module}_shell define:  \<code>ifdef gumi_use_{module}_shell     module {module}_shell(/*AUTOARGS*/);       ...     endmodule  \</code>endif   | <a href="https://bazel.build/docs/build-ref.html#labels">List of labels</a> | optional | [] |
+| <a id="verilog_dv_tb-simulator"></a>simulator |  Simulator to use for this DV testbench. Supported values are XRUN and VCS. The selected simulator determines which compile/runtime filelists are generated.   | String | optional | `"XRUN"` |
 | <a id="verilog_dv_tb-warning_waivers"></a>warning_waivers |  Waive warnings in the compile. By default, simmer promotes all compile warnings to errors. This list is converted to python regular expressions which are imported by simmer to waive warning. All warnings may be waived by using '\*W'   | List of strings | optional | [] |
 
 
@@ -70,7 +95,7 @@ A DV Testbench.
 ## verilog_dv_test_cfg
 
 <pre>
-verilog_dv_test_cfg(<a href="#verilog_dv_test_cfg-name">name</a>, <a href="#verilog_dv_test_cfg-abstract">abstract</a>, <a href="#verilog_dv_test_cfg-inherits">inherits</a>, <a href="#verilog_dv_test_cfg-no_run">no_run</a>, <a href="#verilog_dv_test_cfg-sim_opts">sim_opts</a>, <a href="#verilog_dv_test_cfg-sockets">sockets</a>, <a href="#verilog_dv_test_cfg-tb">tb</a>, <a href="#verilog_dv_test_cfg-timeout">timeout</a>, <a href="#verilog_dv_test_cfg-uvm_testname">uvm_testname</a>, <a href="#verilog_dv_test_cfg-description">description</a>)
+verilog_dv_test_cfg(<a href="#verilog_dv_test_cfg-name">name</a>, <a href="#verilog_dv_test_cfg-abstract">abstract</a>, <a href="#verilog_dv_test_cfg-inherits">inherits</a>, <a href="#verilog_dv_test_cfg-no_run">no_run</a>, <a href="#verilog_dv_test_cfg-sim_opts">sim_opts</a>, <a href="#verilog_dv_test_cfg-simulator">simulator</a>, <a href="#verilog_dv_test_cfg-sockets">sockets</a>, <a href="#verilog_dv_test_cfg-tb">tb</a>, <a href="#verilog_dv_test_cfg-timeout">timeout</a>, <a href="#verilog_dv_test_cfg-uvm_testname">uvm_testname</a>, <a href="#verilog_dv_test_cfg-description">description</a>)
 </pre>
 
 A DV test configuration.
@@ -89,6 +114,7 @@ A DV test configuration.
 | <a id="verilog_dv_test_cfg-inherits"></a>inherits |  Inherit configurations from other verilog_dv_test_cfg targets. Entries later in the list will override arguments set by previous inherits entries. Only attributes noted as inheritable in documentation may be inherited. Any field explicitly set in this rule will override values set via inheritance.   | <a href="https://bazel.build/docs/build-ref.html#labels">List of labels</a> | optional | [] |
 | <a id="verilog_dv_test_cfg-no_run"></a>no_run |  Set to True to skip running this test. This flag is not used by bazel but is used as a query filter by simmer.TODO: Deprecate this flag in favor of using built-in tags.   | Boolean | optional | False |
 | <a id="verilog_dv_test_cfg-sim_opts"></a>sim_opts |  Additional simulation options. These are 'runtime' arguments. Preprocessor or compiler directives will not take effect. The (key, value) pairs are joined without additional characters.For unary arguments (e.g. +DISABLE_SCOREBOARD), set the value to be the empty string. For arguments with a value (e.g. +UVM_VERBOSITY=UVM_MEDIUM), add an '=' as a suffix to the key. This attribute is inheritable. See 'inherits' attribute. Unlike other inheritable attributes, values in sim_opts are not entirely overridden. Instead, the dictionary is 'updated' with new values at each successive level. This allows for the override of individual simopts for finer-grained control.   | <a href="https://bazel.build/docs/skylark/lib/dict.html">Dictionary: String -> String</a> | optional | {} |
+| <a id="verilog_dv_test_cfg-simulator"></a>simulator |  Simulator to use for this test configuration. Supported values are XRUN and VCS. This attribute is inheritable. If left unspecified, XRUN is used unless the selected tb already fixes the simulator. The resolved simulator must match the associated `verilog_dv_tb`.   | String | optional | `""` |
 | <a id="verilog_dv_test_cfg-sockets"></a>sockets |  Dictionary mapping of socket_name to socket_command. Simmer has the ability to spawn parallel processes to the primary simulation that are connected via sockets. For each entry in the dictionary, simmer will create a separate process and pass a unique temporary file path to both the simulator and the socket_command. The socket name is a short identifier that will be passed as "+SOCKET__&lt;socket_name&gt;=&lt;socket_file&gt;" to the simulator. The socket_file is a path to a unique temporary file in the simulation results directory created by simmer. The socket_command is a bash command that must contain a python string formatter of "{socket_file}". The socket_command will be run from the root of the project tree.   | <a href="https://bazel.build/docs/skylark/lib/dict.html">Dictionary: String -> String</a> | optional | {} |
 | <a id="verilog_dv_test_cfg-tb"></a>tb |  The testbench to run this test on. This label must be a 'verilog_dv_tb' target.This attribute is inheritable. See 'inherits' attribute. Future: Allow tb to be a list of labels to allow a test to run on multiple verilog_dv_tb   | <a href="https://bazel.build/docs/build-ref.html#labels">Label</a> | optional | None |
 | <a id="verilog_dv_test_cfg-timeout"></a>timeout |  Duration in minutes before the test will be killed due to timeout. This option is inheritable.   | Integer | optional | -1 |
@@ -101,7 +127,7 @@ A DV test configuration.
 ## verilog_dv_unit_test
 
 <pre>
-verilog_dv_unit_test(<a href="#verilog_dv_unit_test-name">name</a>, <a href="#verilog_dv_unit_test-default_sim_opts">default_sim_opts</a>, <a href="#verilog_dv_unit_test-deps">deps</a>, <a href="#verilog_dv_unit_test-sim_args">sim_args</a>, <a href="#verilog_dv_unit_test-ut_sim_template">ut_sim_template</a>)
+verilog_dv_unit_test(<a href="#verilog_dv_unit_test-name">name</a>, <a href="#verilog_dv_unit_test-default_sim_opts">default_sim_opts</a>, <a href="#verilog_dv_unit_test-deps">deps</a>, <a href="#verilog_dv_unit_test-sim_args">sim_args</a>, <a href="#verilog_dv_unit_test-simulator">simulator</a>, <a href="#verilog_dv_unit_test-ut_sim_template">ut_sim_template</a>)
 </pre>
 
 Compiles and runs a small unit test for DV.
@@ -120,10 +146,11 @@ Compiles and runs a small unit test for DV.
 | Name  | Description | Type | Mandatory | Default |
 | :------------- | :------------- | :------------- | :------------- | :------------- |
 | <a id="verilog_dv_unit_test-name"></a>name |  A unique name for this target.   | <a href="https://bazel.build/docs/build-ref.html#name">Name</a> | required |  |
-| <a id="verilog_dv_unit_test-default_sim_opts"></a>default_sim_opts |  Default simulator options to pass to the simulator.   | <a href="https://bazel.build/docs/build-ref.html#labels">Label</a> | optional | @rules_verilog//vendors/cadence:verilog_dv_default_sim_opts.f |
+| <a id="verilog_dv_unit_test-default_sim_opts"></a>default_sim_opts |  Default simulator options to pass to the simulator. When the default Cadence label is left in place and `simulator = "VCS"`, the rule automatically switches to the Synopsys default opts file.   | <a href="https://bazel.build/docs/build-ref.html#labels">Label</a> | optional | @rules_verilog//vendors/cadence:verilog_dv_unit_test_opts.f |
 | <a id="verilog_dv_unit_test-deps"></a>deps |  verilog_dv_library or verilog_rtl_library labels that the testbench is dependent on. Dependency ordering within this label list is not necessary if dependencies are consistently declared in all other rules.   | <a href="https://bazel.build/docs/build-ref.html#labels">List of labels</a> | required |  |
 | <a id="verilog_dv_unit_test-sim_args"></a>sim_args |  Additional arguments to pass on command line to the simulator. Both compile and runtime arguments are allowed because dv_unit_test runs as a single step flow.   | List of strings | optional | [] |
-| <a id="verilog_dv_unit_test-ut_sim_template"></a>ut_sim_template |  The template to generate the bash script to run the simulation.   | <a href="https://bazel.build/docs/build-ref.html#labels">Label</a> | optional | @rules_verilog//vendors/cadence:verilog_dv_unit_test.sh.template |
+| <a id="verilog_dv_unit_test-simulator"></a>simulator |  Simulator to use for this unit test. Supported values are XRUN and VCS. When left at the default Cadence template/opts, the rule auto-selects the matching Synopsys resources for VCS.   | String | optional | `"XRUN"` |
+| <a id="verilog_dv_unit_test-ut_sim_template"></a>ut_sim_template |  The template to generate the bash script to run the simulation. When the default Cadence label is left in place and `simulator = "VCS"`, the rule automatically switches to the Synopsys unit-test template.   | <a href="https://bazel.build/docs/build-ref.html#labels">Label</a> | optional | @rules_verilog//vendors/cadence:verilog_dv_unit_test.sh.template |
 
 
 <a id="verilog_rtl_cdc_test"></a>
@@ -192,7 +219,7 @@ A collection of RTL design files. Creates a generated flist file to be included 
 
 <pre>
 verilog_rtl_lint_test(<a href="#verilog_rtl_lint_test-name">name</a>, <a href="#verilog_rtl_lint_test-command_template">command_template</a>, <a href="#verilog_rtl_lint_test-defines">defines</a>, <a href="#verilog_rtl_lint_test-deps">deps</a>, <a href="#verilog_rtl_lint_test-design_info">design_info</a>, <a href="#verilog_rtl_lint_test-lint_parser">lint_parser</a>, <a href="#verilog_rtl_lint_test-rulefile">rulefile</a>,
-                      <a href="#verilog_rtl_lint_test-run_template">run_template</a>, <a href="#verilog_rtl_lint_test-shells">shells</a>, <a href="#verilog_rtl_lint_test-top">top</a>, <a href="#verilog_rtl_lint_test-waiver_direct">waiver_direct</a>)
+                      <a href="#verilog_rtl_lint_test-run_template">run_template</a>, <a href="#verilog_rtl_lint_test-shells">shells</a>, <a href="#verilog_rtl_lint_test-simulator">simulator</a>, <a href="#verilog_rtl_lint_test-top">top</a>, <a href="#verilog_rtl_lint_test-waiver_direct">waiver_direct</a>)
 </pre>
 
 Compile and run lint on target
@@ -201,6 +228,11 @@ Compile and run lint on target
     is not entirely generic. It also uses a log post-processor
     (passed in by the lint_parser attribute) to allow for easier waiving of warnings.
 
+    When `simulator = "VCS"`, the rule automatically switches to built-in
+    Synopsys defaults for the launcher, lint command file, parser, and default
+    rulefile. Projects may still override these assets if they need a more
+    opinionated local policy.
+
     The DUT must have no unwaived warning/errors in order for this rule to
     pass. The intended philosophy is for blocks to maintain a clean lint status
     throughout the lifecycle of the project, not to run lint as a checklist
@@ -208,8 +240,9 @@ Compile and run lint on target
 
     There are several attributes in this rule that must be kept in sync.
     run_template, rulefile, lint_parser, and command_template must use the associated
-    files for each vendor. The default values all point to the Cadence HAL versions.
-    If an instance of this rule overrides any values, they must override all four.
+    files for each vendor. The default values auto-select between the built-in
+    Cadence and Synopsys sets based on the simulator attribute. If an instance
+    overrides any of these vendor-specific values, it should override the full set.
 
     
 
@@ -223,10 +256,11 @@ Compile and run lint on target
 | <a id="verilog_rtl_lint_test-defines"></a>defines |  List of additional \<code>defines for this lint run. LINT is always defined by default If a define is only for control and has no value, e.g. \</code>define USE_AXI, the dictionary entry key should be "USE_AXI" and the value should be the empty string. If a define needs a value, e.g. \<code>define WIDTH 8, the dictionary value must start with '=', e.g. '=8'   | <a href="https://bazel.build/docs/skylark/lib/dict.html">Dictionary: String -> String</a> | optional | {} |
 | <a id="verilog_rtl_lint_test-deps"></a>deps |  Other verilog libraries this target is dependent upon. All Labels specified here must provide a VerilogInfo provider.   | <a href="https://bazel.build/docs/build-ref.html#labels">List of labels</a> | required |  |
 | <a id="verilog_rtl_lint_test-design_info"></a>design_info |  A Cadence design_info file to add additional lint rule/waivers   | <a href="https://bazel.build/docs/build-ref.html#labels">List of labels</a> | optional | [] |
-| <a id="verilog_rtl_lint_test-lint_parser"></a>lint_parser |  Post processor for lint logs allowing for easier waiving of warnings. Parsers for HAL and Ascent are included in rules_verilog release at @rules_verilog//lint_parser_(hal|ascent)   | <a href="https://bazel.build/docs/build-ref.html#labels">Label</a> | optional | @rules_verilog//:lint_parser_hal |
-| <a id="verilog_rtl_lint_test-rulefile"></a>rulefile |  The rules configuration file for this lint run. rules_verilog doesn't provide a reference rulefile, each project that uses rules_verilog must write their own tool-specific rulefile. Example HAL rulefile: https://github.com/freecores/t6507lp/blob/ca7d7ea779082900699310db459a544133fe258a/lint/run/hal.def   | <a href="https://bazel.build/docs/build-ref.html#labels">Label</a> | required |  |
+| <a id="verilog_rtl_lint_test-lint_parser"></a>lint_parser |  Post processor for lint logs allowing for easier waiving of warnings. Parsers for HAL, Ascent, and VCS are included in rules_verilog release at `@rules_verilog//bin:lint_parser_(hal|ascent|vcs)`. When left at the default HAL label and `simulator = "VCS"`, the rule automatically switches to the built-in VCS parser.   | <a href="https://bazel.build/docs/build-ref.html#labels">Label</a> | optional | @rules_verilog//:lint_parser_hal |
+| <a id="verilog_rtl_lint_test-rulefile"></a>rulefile |  The rules configuration file for this lint run. Each project may write its own tool-specific rulefile. When omitted and `simulator = "VCS"`, rules_verilog uses a built-in Synopsys default lint opts file. When `simulator = "XRUN"`, a project-specific Cadence/HAL rulefile is still required. Example HAL rulefile: https://github.com/freecores/t6507lp/blob/ca7d7ea779082900699310db459a544133fe258a/lint/run/hal.def   | <a href="https://bazel.build/docs/build-ref.html#labels">Label</a> | optional |  |
 | <a id="verilog_rtl_lint_test-run_template"></a>run_template |  The template to generate the script to run the lint test. The command templates are located at @rules_verilog//vendors/&lt;vendor name&gt;/verilog_rtl_lint_test.tcl.template   | <a href="https://bazel.build/docs/build-ref.html#labels">Label</a> | optional | @rules_verilog//vendors/cadence:verilog_rtl_lint_test.sh.template |
 | <a id="verilog_rtl_lint_test-shells"></a>shells |  List of verilog_rtl_shell Labels. For each Label, a gumi define will be placed on the command line to use this shell instead of the original module. This requires that the original module was instantiated using \<code>gumi_&lt;module_name&gt; instead of just &lt;module_name&gt;.   | <a href="https://bazel.build/docs/build-ref.html#labels">List of labels</a> | optional | [] |
+| <a id="verilog_rtl_lint_test-simulator"></a>simulator |  Simulator launcher to use for this lint test. XRUN uses the built-in Cadence defaults. VCS automatically switches to the built-in Synopsys launcher, lint command file, parser, and default rulefile.   | String | optional | `"XRUN"` |
 | <a id="verilog_rtl_lint_test-top"></a>top |  The name of the top-level module for this lint run   | String | required |  |
 | <a id="verilog_rtl_lint_test-waiver_direct"></a>waiver_direct |  Lint waiver python regex to apply directly to a lint message. This is sometimes needed to work around cases when HAL has formatting errors in xrun.log.xml that cause problems for the lint parser   | String | optional | "" |
 
@@ -237,7 +271,7 @@ Compile and run lint on target
 
 <pre>
 verilog_rtl_unit_test(<a href="#verilog_rtl_unit_test-name">name</a>, <a href="#verilog_rtl_unit_test-command_override">command_override</a>, <a href="#verilog_rtl_unit_test-data">data</a>, <a href="#verilog_rtl_unit_test-deps">deps</a>, <a href="#verilog_rtl_unit_test-post_flist_args">post_flist_args</a>, <a href="#verilog_rtl_unit_test-pre_flist_args">pre_flist_args</a>, <a href="#verilog_rtl_unit_test-shells">shells</a>,
-                      <a href="#verilog_rtl_unit_test-ut_sim_template">ut_sim_template</a>, <a href="#verilog_rtl_unit_test-ut_sim_waves_template">ut_sim_waves_template</a>, <a href="#verilog_rtl_unit_test-wave_viewer_command">wave_viewer_command</a>)
+                      <a href="#verilog_rtl_unit_test-simulator">simulator</a>, <a href="#verilog_rtl_unit_test-ut_sim_template">ut_sim_template</a>, <a href="#verilog_rtl_unit_test-ut_sim_waves_template">ut_sim_waves_template</a>, <a href="#verilog_rtl_unit_test-wave_viewer_command">wave_viewer_command</a>)
 </pre>
 
 Compile and simulate a verilog_rtl_library.
@@ -268,9 +302,10 @@ Compile and simulate a verilog_rtl_library.
 | <a id="verilog_rtl_unit_test-post_flist_args"></a>post_flist_args |  Additional command line arguments to be placed after the flist arguments See ut_sim_template attribute for exact layout.   | List of strings | optional | [] |
 | <a id="verilog_rtl_unit_test-pre_flist_args"></a>pre_flist_args |  Additional command line arguments to be placed after the simulator binary but before the flist arguments. See ut_sim_template attribute for exact layout.For defines to have effect, they must be declared in pre_flist_args not post_flist_args.   | List of strings | optional | [] |
 | <a id="verilog_rtl_unit_test-shells"></a>shells |  List of verilog_rtl_shell Labels. For each Label, a gumi define will be placed on the command line to use this shell instead of the original module. This requires that the original module was instantiated using \<code>gumi_&lt;module_name&gt; instead of just &lt;module_name&gt;.   | <a href="https://bazel.build/docs/build-ref.html#labels">List of labels</a> | optional | [] |
-| <a id="verilog_rtl_unit_test-ut_sim_template"></a>ut_sim_template |  The template to generate the script to run the test. Also available is a [SVUnit](http://agilesoc.com/open-source-projects/svunit/) test template: @rules_verilog//vendors/cadence:verilog_rtl_unit_test_svunit.sh.template If using the SVUnit template, you may also want to throw: <pre><code>    post_flist_args = [     "--directory &lt;path_to_test_directory_from_workspace&gt;",  ],</code></pre>   | <a href="https://bazel.build/docs/build-ref.html#labels">Label</a> | optional | @rules_verilog//vendors/cadence:verilog_rtl_unit_test.sh.template |
-| <a id="verilog_rtl_unit_test-ut_sim_waves_template"></a>ut_sim_waves_template |  The template to generate the waves command script to run in the test. When using the SVUnit ut_sim_template or a custom SVUnit invocation, the default verilog_rtl_unit_test_waves.tcl.template will not work. You must either write your own waves script or use the SVUnit waves template: @rules_verilog//vendors/cadence:verilog_rtl_unit_test_svunit_waves.tcl.template   | <a href="https://bazel.build/docs/build-ref.html#labels">Label</a> | optional | @rules_verilog//vendors/cadence:verilog_rtl_unit_test_waves.tcl.template |
-| <a id="verilog_rtl_unit_test-wave_viewer_command"></a>wave_viewer_command |  Allows custom override of waveform viewer command in the event of wrapping via modulefiles. Example override in project's .bazelrc:   build --@rules_verilog//:verilog_rtl_wave_viewer_command="runmod xrun --"   | <a href="https://bazel.build/docs/build-ref.html#labels">Label</a> | optional | @rules_verilog//:verilog_rtl_wave_viewer_command |
+| <a id="verilog_rtl_unit_test-simulator"></a>simulator |  Simulator to use for this RTL unit test. Supported values are XRUN and VCS. When the default Cadence command/template/viewer labels are left in place, the rule auto-selects the matching Synopsys resources for VCS.   | String | optional | `"XRUN"` |
+| <a id="verilog_rtl_unit_test-ut_sim_template"></a>ut_sim_template |  The template to generate the script to run the test. Also available is a [SVUnit](http://agilesoc.com/open-source-projects/svunit/) test template: @rules_verilog//vendors/cadence:verilog_rtl_unit_test_svunit.sh.template If using the SVUnit template, you may also want to throw: <pre><code>    post_flist_args = [     "--directory &lt;path_to_test_directory_from_workspace&gt;",  ],</code></pre> When the default Cadence label is left in place and `simulator = "VCS"`, the rule automatically switches to the Synopsys unit-test template.   | <a href="https://bazel.build/docs/build-ref.html#labels">Label</a> | optional | @rules_verilog//vendors/cadence:verilog_rtl_unit_test.sh.template |
+| <a id="verilog_rtl_unit_test-ut_sim_waves_template"></a>ut_sim_waves_template |  The template to generate the waves command script to run in the test. When using the SVUnit ut_sim_template or a custom SVUnit invocation, the default verilog_rtl_unit_test_waves.tcl.template will not work. You must either write your own waves script or use the SVUnit waves template: @rules_verilog//vendors/cadence:verilog_rtl_unit_test_svunit_waves.tcl.template. When the default Cadence label is left in place and `simulator = "VCS"`, the rule automatically switches to the Synopsys waves template.   | <a href="https://bazel.build/docs/build-ref.html#labels">Label</a> | optional | @rules_verilog//vendors/cadence:verilog_rtl_unit_test_waves.tcl.template |
+| <a id="verilog_rtl_unit_test-wave_viewer_command"></a>wave_viewer_command |  Allows custom override of waveform viewer command in the event of wrapping via modulefiles. Example override in project's .bazelrc:   build --@rules_verilog//:verilog_rtl_wave_viewer_command="runmod xrun --" When the default label is left in place and `simulator = "VCS"`, the rule automatically switches to the Verdi wrapper command.   | <a href="https://bazel.build/docs/build-ref.html#labels">Label</a> | optional | @rules_verilog//:verilog_rtl_wave_viewer_command |
 
 
 <a id="verilog_test"></a>
@@ -368,5 +403,3 @@ limited functionality. Frequent uses include:
 | <a id="verilog_rtl_shell-module_to_shell_name"></a>module_to_shell_name |  The name of the module that will be replaced.<br><br>When a downstream test uses this 'shell', a gumi define will be created using this name.<br><br>When a shell needs to be hand-edited after generation If module_to_shell_name == 'custom', then all rules regarding shells are ignored and gumi shell defines are not thrown, allowing the user great power.   |  none |
 | <a id="verilog_rtl_shell-shell_module_label"></a>shell_module_label |  The Label or file containing the shell.<br><br>See verilog_rtl_library::no_synth.   |  none |
 | <a id="verilog_rtl_shell-deps"></a>deps |  Other packages this target is dependent on.<br><br>In general. shells should avoid having dependencies. Exceptions include necessary packages and possible a DV model to implement functional behavior.<br><br>See verilog_rtl_library::deps.   |  <code>[]</code> |
-
-

@@ -2,11 +2,21 @@
 
 cd {{ bazel_runfiles_main }} && \
 
-runmod -t vcs -- \
+runmod vcs -- vcs \
   -full64 \
   -Mdir={{ VCOMP_DIR }}/csrc \
   -Mlib={{ VCOMP_DIR }}/csrc \
   -p1800_macro_expansion \
+  {% if options.fgp is not none -%}
+    -fgp \
+  {% endif -%}
+  {% if options.vcs_profile -%}
+    -pcmakeprof -reportstats \
+  {% endif -%}
+  {% if options.dtl -%}
+    -dir={{ VCOMP_DIR }}/dtl_static \
+    -enable_dynamic_tb \
+  {% endif -%}
 
   {% if options.compile_args_file -%}
     -file {{ options.compile_args_file }} \
@@ -16,31 +26,28 @@ runmod -t vcs -- \
   {% for define in additional_defines -%}
     +define+{{ define }} \
   {% endfor -%}
-  {% if enable_debug_access == 0 -%}
+  {% if debug_mode == "default" -%}
     -debug_access+f \
   {% endif -%}
-  {% if enable_debug_access == 1 -%}
-    -kdb \
+  {% if debug_mode == "waves" -%}
+    {% if options.dtl -%}
+      -kdb=common_elab \
+    {% else -%}
+      -kdb \
+    {% endif -%}
     -debug_access+all+designer+simctrl \
     +define+UVM_VERDI_COMPWAVE \
   {% endif -%}
-  {% if enable_debug_access == 2 -%}
-    +fsmdebug \
-    -uvmlinedebug \
-    -debug_access+reverse \
+  {% if debug_mode == "gui" -%}
+    -kdb \
+    -debug_access+all+reverse \
   {% endif -%}
-  {% if cov_opts is not none -%}
+  {% if xprop_cmd -%}
+    {{ xprop_cmd }} \
+  {% endif -%}
+  {% if cov_opts -%}
     {{ cov_opts }} \
   {% endif -%}
-  {% if enable_cdnvip == 1 -%}
-	  -LDFLAGS -Wl,-E \
-	  +define+DENALI_UVM +define+DENALI_SV_VCS -CFLAGS \'-DVCS=1\' \
-    '${DENALI}'/ddvapi/sv/denaliMemSvIf.c \
-    -CFLAGS \'-DVCS -DDENALI_SV_VCS=1 -I../ -I/usr/local/include -I'${DENALI}' -I'${DENALI}'/ddvapi -O2 -c\' \
-	  -LDFLAGS \'-rdynamic '${DENALI}'/verilog/libcdnsv.so\' \
-	  -LDFLAGS \'-rdynamic '${DENALI}'/lib/libviputil.so\' \
-    -XVpiCbAutoRelease=libcdnsv.so \
-    -P '${DENALI}'/verilog/cdnsv.tab \
-  {% endif -%}
+  -sml \
   -l {{ VCOMP_DIR }}/cmp.log \
   -o {{ VCOMP_DIR }}/simv

@@ -1,0 +1,9 @@
+#!/usr/bin/env bash
+
+# Merge the coverage database produced by VCS -cm_dir.
+urg -full64 -dir "{{ cov_db_path }}" -dbname "{{ merged_db_path }}" -flex_merge union -report "{{ report_dir }}"
+
+# Launch Verdi for the merged database.
+echo "To view merged coverage: runmod vcs -- verdi -cov -covdir {{ merged_db_path }}"
+# Or launch Verdi for the unmerged simulation database.
+echo "To view unmerged coverage: runmod vcs -- verdi -cov -covdir {{ cov_db_path }}"

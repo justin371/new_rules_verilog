@@ -2,6 +2,7 @@
 -V
 -notice
 -sverilog
+-std=1800-2023
 -DVCS
 -ntb_opts uvm-1.2
 -lca
@@ -10,18 +11,14 @@
 +libext+.sv+.svh+.v+.vh+.vams+.vp+.svp
 +systemverilogext+.sv+.svh
 
-+vcs+flush+log
-
 # Enable the IEEE Std. 1800-2012 compliant SVA features
 -assert svaext
 # Enable the checker endchecker' construct
 -assert checker
 
--timescale=1ps/1ps
+-timescale=1ns/1ps
 
--pcmakeprof -reportstats
 -partcomp=adaptive_sched -fastpartcomp=j4
--fgp
 -Mupdate
 
 # Support MDA of interface/module instances and interface ports
@@ -53,7 +50,7 @@
 # Support varible-size arrays in the right side of continuous assignment and force statement
 -xlrm dyn_types_in_ca
 
-+lint=PCWM-L,TFIPC-L,PCWM
++lint=PCWM,TFIPC-L
 
 # Turn on warnings for non-void functions called with return values ignored
 +warn=SV-NFIVC

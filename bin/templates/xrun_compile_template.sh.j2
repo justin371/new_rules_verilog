@@ -9,9 +9,6 @@ runmod -t xrun -- \
   {% for define in additional_defines -%}
     -define {{ define }} \
   {% endfor -%}
-  {% if options.xprof -%}
-    -xprof \
-  {% endif -%}
   {% if options.mce -%}
     -mce \
     -mce_newperf \
@@ -23,14 +20,8 @@ runmod -t xrun -- \
     {{ xprop_cmd }} \
   {% endif -%}
 
-  {% if enable_debug_access > 0 -%}
+  {% if debug_mode in ["waves", "gui"] -%}
     -debug_opts verisium_pp \
-  {% endif -%}
-  {% if enable_debug_access > 1 -%}
-    -debug_opts verisium_interactive \
-    -linedebug \
-    -uvmlinedebug \
-    -ext_src_info \
   {% endif -%}
 
   {% if cov_opts is not none -%}

@@ -1,16 +1,23 @@
+# vim: set ft=bzl :
 load("@rules_verilog//verilog:defs.bzl", "verilog_dv_library", "verilog_dv_unit_test", "verilog_rtl_library")
-load("@rules_cc//cc:defs.bzl", "cc_library", "cc_test")
+load("@rules_cc//cc:defs.bzl", "cc_binary", "cc_library", "cc_test")
 
 cc_library(
-    name = "dpi_c",
+    name = "dpi_c_lib",
     srcs = ["dpi.c"],
     hdrs = ["dpi.h"],
+)
+
+cc_binary(
+    name = "dpi_c",
+    deps = [":dpi_c_lib"],
+    linkshared = True,
 )
 
 cc_test(
     name = "dpi_c_test",
     srcs = ["dpi_test.c"],
-    deps = [":dpi_c"],
+    deps = [":dpi_c_lib"],
 )
 
 verilog_dv_library(

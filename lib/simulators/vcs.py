@@ -1,6 +1,5 @@
 # lib/simulators/vcs.py
 import os
-import re
 import stat
 import logging
 
@@ -11,6 +10,16 @@ log = logging.getLogger(__name__)
 
 class VcsSimulator(SimulatorInterface):
     """Implementation for Synopsys VCS simulator."""
+
+    VCS_XPROP_CONFIG_BY_MODE = {
+        'F': ['vcs_fox_xprop.cfg', 'fox_xprop.cfg'],
+        'C': ['vcs_cat_xprop.cfg', 'cat_xprop.cfg'],
+    }
+
+    VCS_XPROP_FALLBACK_BY_MODE = {
+        'F': '-xprop=xmerge',
+        'C': '-xprop=tmerge',
+    }
 
     def get_name(self):
         return "vcs"
@@ -23,15 +32,24 @@ class VcsSimulator(SimulatorInterface):
         return self.env.get_template('sim_template.sh.j2')
 
     def get_wave_cmd_template(self):
-        # Assuming a single wave template works, driven by options and sim type
-        # If needed, create vcs_wave_cmd_template.tcl.j2
-        return self.env.get_template('wave_cmd_template.tcl.j2') # Or specialized one
+        return self.env.get_template('vcs_wave_cmd_template.tcl.j2')
+
+    def get_wave_view_command(self, wave_file_path, job_dir=None):
+        cmd = 'runmod vcs -- verdi -apex -lca -ssf "{}"'.format(wave_file_path)
+        if job_dir is not None:
+            smartlog_path = os.path.join(job_dir, "stdout.log")
+            if os.path.exists(smartlog_path):
+                cmd += ' -smlog "{}"'.format(smartlog_path)
+        return cmd
 
     def get_bazel_compile_args_file(self, bazel_runfiles_main, relpath, bazel_target):
-        return os.path.join(bazel_runfiles_main, relpath, "{}_compile_args_vcs.f".format(bazel_target))
+        return os.path.join(bazel_runfiles_main, relpath, "{}_compile_args.f".format(bazel_target))
+
+    def get_vcomp_job_dir(self, default_job_dir):
+        return default_job_dir
 
     def get_bazel_runtime_args_file(self, bazel_runfiles_main, relpath, bazel_target):
-        return os.path.join(bazel_runfiles_main, relpath, "{}_runtime_args_vcs.f".format(bazel_target))
+        return os.path.join(bazel_runfiles_main, relpath, "{}_runtime_args.f".format(bazel_target))
 
     def generate_compile_options(self, vcomp_job):
         opts = {'cov_opts': '', 'xprop_cmd': None, 'additional_defines': []}
@@ -44,19 +62,37 @@ class VcsSimulator(SimulatorInterface):
             opts['cov_opts'] += ' -cm_dir {} '.format(vcomp_job.cov_work_dir)
             # Translate coverage level options if needed
             cm_level = self.options.cm
-            if 'A' in cm_level or 'U' in cm_level: # Assume 'A' or 'U' means all
+            if 'A' in cm_level:
                 cm_level = 'line+cond+fsm+tgl+assert+branch'
             opts['cov_opts'] += ' -cm {} '.format(cm_level)
+            if self.options.vcs_cm_line is not None:
+                opts['cov_opts'] += ' -cm_line {} '.format(self.options.vcs_cm_line)
+            if self.options.vcs_cm_report is not None:
+                opts['cov_opts'] += ' -cm_report {} '.format(self.options.vcs_cm_report)
+            if self.options.vcs_cm_hier is not None:
+                opts['cov_opts'] += ' -cm_hier {} '.format(self.options.vcs_cm_hier)
             self.setup_coverage_merge(vcomp_job) # Setup merge script
 
         # XPROP
-        if self.options.xprop and not (self.options.mce or self.options.msie or self.options.msie_prim
-                                       or self.options.msie_href):
-            xprop_file_path = os.path.join(vcomp_job.bench_dir, 'vcs_xprop.cfg')
-            if os.path.exists(xprop_file_path):
-                opts['xprop_cmd'] = "-xprop={}".format(xprop_file_path)
+        if self.options.xprop and not self.options.mce:
+            xprop_mode = self.options.xprop
+            xprop_cmds = []
+            xprop_cfg_path = self._find_vcs_xprop_config(vcomp_job.bench_dir, xprop_mode)
+            if xprop_cfg_path is not None:
+                xprop_cmds.append("-xprop={}".format(xprop_cfg_path))
             else:
-                log.warning(f"VCS XPROP file not found: {xprop_file_path}")
+                xprop_fallback = self.VCS_XPROP_FALLBACK_BY_MODE.get(xprop_mode)
+                if xprop_fallback is None:
+                    log.warning("Unsupported VCS XPROP mode '%s'; XPROP disabled.", xprop_mode)
+                else:
+                    xprop_cmds.append(xprop_fallback)
+
+            if xprop_cmds:
+                if self.options.vcs_xprop_flowctrl:
+                    xprop_cmds.append("-xprop=flowctrl")
+                if self.options.vcs_xprop_mmsopt:
+                    xprop_cmds.append("-xprop=mmsopt")
+                opts['xprop_cmd'] = " ".join(xprop_cmds)
 
         # Defines
         opts['additional_defines'].extend(additional_vcs_defines)
@@ -65,35 +101,91 @@ class VcsSimulator(SimulatorInterface):
 
         return opts
 
+    def _find_vcs_xprop_config(self, bench_dir, xprop_mode):
+        for cfg_name in self.VCS_XPROP_CONFIG_BY_MODE.get(xprop_mode, []):
+            cfg_path = os.path.join(bench_dir, cfg_name)
+            if os.path.exists(cfg_path):
+                return cfg_path
+
+        generic_cfg_path = os.path.join(bench_dir, 'vcs_xprop.cfg')
+        if os.path.exists(generic_cfg_path):
+            log.info(
+                "Using generic VCS XPROP config '%s'; merge mode is controlled inside the config file.",
+                generic_cfg_path,
+            )
+            return generic_cfg_path
+
+        return None
+
     def generate_sim_options(self, test_job, seed):
         sim_opts = ""
         sim_opts += " +ntb_random_seed=%0d " % seed
+        sim_opts += " -xlrm hier_inst_seed "
+        sim_opts += " -assert nopostproc "
+        if self.options.fgp is not None:
+            sim_opts += " -fgp=num_threads:{} ".format(self.options.fgp)
+        if self.options.vcs_xprop_banner:
+            sim_opts += " -xprop=banner "
+        if self.options.vcs_xprop_report:
+            sim_opts += " -report=xprop "
         test_job.test_name_seed = "{}_seed_{}".format(test_job.name, seed) # Needed for VCS sim script template
 
         # Coverage
         if self.options.cm:
             # Translate coverage level options if needed
             cm_level = self.options.cm
-            if 'A' in cm_level or 'U' in cm_level:
+            if 'A' in cm_level:
                 cm_level = 'line+cond+fsm+tgl+assert+branch'
             sim_opts += ' -cm {} '.format(cm_level)
+            sim_opts += ' -cm_dir {} '.format(test_job.vcomper.cov_work_dir)
             sim_opts += ' -cm_name {}_sv{} '.format(test_job.name, seed)
-            # -cm_dir is compile-time only for VCS
-
-        # Waves
-        if self.options.waves is not None:
-            if self.options.wave_tcl:
-                if os.path.exists(self.options.wave_tcl):
-                    waves_tcl = self.options.wave_tcl
-                    log.info(f"Using user-provided wave Tcl: {waves_tcl}")
-                else:
-                    raise ValueError("{} not exists".format(self.options.wave_tcl))
-            else:
-                waves_tcl = os.path.join(test_job.job_dir, "waves.tcl") # Assumes wave tcl name is standard
-
-            sim_opts += " -ucli -do {} ".format(waves_tcl)
 
         return sim_opts
+
+    def get_wave_capture_options(self, test_job, wave_tcl_path):
+        wave_type = self.options.wave_type.lower()
+        waves_db = test_job.job_dir
+        default_capture = 'hdl_top'
+        sim_opts = ""
+
+        if self.options.wave_tcl:
+            if os.path.exists(self.options.wave_tcl):
+                wave_tcl_path = self.options.wave_tcl
+                log.info(f"Using user-provided wave Tcl: {wave_tcl_path}")
+            else:
+                raise ValueError("{} not exists".format(self.options.wave_tcl))
+
+        if wave_type == 'fsdb':
+            waves_db = os.path.join(waves_db, "waves.fsdb")
+        else:
+            raise ValueError("{} wave dumping is not supported for VCS".format(self.options.wave_type))
+
+        sim_opts += " -ucli -do {} ".format(wave_tcl_path)
+        return {
+            'sim_opts': sim_opts,
+            'wave_tcl_path': wave_tcl_path,
+            'waves_db': waves_db,
+            'default_capture': default_capture,
+        }
+
+    def get_no_wave_capture_options(self, test_job, nwaves_tcl_path):
+        if not self.options.gui:
+            return {
+                'sim_opts': "",
+                'tcl_commands': [],
+            }
+
+        tcl_commands = ["config reversedebug on", "run"]
+        return {
+            'sim_opts': " -ucli -do {} ".format(nwaves_tcl_path),
+            'tcl_commands': tcl_commands,
+        }
+
+    def get_wave_artifact_path(self, job_dir, wave_type):
+        wave_type = wave_type.lower()
+        if wave_type == 'fsdb':
+            return os.path.join(job_dir, 'waves.fsdb')
+        raise ValueError("{} wave dumping is not supported for VCS".format(wave_type))
 
     def setup_coverage_merge(self, vcomp_job):
         # Only create merge script if coverage was enabled
@@ -102,28 +194,22 @@ class VcsSimulator(SimulatorInterface):
 
         merge_sh = os.path.join(self.rcfg.regression_dir, "vcs_cov_merge.sh")
         merged_db_path = os.path.join(self.rcfg.regression_dir, "merged_cov.vdb")
-        report_dir = os.path.join(vcomp_job.cov_work_dir + ".vdb") # URG expects .vdb suffix on dir
+        report_dir = os.path.join(self.rcfg.regression_dir, "vcs_cov_report")
+        cov_db_path = "{}.vdb".format(vcomp_job.cov_work_dir)
+        merge_template = self.env.get_template('vcs_cov_merge_template.sh.j2')
 
         with open(merge_sh, 'w') as filep:
-            # Updated merge command using -input for multiple dirs
-            filep.write("".join([
-                "#!/usr/bin/env bash\n",
-                "# Merge individual simulation coverage databases\n",
-                "# Ensure the target directory exists\n",
-                f"mkdir -p {merged_db_path}\n",
-                "# Find all simulation coverage dirs (ending in .vdb) and merge them\n",
-                f"find {self.rcfg.regression_dir} -maxdepth 1 -type d -name '{vcomp_job.name}__*__*_seed_*.vdb' -print0 | xargs -0 urg -full64 -dir -dbname {merged_db_path} -flex_merge union -report {report_dir}/urgReport\n",
-                "# Alternative: Merge directly from the -cm_dir (may require post-processing)\n",
-                "# urg -full64 -dir {vcomp_job.cov_work_dir}.vdb -dbname {merged_db_path} ... \n",
-                "\n",
-                "# Launch Verdi for the merged database\n",
-                f"echo \"To view merged coverage: runmod vcs -- verdi -cov -covdir {merged_db_path}\"\n",
-                "# Or launch Verdi for the unmerged simulation databases (shows individual runs)\n",
-                f"echo \"To view unmerged coverage: runmod vcs -- verdi -cov -covdir {vcomp_job.cov_work_dir}.vdb\"\n",
-            ]))
+            filep.write(merge_template.render(
+                cov_db_path=cov_db_path,
+                merged_db_path=merged_db_path,
+                report_dir=report_dir,
+            ))
         st = os.stat(merge_sh)
         os.chmod(merge_sh, st.st_mode | stat.S_IEXEC)
         self.rcfg.deferred_messages.append("Merge/Launch VCS coverage with {}".format(merge_sh))
+
+    def run_report_coverage_merge(self, vcomp_jobs):
+        pass
 
     def get_log_parsing_info(self):
         # Adjust regex if VCS warnings look different, e.g., "^Warning:"
@@ -133,25 +219,32 @@ class VcsSimulator(SimulatorInterface):
         # Enable Verdi debug features along with DVE/Verdi GUI
         return " -gui=verdi +UVM_VERDI_TRACE=UVM_AWARE +UVM_CONFIG_TRACE +UVM_PHASE_TRACE +UVM_OBJECTION_TRACE +UVM_RESOURCE_DB_TRACE +UVM_LOG_TRACE "
 
+    def validate_reusable_compile_artifacts(self, vcomp_job):
+        simv_path = os.path.join(vcomp_job.job_dir, "simv")
+        if not os.path.exists(simv_path):
+            raise FileNotFoundError(
+                "VCS --no-compile requires an existing elaborated executable at '{}'".format(simv_path)
+            )
+
     # --- Method to implement for generating the simulation command ---
     def get_sim_command(self, test_job, sim_opts, vcomp_job_dir, log_path, user_args_list=None):
         """
         Constructs the full simulation command string for VCS, including logging.
         """
-        options = self.options
-        job = test_job
-
         # Base executable and common flags
-        base_exec = "runmod vcs --" # Assume runmod wrapper
+        base_exec = "runmod vcs --"
         simv_path = f"{vcomp_job_dir}/simv" # Path to compiled executable
 
-        # VCS uses -l for logging
+        # VCS smartlog is enabled by `-sml -l <logfile>`, which also generates
+        # the companion `<logfile>.sml` automatically.
+        smartlog_handling = "-sml"
         log_handling = f"-l {log_path}"
 
         # Combine parts
         cmd_parts = [
             base_exec,
             simv_path,
+            smartlog_handling,
             log_handling,
             sim_opts # Includes seed, coverage, waves, gui, uvm opts etc.
         ]
@@ -167,38 +260,11 @@ class VcsSimulator(SimulatorInterface):
         return full_command.strip()
 
     def get_sim_working_dir(self, test_job):
-        """VCS runs inside a temporary seed-specific subdirectory within runfiles main."""
-        if not hasattr(test_job, 'vcomper') or not hasattr(test_job.vcomper, 'bazel_runfiles_main'):
-            raise AttributeError(f"Missing vcomper or bazel_runfiles_main for test job {test_job.name}")
-        if not hasattr(test_job, 'test_name_seed') or not test_job.test_name_seed:
-            # This should have been set in generate_sim_options
-            raise AttributeError(f"Missing test_name_seed for VCS test job {test_job.name}")
-        # The working dir is the bazel runfiles main dir initially
-        # The pre-sim command will create the subdir, but the template needs the base dir
-        # Correction: The template cds into sim_working_dir first. So this should be the runfiles main.
-        # The pre/post commands handle the subdirectory relative to this.
-        # Let's try having the working dir be the runfiles main, and pre/post handle the subdir.
-        # return test_job.vcomper.bazel_runfiles_main
-
-        # --- Alternative: Define working dir as the sub-directory itself ---
-        # This might be cleaner if the template just needs to `cd` once.
-        return os.path.join(test_job.vcomper.bazel_runfiles_main, test_job.test_name_seed)
+        """Run each VCS simulation from its own test job directory."""
+        return test_job.job_dir
 
     def get_pre_sim_commands(self, test_job):
-        """Create the seed-specific subdirectory for VCS."""
-        if not hasattr(test_job, 'test_name_seed') or not test_job.test_name_seed:
-            raise AttributeError(f"Missing test_name_seed for VCS test job {test_job.name} in pre_sim_commands")
-        # Create the directory relative to the *parent* of sim_working_dir if using the Alternative above
-        # Or just create the absolute path if working dir is the subdir.
-        # Let's assume sim_working_dir *is* the final subdir based on the Alternative above.
-        # Use mkdir -p for safety (idempotent)
-        return [f"mkdir -p {self.get_sim_working_dir(test_job)}"] # Command creates the target dir
+        return []
 
     def get_post_sim_commands(self, test_job):
-        """Remove the seed-specific subdirectory after VCS simulation."""
-        if not hasattr(test_job, 'test_name_seed') or not test_job.test_name_seed:
-            log.warning(
-                f"Missing test_name_seed for VCS test job {test_job.name} in post_sim_commands, cannot clean up.")
-            return []
-        # Remove the directory defined by get_sim_working_dir
-        return [f"rm -rf {self.get_sim_working_dir(test_job)}"]
+        return []

@@ -1,3 +1,4 @@
+# vim: set ft=bzl :
 """Generic functions for gathering verilog files."""
 
 CUSTOM_SHELL = "custom"
@@ -9,7 +10,7 @@ This requires that the original module was instantiated using \\`gumi_<module_na
 VerilogInfo = provider(fields = {
     "transitive_sources": "All source source files needed by a target. This flow is not currently setup to do partioned compile, so all files need to be carried through to the final step for compilation as a whole.",
     "transitive_flists": "All flists which specify ordering of transitive sources.",
-    "transitive_dpi": "Shared libraries (only .so extension allowed) to link in via the DPI for testbenches.",
+    "transitive_dpi": "Shared libraries (.so/.dll/.dylib) to link in via the DPI for testbenches.",
     "last_module": "This is a convenience accessor. The last module specified is assumed be the top module in a design. This is frequently needed by downstream tools.",
 })
 
@@ -70,7 +71,16 @@ def get_transitive_srcs(srcs, deps, provider, attr_name, allow_other_outputs = F
         transitive = trans,
     )
 
-def flists_to_arguments(deps, provider, field, prefix, separator = "", tool_name=None):
+def _runfiles_relative_short_path(f):
+    short_path = f.short_path
+    if short_path.startswith("../"):
+        return "external/" + short_path[3:]
+    return short_path
+
+def flists_to_arguments(deps, provider, field, prefix, separator = "", tool_name = None, path_prefix = ""):
+    # Emit Bazel short_path entries so generated filelists stay rooted at the
+    # runfiles tree, e.g. hw/... and external/..., instead of machine-specific
+    # absolute paths or fragile ../ relative traversals.
     trans = []
     for dep in deps:
         if provider in dep:
@@ -83,25 +93,16 @@ def flists_to_arguments(deps, provider, field, prefix, separator = "", tool_name
     trans = trans_depset.to_list()
 
     if tool_name == "vcs":
-        #formatted_args = [
-        #    " {} ../{}".format(prefix, flist.short_path[:-3]) if flist.short_path.endswith(".so")
-        #    else " {} {}".format(prefix, flist.short_path)
-        #    for flist in trans
-        #]
         formatted_args = []
         for flist in trans:
-            if flist.path.endswith(".so"):
-                # flist.path = "bazel-out/k8-fastbuild/bin/external/dv_common/global/libwc_time_dpi.so"
-                # "external/dv_common/global/libwc_time_dpi" = flist.path[27:-3]
-                base_path_no_so = flist.path[27:-3]
-                arg = " {} {}".format(prefix, base_path_no_so)
-                #print("Desired base path for {}: {}".format(flist.short_path, base_path_no_so))
-                print("Desired base path for {}: {}".format(flist.path, base_path_no_so))
-                formatted_args.append(arg)
+            normalized_short_path = _runfiles_relative_short_path(flist)
+            if normalized_short_path.endswith(".so"):
+                formatted_args.append(" {} {}{}".format(prefix, path_prefix, normalized_short_path[:-3]))
+            else:
+                formatted_args.append(" {} {}{}".format(prefix, path_prefix, normalized_short_path))
     else:
-        formatted_args = [" {} {}".format(prefix, flist.short_path) for flist in trans]
+        formatted_args = [" {} {}{}".format(prefix, path_prefix, _runfiles_relative_short_path(flist)) for flist in trans]
 
-    #return separator.join([" {} {}".format(prefix, flist.short_path) for flist in trans])
     return separator.join(formatted_args)
 
 def _verilog_test_impl(ctx):

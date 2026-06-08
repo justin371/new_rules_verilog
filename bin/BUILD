@@ -1,3 +1,4 @@
+# vim: set ft=bzl :
 load("@rules_python//python:defs.bzl", "py_binary")
 
 package(default_visibility = ["//visibility:public"])
@@ -15,6 +16,12 @@ py_binary(
 )
 
 py_binary(
+    name = "lint_parser_vcs",
+    srcs = ["lint_parser_vcs.py"],
+    deps = ["//lib:cmn_logging"],
+)
+
+py_binary(
     name = "simmer",
     srcs = ["simmer.py"],
     deps = [
@@ -25,6 +32,7 @@ py_binary(
         "//lib:parser_actions",
         "//lib:regression",
         "//lib:rv_utils",
+        "//lib:runtime_options",
         "//lib/simulators:simulators",
         "//lib:regression_report",
     ],
@@ -32,7 +40,14 @@ py_binary(
 
 py_binary(
     name = "args_parser",
-    srcs = ["args_parser.py"],
+    srcs = [
+        "args_parser.py",
+        "args_parse/__init__.py",
+        "args_parse/common.py",
+        "args_parse/parser.py",
+        "args_parse/vcs.py",
+        "args_parse/xcelium.py",
+    ],
     deps = ["//lib:parser_actions"],
 )
 
@@ -40,4 +55,9 @@ py_binary(
     name = "check_test",
     srcs = ["check_test.py"],
     deps = ["//lib:cmn_logging"],
+)
+
+py_binary(
+    name = "normalize_runfiles_flist",
+    srcs = ["normalize_runfiles_flist.py"],
 )

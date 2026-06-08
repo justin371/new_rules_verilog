@@ -5,16 +5,15 @@ set -e
 
 # --- Configuration (can be set here or passed as variables) ---
 BSUB_COMMAND_PATH="/global/tools/lsf/10.1/linux3.10-glibc2.17-x86_64/bin/bsub"
-# XRUN_BASE_COMMAND includes options common to all wave dump viewing
-XRUN_BASE_COMMAND="runmod xrun -- verisium -64bit"
 BSUB_OPTIONS="-I -q syn" # Common bsub options
 
 # --- Dynamic values passed from Python ---
 # job_dir (passed for informational purposes in the script)
 # wave_file_path
 # bazel_runfiles_dir
+# wave_view_command
 
-echo "Preparing to run xrun with wave file..."
+echo "Preparing to open wave file..."
 echo "Job directory: {{ job_dir }}"
 echo "Wave file: {{ wave_file_path }}"
 echo "Target run directory: {{ bazel_runfiles_dir }}"
@@ -29,15 +28,13 @@ fi
 echo "Changing directory to {{ bazel_runfiles_dir }}"
 cd "{{ bazel_runfiles_dir }}"
 
-# Construct the full command
-# Note: Quoting "{{ wave_file_path }}" is important for paths with spaces
-FULL_XRUN_COMMAND="${XRUN_BASE_COMMAND} -db \"{{ wave_file_path }}\""
+WAVE_VIEW_COMMAND='{{ wave_view_command }}'
 
 echo "Executing bsub command:"
-echo "${BSUB_COMMAND_PATH} ${BSUB_OPTIONS} ${FULL_XRUN_COMMAND}"
-${BSUB_COMMAND_PATH} ${BSUB_OPTIONS} ${FULL_XRUN_COMMAND} &
+echo "${BSUB_COMMAND_PATH} ${BSUB_OPTIONS} ${WAVE_VIEW_COMMAND}"
+eval "${BSUB_COMMAND_PATH} ${BSUB_OPTIONS} ${WAVE_VIEW_COMMAND}" &
 
 echo "Returning to previous directory."
 cd - > /dev/null # Suppress output of 'cd -'
 
-echo "Script finished. xrun submitted via bsub."
+echo "Script finished. Wave viewer submitted via bsub."

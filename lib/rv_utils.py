@@ -8,6 +8,7 @@ import re
 import json
 import shlex
 import jinja2
+import shutil
 import subprocess
 from typing import Dict, Optional, List
 from bs4 import BeautifulSoup
@@ -249,7 +250,7 @@ def get_report_header(rcfg):
     header = {}
 
     header['username'] = getpass.getuser()
-    header['simulator'] = rcfg.options.simulator
+    header['simulator'] = getattr(rcfg, 'simulator', rcfg.options.simulator)
     header['time'] = rcfg.current_time
     try:
         branch = subprocess.check_output(['git', 'rev-parse', '--abbrev-ref', 'HEAD'], text=True).strip()
@@ -304,7 +305,10 @@ def get_coverage_data(rcfg, vcomp_jobs):
             cmd = 'runmod xrun -- imc -exec {} -verbose'.format(os.path.join(job.cov_work_dir, "imc_report.tcl"))
             p = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, shell=True)
             p.wait()
-            assert p.returncode == 0
+            if p.returncode != 0:
+                stderr = p.stderr.read().decode('utf-8', errors='ignore')
+                rcfg.log.error("IMC report generation failed:\n%s", stderr)
+                continue
 
             result = subprocess.run(['grep', '-rl', dut_pattern, report_dir], capture_output=True, text=True)
             grep_files = result.stdout.splitlines()
@@ -346,18 +350,18 @@ def get_coverage_data(rcfg, vcomp_jobs):
 
             cc_filtered = {
                 k.split(' ')[0]: process_value(v)
-                for k, v in cov[vcomp_name]['cc'].items()
+                for k, v in cov[vcomp_name].get('cc', {}).items()
                 if 'Average' in k and 'CoverGroup' not in k
             }
             cf_filtered = {
                 k.split(' ')[0]: process_value(v)
-                for k, v in cov[vcomp_name]['cf'].items()
+                for k, v in cov[vcomp_name].get('cf', {}).items()
                 if k in ['Overall Average', 'Assertion Average', 'CoverGroup Average']
             }
             cov[vcomp_name]['cc'] = cc_filtered
             cov[vcomp_name]['cf'] = cf_filtered
 
-            subprocess.run(['rm', '-rf', report_dir])
+            shutil.rmtree(report_dir, ignore_errors=True)
 
     return cov
 

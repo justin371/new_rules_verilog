@@ -1,6 +1,8 @@
 #!/usr/bin/bash
 # This is a template for the bazel verilog_dv_unit_test rule
 # It is not intended to be run stand-alone
+set -e
+
 {SIMULATOR_COMMAND} \
     -libext .sv \
     -libext .svh \

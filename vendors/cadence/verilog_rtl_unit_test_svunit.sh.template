@@ -18,7 +18,7 @@ do
             launch_wave_viewer=1
             ;;
         *)
-            remaining_args+=($1)
+            remaining_args+=("$1")
             ;;    
     esac
     shift
@@ -58,7 +58,7 @@ fi
     {FLISTS} \
     $waves_render_cmd \
     {POST_FLIST_ARGS}
-    ${remaining_args[@]};
+    "${remaining_args[@]}";
 $waves_launch_cmd
 
 grep -q "\[testrunner\]: PASSED" run.log

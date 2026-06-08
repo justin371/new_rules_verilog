@@ -1,3 +1,4 @@
+# vim: set ft=bzl :
 # lib/simulators/BUILD
 package(default_visibility = ["//visibility:public"])
 
@@ -8,11 +9,11 @@ py_library(
 )
 
 py_library(
-    name = "xrun",
-    srcs = ["xrun.py"],
+    name = "xcelium",
+    srcs = ["xcelium.py"],
     deps = [
         ":base",
-        # Add deps needed by xrun.py, e.g., from project root if needed
+        # Add deps needed by xcelium.py, e.g., from project root if needed
         # "//lib:cmn_logging", # Example if needed, but likely not directly
     ],
 )
@@ -34,7 +35,7 @@ py_library(
     deps = [
         ":base",
         ":vcs",
-        ":xrun",
+        ":xcelium",
         # Add others
     ],
 )

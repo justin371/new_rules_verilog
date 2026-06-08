@@ -1,3 +1,4 @@
+# vim: set ft=bzl :
 load("@rules_verilog//verilog:defs.bzl", "verilog_rtl_library", "verilog_rtl_pkg", "verilog_rtl_unit_test")
 
 verilog_rtl_pkg(

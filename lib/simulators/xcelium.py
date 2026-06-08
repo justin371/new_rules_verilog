@@ -1,9 +1,11 @@
-# lib/simulators/xrun.py
+# lib/simulators/xcelium.py
 import os
 import sys
-import re
 import stat
+import glob
+import shutil
 import logging
+import subprocess
 
 from .base import SimulatorInterface
 
@@ -16,7 +18,7 @@ project_root_path = os.path.abspath(os.path.join(simulators_dir_path, os.pardir,
 sys.path.append(project_root_path) # Add project root to path if necessary
 
 
-class XrunSimulator(SimulatorInterface):
+class XceliumSimulator(SimulatorInterface):
     """Implementation for Cadence XRUN simulator (including EMU variant)."""
 
     def get_name(self):
@@ -55,19 +57,29 @@ class XrunSimulator(SimulatorInterface):
         return self.env.get_template('sim_template.sh.j2')
 
     def get_wave_cmd_template(self):
-        # Assuming a single wave template works, driven by options and sim type
-        # If needed, create xrun_wave_cmd_template.tcl.j2
-        return self.env.get_template('wave_cmd_template.tcl.j2') # Or specialized one
+        return self.env.get_template('xrun_wave_cmd_template.tcl.j2')
+
+    def get_wave_view_command(self, wave_file_path, job_dir=None):
+        return 'runmod xrun -- verisium -64bit -db "{}"'.format(wave_file_path)
 
     def get_bazel_compile_args_file(self, bazel_runfiles_main, relpath, bazel_target):
+        if self.options.msie_prim:
+            return os.path.join(self.options.proj_dir, relpath, "msie/{}_prim.f".format(bazel_target))
+        if self.options.msie_incr:
+            return os.path.join(self.options.proj_dir, relpath, "msie/{}_incr.f".format(bazel_target))
         # Handle EMU exception first
         if self.options.emulator == 'pldm_sa':
             return os.path.join(bazel_runfiles_main, relpath, "{}_compile_args".format(bazel_target))
         # Default XRUN/non-pldm_sa EMU
-        return os.path.join(bazel_runfiles_main, relpath, "{}_compile_args_xrun.f".format(bazel_target))
+        return os.path.join(bazel_runfiles_main, relpath, "{}_compile_args.f".format(bazel_target))
+
+    def get_vcomp_job_dir(self, default_job_dir):
+        if self.options.msie_prim:
+            return default_job_dir + "_PRIM"
+        return default_job_dir
 
     def get_bazel_runtime_args_file(self, bazel_runfiles_main, relpath, bazel_target):
-        return os.path.join(bazel_runfiles_main, relpath, "{}_runtime_args_xrun.f".format(bazel_target))
+        return os.path.join(bazel_runfiles_main, relpath, "{}_runtime_args.f".format(bazel_target))
 
     def generate_compile_options(self, vcomp_job):
         opts = {'cov_opts': '', 'xprop_cmd': None, 'additional_defines': []}
@@ -138,33 +150,6 @@ class XrunSimulator(SimulatorInterface):
             sim_opts += ' -covbaserun {} '.format(test_job.name)
             if 'A' in self.options.coverage or 'U' in self.options.coverage:
                 sim_opts += ' +SVFCOV=1 '
-        # Waves
-        if self.options.waves is not None:
-            if self.options.wave_tcl:
-                if os.path.exists(self.options.wave_tcl):
-                    waves_tcl = self.options.wave_tcl
-                    log.info(f"Using user-provided wave Tcl: {waves_tcl}")
-                else:
-                    raise ValueError("{} not exists".format(self.options.wave_tcl))
-            else:
-                waves_tcl = os.path.join(test_job.job_dir, "waves.tcl") # Assumes wave tcl name is standard
-
-            sim_opts += " -input {} ".format(waves_tcl)
-            if self.options.wave_type == 'shm':
-                sim_opts += ' -debug_opts verisium_pp '
-            elif self.options.wave_type == 'fsdb':
-                # Assuming VERDI_HOME is set correctly
-                verdi_pli = os.path.join(os.environ.get('VERDI_HOME', ''), 'share/PLI/IUS/LINUX64/boot',
-                                         'debpli.so:novas_pli_boot')
-                if os.path.exists(verdi_pli.split(':')[0]):
-                    sim_opts += " -loadpli1 {} ".format(verdi_pli)
-                    sim_opts += " +UVM_VERDI_TRACE=UVM_AWARE+HIER+RAL+TLM+COMPWAVE "
-                    sim_opts += " +fsdb+delta +fsdb+force +fsdb+functions +fsdb+struct=on "
-                    sim_opts += " +fsdb+parameter=on +fsdb+sva_status +fsdb+sva_success "
-                    sim_opts += " +fsdb+autoflush "
-                else:
-                    log.warning(f"Verdi PLI not found for FSDB: {verdi_pli}. FSDB dumping might fail.")
-            # Add other wave types if XRUN specific options are needed (VCD, EVCD)
         # MCE
         if self.options.mce:
             sim_opts += " -mce "
@@ -180,15 +165,78 @@ class XrunSimulator(SimulatorInterface):
 
         return sim_opts
 
+    def get_wave_capture_options(self, test_job, wave_tcl_path):
+        wave_type = self.options.wave_type.lower()
+        waves_db = test_job.job_dir
+        default_capture = 'hdl_top'
+        sim_opts = ""
+
+        if self.options.wave_tcl:
+            if os.path.exists(self.options.wave_tcl):
+                wave_tcl_path = self.options.wave_tcl
+                log.info(f"Using user-provided wave Tcl: {wave_tcl_path}")
+            else:
+                raise ValueError("{} not exists".format(self.options.wave_tcl))
+
+        if wave_type == 'shm':
+            waves_db = os.path.join(waves_db, "waves.shm")
+            sim_opts += ' -debug_opts verisium_pp '
+        elif wave_type == 'vwdb':
+            waves_db = os.path.join(waves_db, 'waves')
+            sim_opts += ' -debug_opts verisium_pp '
+        elif wave_type == 'vcd':
+            default_capture = 'hdl_top.dut'
+            waves_db = os.path.join(waves_db, "waves.vcd")
+        else:
+            raise ValueError("{} not allowed".format(self.options.wave_type))
+
+        sim_opts += " -input {} ".format(wave_tcl_path)
+        return {
+            'sim_opts': sim_opts,
+            'wave_tcl_path': wave_tcl_path,
+            'waves_db': waves_db,
+            'default_capture': default_capture,
+        }
+
+    def get_no_wave_capture_options(self, test_job, nwaves_tcl_path):
+        return {
+            'sim_opts': " -input {} ".format(nwaves_tcl_path),
+            'tcl_commands': ["run"],
+        }
+
+    def get_wave_artifact_path(self, job_dir, wave_type):
+        wave_type = wave_type.lower()
+        if wave_type == 'shm':
+            return os.path.join(job_dir, 'waves.shm')
+        if wave_type == 'vcd':
+            return os.path.join(job_dir, 'waves.vcd')
+        if wave_type == 'vwdb':
+            return os.path.join(job_dir, 'waves.db')
+        raise ValueError("Not allowed wave: {}".format(wave_type))
+
     def setup_coverage_merge(self, vcomp_job):
         # The merge script setup is already done within generate_compile_options for XRUN/IMC
         pass
+
+    def run_report_coverage_merge(self, vcomp_jobs):
+        if not self.options.coverage:
+            return
+        for vcomp in vcomp_jobs.values():
+            log.info("Before merge: Vcomp {}.".format(vcomp))
+            merge_exec_tcl = os.path.join(vcomp.cov_work_dir, "merge_exec.tcl")
+            result = subprocess.run(
+                ["runmod", "xrun", "--", "imc", "-exec", merge_exec_tcl, "-verbose"],
+                capture_output=True,
+                text=True,
+            )
+            if result.returncode != 0:
+                raise RuntimeError("XRUN coverage merge failed:\n{}\n{}".format(result.stdout, result.stderr))
 
     def get_log_parsing_info(self):
         return {'warning_regex': r"\*W.*"}
 
     def get_gui_command_options(self):
-        return " -gui -R " # -R makes it run automatically in GUI
+        raise ValueError("Xcelium supports batch mode only; --gui is allowed only with VCS")
 
     # --- Method to implement for generating the simulation command ---
     def get_sim_command(self, test_job, sim_opts, vcomp_job_dir, log_path, user_args_list=None):
@@ -268,11 +316,8 @@ class XrunSimulator(SimulatorInterface):
         return full_command.strip() # Return the complete command string
 
     def get_sim_working_dir(self, test_job):
-        """XRUN runs directly from the runfiles main directory."""
-        # Ensure vcomper and bazel_runfiles_main exist
-        if not hasattr(test_job, 'vcomper') or not hasattr(test_job.vcomper, 'bazel_runfiles_main'):
-            raise AttributeError(f"Missing vcomper or bazel_runfiles_main for test job {test_job.name}")
-        return test_job.vcomper.bazel_runfiles_main
+        """Run each XRUN simulation from its own test job directory."""
+        return test_job.job_dir
 
     def get_pre_sim_commands(self, test_job):
         """No specific pre-simulation commands needed for XRUN directory setup."""
@@ -281,3 +326,50 @@ class XrunSimulator(SimulatorInterface):
     def get_post_sim_commands(self, test_job):
         """No specific post-simulation commands needed for XRUN directory cleanup."""
         return []
+
+    def cleanup_shared_runtime_artifacts(self, vcomp_jobs):
+        # Only remove simulator scratch files created at the top level of the
+        # shared runfiles tree. Never recurse into mirrored source areas such as
+        # hw/, external/, odie/, testbench/, tests/, etc., because those
+        # directories contain real runfiles and generated filelists needed by
+        # the simulation flow.
+        cleanup_patterns = [
+            "xp_elab.log*",
+            "xmsim_*.err",
+            "xmsim_sigbus.*",
+            "ida_diagnostics.log",
+            "lwdgen.log",
+            "cdns_dump.log",
+            "environment.*",
+            "verisium_debug_logs",
+            "verisium_debug_logs_backup",
+            "waves.shm",
+        ]
+
+        cleaned_dirs = set()
+        for vcomp_job in vcomp_jobs.values():
+            runfiles_dir = getattr(vcomp_job, "bazel_runfiles_main", None)
+            if not runfiles_dir or runfiles_dir in cleaned_dirs or not os.path.isdir(runfiles_dir):
+                continue
+
+            removed_paths = []
+            for pattern in cleanup_patterns:
+                for path in glob.glob(os.path.join(runfiles_dir, pattern)):
+                    try:
+                        if os.path.isdir(path) and not os.path.islink(path):
+                            shutil.rmtree(path, ignore_errors=False)
+                        else:
+                            os.remove(path)
+                        removed_paths.append(os.path.basename(path))
+                    except FileNotFoundError:
+                        continue
+                    except OSError as exc:
+                        log.warning("Failed to remove XRUN shared runtime artifact %s: %s", path, exc)
+
+            if removed_paths:
+                log.info(
+                    "Cleaned %d XRUN shared runtime artifact(s) from %s",
+                    len(removed_paths),
+                    runfiles_dir,
+                )
+            cleaned_dirs.add(runfiles_dir)

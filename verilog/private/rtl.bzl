@@ -1,3 +1,4 @@
+# vim: set ft=bzl :
 """Rules to gather and compile RTL."""
 
 load(":verilog.bzl", "CUSTOM_SHELL", "ShellInfo", "ToolEncapsulationInfo", "VerilogInfo", "gather_shell_defines", "get_transitive_srcs")
@@ -5,6 +6,16 @@ load(":verilog.bzl", "CUSTOM_SHELL", "ShellInfo", "ToolEncapsulationInfo", "Veri
 _SHELLS_DOC = """List of verilog_rtl_shell Labels.
 For each Label, a gumi define will be placed on the command line to use this shell instead of the original module.
 This requires that the original module was instantiated using \\`gumi_<module_name> instead of just <module_name>."""
+
+def _resolve_unit_test_default_file(simulator, selected_file, xrun_default_file, vcs_default_file):
+    if simulator == "VCS" and selected_file.short_path == xrun_default_file.short_path:
+        return vcs_default_file
+    return selected_file
+
+def _resolve_label_default_file(simulator, selected_label, xrun_default_label, xrun_default_file, vcs_default_file):
+    if simulator == "VCS" and str(selected_label) == xrun_default_label:
+        return vcs_default_file
+    return xrun_default_file
 
 def create_flist_content(ctx, gumi_path, allow_library_discovery, no_synth = False, makelib = ""):
     """Create the content of a '.f' file.
@@ -363,9 +374,30 @@ def _verilog_rtl_unit_test_impl(ctx):
     else:
         post_fa = " \\"
 
+    simulator = ctx.attr.simulator
+    ut_sim_template = _resolve_unit_test_default_file(
+        simulator,
+        ctx.file.ut_sim_template,
+        ctx.file._ut_sim_template_xrun_default,
+        ctx.file._ut_sim_template_vcs_default,
+    )
+    ut_sim_waves_template = _resolve_unit_test_default_file(
+        simulator,
+        ctx.file.ut_sim_waves_template,
+        ctx.file._ut_sim_waves_template_xrun_default,
+        ctx.file._ut_sim_waves_template_vcs_default,
+    )
+    simulator_command = ctx.attr.command_override[ToolEncapsulationInfo].command
+    if simulator == "VCS" and str(ctx.attr.command_override.label) == "@rules_verilog//:verilog_rtl_unit_test_command":
+        simulator_command = ctx.attr._command_override_vcs[ToolEncapsulationInfo].command
+
+    wave_viewer_command = ctx.attr.wave_viewer_command[ToolEncapsulationInfo].command
+    if simulator == "VCS" and str(ctx.attr.wave_viewer_command.label) == "@rules_verilog//:verilog_rtl_wave_viewer_command":
+        wave_viewer_command = ctx.attr._wave_viewer_command_vcs[ToolEncapsulationInfo].command
+
     waves_cmd = ctx.actions.declare_file(ctx.label.name + "_waves.tcl")
     ctx.actions.expand_template(
-        template = ctx.file.ut_sim_waves_template,
+        template = ut_sim_waves_template,
         output = waves_cmd,
         substitutions = {
             "{TOP_BASE_NAME}": top_base_name,  # buildifier: disable=uninitialized
@@ -373,11 +405,11 @@ def _verilog_rtl_unit_test_impl(ctx):
     )
 
     ctx.actions.expand_template(
-        template = ctx.file.ut_sim_template,
+        template = ut_sim_template,
         output = ctx.outputs.executable,
         substitutions = {
-            "{SIMULATOR_COMMAND}": ctx.attr.command_override[ToolEncapsulationInfo].command,
-            "{WAVE_VIEWER_COMMAND}": ctx.attr.wave_viewer_command[ToolEncapsulationInfo].command,
+            "{SIMULATOR_COMMAND}": simulator_command,
+            "{WAVE_VIEWER_COMMAND}": wave_viewer_command,
             "{FLISTS}": " ".join(["-f {}".format(f.short_path) for f in flists_list]),
             "{TOP}": top,
             "{PRE_FLIST_ARGS}": "\n".join(pre_fa),
@@ -415,6 +447,11 @@ verilog_rtl_unit_test = rule(
             doc = "Other verilog libraries this target is dependent upon.\n" +
                   "All Labels specified here must provide a VerilogInfo provider.",
         ),
+        "simulator": attr.string(
+            default = "XRUN",
+            values = ["XRUN", "VCS"],
+            doc = "Simulator to use for this RTL unit test. XRUN uses Cadence defaults and VCS uses Synopsys defaults.\n",
+        ),
         "ut_sim_template": attr.label(
             allow_single_file = True,
             default = Label("@rules_verilog//vendors/cadence:verilog_rtl_unit_test.sh.template"),
@@ -425,7 +462,8 @@ verilog_rtl_unit_test = rule(
                   "    post_flist_args = [\n" +
                   "    \"--directory <path_to_test_directory_from_workspace>\",\n" +
                   " ]," +
-                  "```",
+                  "```\n" +
+                  "When left at the default Cadence label and simulator = VCS, the rule automatically switches to the Synopsys unit-test template.\n",
         ),
         "ut_sim_waves_template": attr.label(
             allow_single_file = True,
@@ -433,7 +471,8 @@ verilog_rtl_unit_test = rule(
             doc = "The template to generate the waves command script to run in the test.\n" +
                   "When using the SVUnit ut_sim_template or a custom SVUnit invocation, the default verilog_rtl_unit_test_waves.tcl.template will not work. " +
                   "You must either write your own waves script or use the SVUnit waves template: " +
-                  "@rules_verilog//vendors/cadence:verilog_rtl_unit_test_svunit_waves.tcl.template\n",
+                  "@rules_verilog//vendors/cadence:verilog_rtl_unit_test_svunit_waves.tcl.template\n" +
+                  "When left at the default Cadence label and simulator = VCS, the rule automatically switches to the Synopsys waves template.\n",
         ),
         "command_override": attr.label(
             default = Label("@rules_verilog//:verilog_rtl_unit_test_command"),
@@ -445,7 +484,32 @@ verilog_rtl_unit_test = rule(
             default = Label("@rules_verilog//:verilog_rtl_wave_viewer_command"),
             doc = "Allows custom override of waveform viewer command in the event of wrapping via modulefiles.\n" +
                   "Example override in project's .bazelrc:\n" +
-                  '  build --@rules_verilog//:verilog_rtl_wave_viewer_command="runmod xrun --"',
+                  '  build --@rules_verilog//:verilog_rtl_wave_viewer_command="runmod xrun --"\n' +
+                  "When left at the default label and simulator = VCS, the rule automatically switches to the Verdi wrapper command.\n",
+        ),
+        "_command_override_vcs": attr.label(
+            default = Label("@rules_verilog//:verilog_rtl_unit_test_command_vcs"),
+            doc = "Default command encapsulation for VCS rtl unit tests.",
+        ),
+        "_wave_viewer_command_vcs": attr.label(
+            default = Label("@rules_verilog//:verilog_rtl_wave_viewer_command_vcs"),
+            doc = "Default waveform viewer command encapsulation for VCS rtl unit tests.",
+        ),
+        "_ut_sim_template_xrun_default": attr.label(
+            default = Label("@rules_verilog//vendors/cadence:verilog_rtl_unit_test.sh.template"),
+            allow_single_file = True,
+        ),
+        "_ut_sim_template_vcs_default": attr.label(
+            default = Label("@rules_verilog//vendors/synopsys:verilog_rtl_unit_test.sh.template"),
+            allow_single_file = True,
+        ),
+        "_ut_sim_waves_template_xrun_default": attr.label(
+            default = Label("@rules_verilog//vendors/cadence:verilog_rtl_unit_test_waves.tcl.template"),
+            allow_single_file = True,
+        ),
+        "_ut_sim_waves_template_vcs_default": attr.label(
+            default = Label("@rules_verilog//vendors/synopsys:verilog_rtl_unit_test_waves.tcl.template"),
+            allow_single_file = True,
         ),
         "data": attr.label_list(
             allow_files = True,
@@ -468,6 +532,38 @@ verilog_rtl_unit_test = rule(
 )
 
 def _verilog_rtl_lint_test_impl(ctx):
+    simulator = ctx.attr.simulator
+    if simulator not in ["XRUN", "VCS"]:
+        fail("verilog_rtl_lint_test simulator must be one of ['XRUN', 'VCS'], got '{}'".format(simulator))
+    run_template = _resolve_unit_test_default_file(
+        simulator,
+        ctx.file.run_template,
+        ctx.file._run_template_xrun_default,
+        ctx.file._run_template_vcs_default,
+    )
+    command_template = _resolve_unit_test_default_file(
+        simulator,
+        ctx.file.command_template,
+        ctx.file._command_template_xrun_default,
+        ctx.file._command_template_vcs_default,
+    )
+    lint_parser = _resolve_label_default_file(
+        simulator,
+        ctx.attr.lint_parser.label,
+        "@rules_verilog//bin:lint_parser_hal",
+        ctx.files.lint_parser[0],
+        ctx.file._lint_parser_vcs_default,
+    )
+    rulefile = None
+    if len(ctx.files.rulefile) > 1:
+        fail("Only one rulefile allowed, but {} has several rulefiles".format(ctx.label))
+    if len(ctx.files.rulefile) == 1:
+        rulefile = ctx.files.rulefile[0]
+    elif simulator == "VCS":
+        rulefile = ctx.file._rulefile_vcs_default
+    else:
+        fail("verilog_rtl_lint_test {} requires rulefile when simulator = 'XRUN'".format(ctx.label))
+
     trans_flists = get_transitive_srcs([], ctx.attr.shells + ctx.attr.deps, VerilogInfo, "transitive_flists", allow_other_outputs = False)
 
     # This is a workaround for an issue with using -define in Ascent and will be removed once the Ascent issue is fixed
@@ -490,35 +586,36 @@ def _verilog_rtl_lint_test_impl(ctx):
     if top_path == "":
         fail("verilog_rtl_lint_test {} could not determine the top module from the target's dependencies".format(ctx.label()))
 
-    if len(ctx.files.rulefile) > 1:
-        fail("Only one rulefile allowed, but {} has several rulefiles".format(ctx.label))
-
     ctx.actions.expand_template(
-        template = ctx.file.command_template,
+        template = command_template,
         output = ctx.outputs.command_script,
         substitutions = {
-            "{RULEFILE}": "".join([f.short_path for f in ctx.files.rulefile]),
+            "{RULEFILE}": rulefile.short_path,
             "{DEFINES}": " ".join(defines),
             "{FLISTS}": " ".join(["-f {}".format(f.short_path) for f in trans_flists.to_list()]),
             "{TOP_PATH}": top_path,
             "{INST_TOP}": ctx.attr.top,
-            "{LINT_PARSER}": ctx.files.lint_parser[0].short_path,
+            "{LINT_PARSER}": lint_parser.short_path,
         },
     )
 
+    simulator_command = ctx.attr._command_override[ToolEncapsulationInfo].command
+    if simulator == "VCS":
+        simulator_command = ctx.attr._command_override_vcs[ToolEncapsulationInfo].command
+
     ctx.actions.expand_template(
-        template = ctx.file.run_template,
+        template = run_template,
         output = ctx.outputs.executable,
         substitutions = {
-            "{SIMULATOR_COMMAND}": ctx.attr._command_override[ToolEncapsulationInfo].command,
+            "{SIMULATOR_COMMAND}": simulator_command,
             "{COMMAND_SCRIPT}": ctx.outputs.command_script.short_path,
             "{DEFINES}": " ".join(defines),
             "{FLISTS}": " ".join(["-f {}".format(f.short_path) for f in trans_flists.to_list()]),
             "{TOP_PATH}": top_path,
             "{DESIGN_INFO}": " ".join(["{}".format(design_info.short_path) for design_info in ctx.files.design_info]),
-            "{RULEFILE}": "".join([f.short_path for f in ctx.files.rulefile]),
+            "{RULEFILE}": rulefile.short_path,
             "{INST_TOP}": ctx.attr.top,
-            "{LINT_PARSER}": ctx.files.lint_parser[0].short_path,
+            "{LINT_PARSER}": lint_parser.short_path,
             "{LINT_PARSER_LIB}": ctx.files._lint_parser_lib[0].dirname,
             "{WAIVER_DIRECT}": ctx.attr.waiver_direct,
         },
@@ -527,7 +624,7 @@ def _verilog_rtl_lint_test_impl(ctx):
     trans_flists = get_transitive_srcs([], ctx.attr.shells + ctx.attr.deps, VerilogInfo, "transitive_flists", allow_other_outputs = False)
     trans_srcs = get_transitive_srcs([], ctx.attr.shells + ctx.attr.deps, VerilogInfo, "transitive_sources", allow_other_outputs = True)
 
-    runfiles = ctx.runfiles(files = trans_srcs.to_list() + trans_flists.to_list() + ctx.files.design_info + ctx.files.rulefile + ctx.files.lint_parser + ctx.files._lint_parser_lib + [ctx.outputs.command_script])
+    runfiles = ctx.runfiles(files = trans_srcs.to_list() + trans_flists.to_list() + ctx.files.design_info + [rulefile, lint_parser] + ctx.files._lint_parser_lib + [ctx.outputs.command_script])
 
     return [
         DefaultInfo(runfiles = runfiles),
@@ -540,6 +637,11 @@ verilog_rtl_lint_test = rule(
     is not entirely generic. It also uses a log post-processor
     (passed in by the lint_parser attribute) to allow for easier waiving of warnings.
 
+    When `simulator = "VCS"`, the rule automatically switches to built-in
+    Synopsys defaults for the launcher, lint command file, parser, and default
+    rulefile. Projects may still override these assets if they need a more
+    opinionated local policy.
+
     The DUT must have no unwaived warning/errors in order for this rule to
     pass. The intended philosophy is for blocks to maintain a clean lint status
     throughout the lifecycle of the project, not to run lint as a checklist
@@ -547,8 +649,9 @@ verilog_rtl_lint_test = rule(
 
     There are several attributes in this rule that must be kept in sync.
     run_template, rulefile, lint_parser, and command_template must use the associated
-    files for each vendor. The default values all point to the Cadence HAL versions.
-    If an instance of this rule overrides any values, they must override all four.
+    files for each vendor. The default values auto-select between the built-in
+    Cadence and Synopsys sets based on the simulator attribute. If an instance
+    overrides any of these vendor-specific values, it should override the full set.
 
     """,
     implementation = _verilog_rtl_lint_test_impl,
@@ -557,6 +660,11 @@ verilog_rtl_lint_test = rule(
             mandatory = True,
             doc = "Other verilog libraries this target is dependent upon.\n" +
                   "All Labels specified here must provide a VerilogInfo provider.",
+        ),
+        "simulator": attr.string(
+            default = "XRUN",
+            values = ["XRUN", "VCS"],
+            doc = "Simulator launcher to use for this lint test. XRUN uses the built-in Cadence defaults. VCS automatically switches to the built-in Synopsys launcher, lint command file, parser, and default rulefile.\n",
         ),
         "run_template": attr.label(
             allow_single_file = True,
@@ -567,9 +675,10 @@ verilog_rtl_lint_test = rule(
         ),
         "rulefile": attr.label(
             allow_single_file = True,
-            mandatory = True,
             doc = "The rules configuration file for this lint run. rules_verilog doesn't provide a reference rulefile, " +
-                  "each project that uses rules_verilog must write their own tool-specific rulefile.\n" +
+                  "each project that uses rules_verilog may write their own tool-specific rulefile.\n" +
+                  "When omitted and simulator = VCS, rules_verilog uses a built-in Synopsys default lint opts file.\n" +
+                  "When simulator = XRUN, a project-specific Cadence/HAL rulefile is still required.\n" +
                   "Example HAL rulefile: https://github.com/freecores/t6507lp/blob/ca7d7ea779082900699310db459a544133fe258a/lint/run/hal.def",
         ),
         "shells": attr.label_list(
@@ -594,8 +703,9 @@ verilog_rtl_lint_test = rule(
             allow_files = True,
             default = "@rules_verilog//bin:lint_parser_hal",
             doc = "Post processor for lint logs allowing for easier waiving of warnings.\n" +
-                  "Parsers for HAL and Ascent are included in rules_verilog release at " +
-                  "@rules_verilog//lint_parser_(hal|ascent)",
+                  "Parsers for HAL, Ascent, and VCS are included in rules_verilog release at " +
+                  "@rules_verilog//bin:lint_parser_(hal|ascent|vcs)\n" +
+                  "When left at the default HAL label and simulator = VCS, the rule automatically switches to the built-in VCS parser.",
         ),
         "waiver_direct": attr.string(
             doc = "Lint waiver python regex to apply directly to a lint message. This is sometimes needed to work around cases when HAL has formatting errors in xrun.log.xml that cause problems for the lint parser",
@@ -612,6 +722,34 @@ verilog_rtl_lint_test = rule(
             doc = "Allows custom override of simulator command in the event of wrapping via modulefiles\n" +
                   "Example override in project's .bazelrc:\n" +
                   '  build --@rules_verilog//:verilog_rtl_lint_test_command="runmod -t xrun --"',
+        ),
+        "_command_override_vcs": attr.label(
+            default = Label("@rules_verilog//:verilog_rtl_lint_test_command_vcs"),
+            doc = "Default command encapsulation for VCS rtl lint tests.",
+        ),
+        "_run_template_xrun_default": attr.label(
+            default = Label("@rules_verilog//vendors/cadence:verilog_rtl_lint_test.sh.template"),
+            allow_single_file = True,
+        ),
+        "_run_template_vcs_default": attr.label(
+            default = Label("@rules_verilog//vendors/synopsys:verilog_rtl_lint_test.sh.template"),
+            allow_single_file = True,
+        ),
+        "_command_template_xrun_default": attr.label(
+            default = Label("@rules_verilog//vendors/cadence:verilog_rtl_lint_cmds.tcl.template"),
+            allow_single_file = True,
+        ),
+        "_command_template_vcs_default": attr.label(
+            default = Label("@rules_verilog//vendors/synopsys:verilog_rtl_lint_cmds.tcl.template"),
+            allow_single_file = True,
+        ),
+        "_lint_parser_vcs_default": attr.label(
+            allow_single_file = True,
+            default = "@rules_verilog//bin:lint_parser_vcs",
+        ),
+        "_rulefile_vcs_default": attr.label(
+            allow_single_file = True,
+            default = Label("@rules_verilog//vendors/synopsys:verilog_rtl_lint_default_opts.f"),
         ),
         "_lint_parser_lib": attr.label(
             allow_single_file = True,

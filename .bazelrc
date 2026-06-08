@@ -2,10 +2,10 @@
 test --action_env=HOME
 
 # Lightelligence Specific
-build --@rules_verilog//:verilog_dv_unit_test_command="runmod -t xrun --"
-build --@rules_verilog//:verilog_rtl_cdc_test_command="runmod -t jg --"
-build --@rules_verilog//:verilog_rtl_unit_test_command="runmod -t xrun --"
-build --@rules_verilog//:verilog_rtl_lint_test_command="runmod -t xrun --"
+build --//:verilog_dv_unit_test_command="runmod -t xrun --"
+build --//:verilog_rtl_cdc_test_command="runmod -t jg --"
+build --//:verilog_rtl_unit_test_command="runmod -t xrun --"
+build --//:verilog_rtl_lint_test_command="runmod -t xrun --"
 
 #If true, Bazel tries to load external repositories from the Bzlmod system before looking into the WORKSPACE file
 ## Enable Bzlmod for every Bazel command

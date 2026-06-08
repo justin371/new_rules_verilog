@@ -13,7 +13,7 @@ do
             use_gui=1
             ;;
         *)
-            remaining_args+=($1)
+            remaining_args+=("$1")
             ;;    
     esac
     shift
@@ -25,15 +25,15 @@ then
     no_gui_flag=""
 fi
 
-# The contents run by CDC_COMMAND need to be wrapped in double quotes to account for how JapserGold processes command line arguments
-# Without the double quotes, JapserGold doesn't treat all the command line arguments as a single unit. Instead it drops into a shell
+# The contents run by CDC_COMMAND need to be wrapped in double quotes to account for how JasperGold processes command line arguments.
+# Without the double quotes, JasperGold doesn't treat all the command line arguments as a single unit. Instead it drops into a shell
 # and doesn't run the specified commands.
 {CDC_COMMAND} \
     "-cdc \
     $no_gui_flag \
     -proj cdc_run \
     -define RULES_VERILOG_GUI $use_gui \
-    -license_remove_method off
+    -license_remove_method off \
     {PREAMBLE_CMDS} \
     {CMD_FILES} \
     {EPILOGUE_CMDS} \

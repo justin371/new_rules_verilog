@@ -4,6 +4,7 @@
 ################################################################################
 # standard lib imports
 import bisect
+import ast
 import datetime
 import enum
 import os
@@ -11,6 +12,8 @@ import signal
 import subprocess
 import threading
 import time
+
+from lib.runtime_options import normalize_test_runtime_options
 
 
 @enum.unique
@@ -107,6 +110,11 @@ class Job():
         self._dependencies = [] # Things this job is dependent on
         self._children = [] # Jobs that depend on this jop
 
+    @property
+    def execution_mode(self):
+        """Execution class used by the scheduler."""
+        return "exclusive"
+
     def __lt__(self, other):
         return self.priority < other.priority
 
@@ -190,13 +198,29 @@ class SubprocessJobRunner(JobRunner):
         kwargs = {'shell': True, 'preexec_fn': os.setsid}
 
         if self.job.suppress_output or self.job.rcfg.options.no_stdout:
-            self.stdout_fp = open(os.path.join(self.job.job_dir, "stdout.log"), 'w')
-            self.stderr_fp = open(os.path.join(self.job.job_dir, "stderr.log"), 'w')
+            self.stdout_log_path = self._get_stdout_capture_path()
+            self.stderr_log_path = os.path.join(self.job.job_dir, "stderr.log")
+            self.stdout_fp = open(self.stdout_log_path, 'w')
+            self.stderr_fp = open(self.stderr_log_path, 'w')
             kwargs['stdout'] = self.stdout_fp
             kwargs['stderr'] = self.stderr_fp
         self._start_time = datetime.datetime.now()
         self._p = subprocess.Popen(self.job.main_cmdline, **kwargs)
         self.log = job.log
+
+    def _get_stdout_capture_path(self):
+        """Avoid clobbering simulator-owned stdout.log files.
+
+        Test jobs can ask the simulator itself to write `stdout.log` via its own
+        logging switch (for example VCS `-l stdout.log`). In that case, keep the
+        subprocess wrapper output separate so the simulator log remains
+        authoritative.
+        """
+        simulator_log_path = getattr(self.job, "_log_path", None)
+        default_stdout_log_path = os.path.join(self.job.job_dir, "stdout.log")
+        if simulator_log_path == default_stdout_log_path:
+            return os.path.join(self.job.job_dir, "job_runner.stdout.log")
+        return default_stdout_log_path
 
     def check_for_done(self):
         if self.done:
@@ -220,9 +244,11 @@ class SubprocessJobRunner(JobRunner):
         if self.job.timeout > 0 and delta > datetime.timedelta(hours=self.job.timeout):
             self.log.error("%s  exceeded timeout value of %s (job will be killed)", self.job, self.job.timeout)
             os.killpg(os.getpgid(self._p.pid), signal.SIGTERM)
-            with open(os.path.join(self.job.job_dir, "stderr.log"), 'a') as filep:
+            stderr_log_path = getattr(self, "stderr_log_path", os.path.join(self.job.job_dir, "stderr.log"))
+            stdout_log_path = getattr(self, "stdout_log_path", os.path.join(self.job.job_dir, "stdout.log"))
+            with open(stderr_log_path, 'a') as filep:
                 filep.write("%%E- %s exceeded timeout value of %s (job will be killed)" % (self.job, self.job.timeout))
-            with open(os.path.join(self.job.job_dir, "stdout.log"), 'a') as filep:
+            with open(stdout_log_path, 'a') as filep:
                 filep.write("%%E- %s exceeded timeout value of %s (job will be killed)" % (self.job, self.job.timeout))
             return True
         return False
@@ -246,12 +272,12 @@ class SubprocessJobRunner(JobRunner):
 
 class JobManager():
     """Manages multiple concurrent jobs"""
+    POLL_SLEEP_SECONDS = 3
 
     def __init__(self, options, log):
         self.log = log
-        self.max_parallel = options['parallel_max']
-        self.sleep_interval = options['parallel_interval']
         self.idle_print_interval = datetime.timedelta(seconds=options['idle_print_seconds'])
+        self.active_job_limit = max(1, int(options.get('active_job_limit', 1)))
 
         self._quit_count = options['quit_count']
         self._error_count = 0
@@ -318,9 +344,9 @@ class JobManager():
                     self._last_done_or_idle_print = datetime.datetime.now()
                     self._print_state(self.log.info)
 
-                time.sleep(self.sleep_interval)
+                time.sleep(self.POLL_SLEEP_SECONDS)
             if not len(self._active):
-                time.sleep(self.sleep_interval)
+                time.sleep(self.POLL_SLEEP_SECONDS)
 
     def _move_children_to_skipped(self, job):
         for child in job._children:
@@ -365,21 +391,41 @@ class JobManager():
 
     def _move_ready_to_active(self):
         self._print_state(self.log.debug)
-
-        available_to_run = self.max_parallel - len(self._active)
-
         jobs_that_advanced_state = []
-        for i in range(available_to_run):
-            try:
-                job = self._ready[i]
-            except IndexError:
-                # We have more jobs available than todos
-                continue # Need to finish loop or final cleanup wont happen
-            job.pre_run()
-            self.log.debug("%s priority: %d", job, job.priority)
-            self.job_lib_type(job, self)
-            jobs_that_advanced_state.append(i)
-            self._active.append(job)
+
+        def can_launch(job):
+            if job.execution_mode == "exclusive":
+                return len(self._active) == 0
+
+            if job.execution_mode != "parallel":
+                raise ValueError("Unknown execution mode '{}'".format(job.execution_mode))
+
+            if any(active_job.execution_mode != "parallel" for active_job in self._active):
+                return False
+
+            return len(self._active) < self.active_job_limit
+
+        made_progress = True
+        while made_progress:
+            made_progress = False
+            for i, job in enumerate(self._ready):
+                if i in jobs_that_advanced_state:
+                    continue
+                if not can_launch(job):
+                    continue
+
+                job.pre_run()
+                self.log.debug("%s priority: %d", job, job.priority)
+                self.job_lib_type(job, self)
+                jobs_that_advanced_state.append(i)
+                self._active.append(job)
+                made_progress = True
+
+                if job.execution_mode == "exclusive":
+                    break
+
+                if len(self._active) >= self.active_job_limit:
+                    break
 
         for i in reversed(jobs_that_advanced_state):
             self._ready.pop(i)
@@ -485,8 +531,8 @@ class BazelTestCfgJob(Job):
                                                   "{}_dynamic_args.py".format(target))
         with open(path_to_dynamic_args_files, 'r') as filep:
             content = filep.read()
-            dynamic_args = eval(content)
-        return dynamic_args
+            dynamic_args = ast.literal_eval(content)
+        return normalize_test_runtime_options(dynamic_args)
 
     def __repr__(self):
         return 'Bazel("{}")'.format(self.bazel_target)

@@ -1,3 +1,5 @@
 *~
-bazel-*
+bazel-*/
 __pycache__
+*.pdf
+.bazel_output/**

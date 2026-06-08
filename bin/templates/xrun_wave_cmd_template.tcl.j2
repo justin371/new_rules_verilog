@@ -35,26 +35,3 @@ probe -database vcd_db {{ probe }} -all -memories -depth all -vcd -packed {{ opt
 {% endfor -%}
 run
 {% endif -%}
-
-{% if options.wave_type == 'evcd' -%}
-database -open -evcd evcd_db -into {{ waves_db }}
-{% for probe in options.probes -%}
-probe -create {{ probe }} -evcd -database evcd_db 
-{% endfor -%}
-run
-{% endif -%}
-
-{% if options.wave_type == 'fsdb' -%}
-{% if options.wave_start -%}
-run {{ options.wave_start }}ns
-{% endif -%}
-{% if options.simulator.upper() == 'XRUN' -%}call {% endif -%}fsdbDumpfile {{ waves_db }}
-{% for probe in options.probes -%}
-{% if options.simulator.upper() == 'XRUN' -%}call {% endif -%}fsdbDumpvars 0 {{ probe }}
-{% if options.simulator.upper() == 'XRUN' -%}call {% endif -%}fsdbDumpMDA 0 {{ probe }}
-{% if options.simulator.upper() == 'XRUN' -%}call {% endif -%}fsdbDumpSVA 0 {{ probe }}
-{% endfor -%}
-run
-exit
-{% endif -%}
-

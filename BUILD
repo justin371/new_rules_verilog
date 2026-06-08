@@ -1,4 +1,5 @@
-load("@rules_verilog//verilog:defs.bzl", "verilog_tool_encapsulation")
+# vim: set ft=bzl :
+load("//verilog:defs.bzl", "verilog_tool_encapsulation")
 load("@com_github_bazelbuild_buildtools//buildifier:def.bzl", "buildifier")
 load("@buildifier_prebuilt//:rules.bzl", "buildifier", "buildifier_test")
 
@@ -7,6 +8,11 @@ package(default_visibility = ["//visibility:public"])
 verilog_tool_encapsulation(
     name = "verilog_dv_unit_test_command",
     build_setting_default = "xrun",
+)
+
+verilog_tool_encapsulation(
+    name = "verilog_dv_unit_test_command_vcs",
+    build_setting_default = "vcs",
 )
 
 verilog_tool_encapsulation(
@@ -20,8 +26,18 @@ verilog_tool_encapsulation(
 )
 
 verilog_tool_encapsulation(
+    name = "verilog_rtl_lint_test_command_vcs",
+    build_setting_default = "vcs",
+)
+
+verilog_tool_encapsulation(
     name = "verilog_rtl_unit_test_command",
     build_setting_default = "xrun",
+)
+
+verilog_tool_encapsulation(
+    name = "verilog_rtl_unit_test_command_vcs",
+    build_setting_default = "vcs",
 )
 
 verilog_tool_encapsulation(
@@ -30,8 +46,18 @@ verilog_tool_encapsulation(
 )
 
 verilog_tool_encapsulation(
+    name = "verilog_rtl_svunit_test_command_vcs",
+    build_setting_default = "vcs",
+)
+
+verilog_tool_encapsulation(
     name = "verilog_rtl_wave_viewer_command",
     build_setting_default = "simvision",
+)
+
+verilog_tool_encapsulation(
+    name = "verilog_rtl_wave_viewer_command_vcs",
+    build_setting_default = "verdi",
 )
 
 # Can't get buildifier to report diff warnings and lint warnings in the same rule

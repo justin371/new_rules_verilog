@@ -2,6 +2,7 @@
 
 ################################################################################
 # standard lib imports
+import ast
 import fnmatch
 import os
 import re
@@ -30,6 +31,7 @@ class RegressionConfig():
         self.log = log
 
         self.tests_to_tags = {}  # Mapping of tests to their tags
+        self.tests_to_simulator = {}  # Mapping of tests to their simulator
         self.max_bench_name_length = 20  # Max length for bench name formatting
         self.max_test_name_length = 20   # Max length for test name formatting
 
@@ -47,7 +49,8 @@ class RegressionConfig():
         # Run test discovery if needed
         if not self.options.no_compile or not os.path.exists(
                 self.proj_dir + "/" + "all_vcomp.json") or not os.path.exists(self.proj_dir + "/" +
-                                                                              "tests_to_tags.json"):
+                                                                              "tests_to_tags.json") or not os.path.exists(self.proj_dir + "/" +
+                                                                                                                           "tests_to_simulator.json"):
             if not self.options.no_bazel:
                 self.test_discovery_all()
         self.test_discovery_match()
@@ -258,15 +261,21 @@ class RegressionConfig():
 
             # Parse test information from output
             ttv = [
-                re.search(r'verilog_dv_test_cfg_info\(@(?:@)?(?P<test>.*), @(?:@)?(?P<vcomp>.*), \[(?P<tags>.*)\]\)',
-                          line) for line in text
+                re.search(
+                    r'verilog_dv_test_cfg_info\(@(?:@)?(?P<test>[^,]+), @(?:@)?(?P<vcomp>[^,]+), (?P<tags>\[.*\]), (?P<simulator>[A-Z0-9_]+)\)',
+                    line,
+                ) for line in text
             ]
             ttv = [match for match in ttv if match]
 
-            # Extract matching tests and their tags
-            matching_tests = [(mt.group('test'), eval("[%s]" % mt.group('tags'))) for mt in ttv
-                              if mt.group('vcomp') == vcomp]
-            self.tests_to_tags.update(matching_tests)
+            # Extract matching tests, tags, and simulator
+            matching_tests = [
+                (mt.group('test'), ast.literal_eval(mt.group('tags')), mt.group('simulator'))
+                for mt in ttv
+                if mt.group('vcomp') == vcomp
+            ]
+            self.tests_to_tags.update([(test_name, tags) for test_name, tags, _ in matching_tests])
+            self.tests_to_simulator.update([(test_name, simulator) for test_name, _, simulator in matching_tests])
             tests.update(dict([(t[0], 0) for t in matching_tests]))
 
         # Log discovered tests in table format
@@ -287,6 +296,7 @@ class RegressionConfig():
         # Save test information to JSON files
         self.dict_to_json(self.all_vcomp, "all_vcomp.json")
         self.dict_to_json(self.tests_to_tags, "tests_to_tags.json")
+        self.dict_to_json(self.tests_to_simulator, "tests_to_simulator.json")
 
     def test_discovery_match(self):
         """
@@ -297,6 +307,7 @@ class RegressionConfig():
         if self.options.no_compile or self.options.no_bazel:
             self.all_vcomp = self.json_to_dict("all_vcomp.json")
             self.tests_to_tags = self.json_to_dict("tests_to_tags.json")
+            self.tests_to_simulator = self.json_to_dict("tests_to_simulator.json")
 
         # Process each test specification from command line
         for ta in self.options.tests:

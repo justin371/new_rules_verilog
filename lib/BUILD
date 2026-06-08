@@ -1,3 +1,4 @@
+# vim: set ft=bzl :
 load("@rules_python//python:defs.bzl", "py_library")
 
 package(default_visibility = ["//visibility:public"])
@@ -10,6 +11,7 @@ py_library(
 py_library(
     name = "job_lib",
     srcs = ["job_lib.py"],
+    deps = [":runtime_options"],
 )
 
 py_library(
@@ -31,4 +33,9 @@ py_library(
 py_library(
     name = "regression_report",
     srcs = ["regression_report.py"],
+)
+
+py_library(
+    name = "runtime_options",
+    srcs = ["runtime_options.py"],
 )

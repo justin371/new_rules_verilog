@@ -1,3 +1,4 @@
+# vim: set ft=bzl :
 """Public entry point to all supported Verilog rules and APIs"""
 
 load(

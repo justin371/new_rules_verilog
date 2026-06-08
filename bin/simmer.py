@@ -2,15 +2,15 @@
 
 ################################################################################
 # standard lib imports
-import argparse
 from copy import deepcopy
+import ast
 import datetime
 from hashlib import sha1
 import os
 import sys
-from tempfile import TemporaryFile
 import random
 import re
+import shutil
 import stat
 import subprocess
 
@@ -25,13 +25,20 @@ sys.path.append(os.path.dirname(__file__))
 ################################################################################
 # rules_verilog lib imports
 from args_parser import parse_args
+from args_parse.vcs import validate_vcs_runtime_options, validate_vcs_switches_for_xcelium
+from args_parse.xcelium import validate_xcelium_runtime_options, validate_xcelium_switches_for_vcs
 from lib.job_lib import Job, JobStatus
 from lib import cmn_logging
 from lib import job_lib
 from lib import regression
 from lib import rv_utils
+from lib.runtime_options import (
+    format_sim_opts_dict,
+    merge_test_runtime_sim_opts,
+    resolve_test_timeout_hours,
+)
 from lib.simulators.base import SimulatorInterface
-from lib.simulators.xrun import XrunSimulator
+from lib.simulators.xcelium import XceliumSimulator
 from lib.simulators.vcs import VcsSimulator
 from lib import regression_report
 
@@ -39,19 +46,62 @@ log = None
 
 # Use the absolute path to locate the 'templates' directory
 file_loader = jinja2.FileSystemLoader(searchpath=os.path.join(dir_path, 'templates'))
-env = jinja2.Environment(loader=file_loader)
+jinja2_env = jinja2.Environment(loader=file_loader)
 
-#XRUN_COMPILE_TEMPLATE = env.get_template('xrun_compile_template.sh.j2')
-#VCS_COMPILE_TEMPLATE = env.get_template('vcs_compile_template.sh.j2')
-#SIM_TEMPLATE = env.get_template('sim_template.sh.j2')
-#WAVE_CMD_TEMPLATE = env.get_template('wave_cmd_template.tcl.j2')
-RERUN_TEMPLATE = env.get_template('rerun_template.sh.j2')
-#BUGGER_TEMPLATE = env.get_template('bugger_template.sh.j2')
-RUN_WAVE_TEMPLATE = env.get_template('run_waves_template.sh.j2')
+#XRUN_COMPILE_TEMPLATE = jinja2_env.get_template('xrun_compile_template.sh.j2')
+#VCS_COMPILE_TEMPLATE = jinja2_env.get_template('vcs_compile_template.sh.j2')
+#SIM_TEMPLATE = jinja2_env.get_template('sim_template.sh.j2')
+RERUN_TEMPLATE = jinja2_env.get_template('rerun_template.sh.j2')
+RUN_WAVE_TEMPLATE = jinja2_env.get_template('run_waves_template.sh.j2')
 
 # Get the path from the environment variable EMU_JINJA2_PATH
 # xrun_emu_compile_template.sh.j2 located here
 emu_template_path = os.getenv('EMU_JINJA2_PATH')
+
+
+def get_bazel_bin():
+    result = subprocess.run(["bazel", "info", "bazel-bin"], capture_output=True, text=True)
+    if result.returncode != 0:
+        raise RuntimeError("bazel info bazel-bin failed:\n{}\n{}".format(result.stdout, result.stderr))
+    return result.stdout.strip()
+
+
+def load_warning_waivers(path):
+    with open(path, 'r') as filep:
+        content = filep.read()
+
+    try:
+        waiver_patterns = ast.literal_eval(content)
+    except (SyntaxError, ValueError):
+        tree = ast.parse(content, mode='eval')
+        if not isinstance(tree.body, ast.List):
+            raise TypeError("Waiver file content must be a list.")
+        waiver_patterns = []
+        for item in tree.body.elts:
+            if isinstance(item, ast.Call) and isinstance(item.func, ast.Attribute):
+                is_re_compile = (
+                    isinstance(item.func.value, ast.Name) and
+                    item.func.value.id == 're' and
+                    item.func.attr == 'compile'
+                )
+                has_string_arg = item.args and isinstance(item.args[0], ast.Constant) and isinstance(item.args[0].value, str)
+                if is_re_compile and has_string_arg:
+                    waiver_patterns.append(item.args[0].value)
+                    continue
+            if isinstance(item, ast.Constant) and isinstance(item.value, str):
+                waiver_patterns.append(item.value)
+                continue
+            raise TypeError("Unsupported waiver entry: {}".format(ast.dump(item)))
+
+    if not isinstance(waiver_patterns, list):
+        raise TypeError("Waiver file content must be a list.")
+    return [p if isinstance(p, re.Pattern) else re.compile(p) for p in waiver_patterns]
+
+
+def replace_symlink(link_path, target_path):
+    if os.path.lexists(link_path):
+        os.remove(link_path)
+    os.symlink(target_path, link_path)
 
 
 # --- Simulator Factory Function ---
@@ -60,7 +110,7 @@ def get_simulator(options, rcfg, jinja_env) -> SimulatorInterface:
     sim_name = options.simulator.lower()
     if sim_name == 'xrun':
         # Pass options, rcfg, and jinja env to the constructor
-        return XrunSimulator(options, rcfg, jinja_env)
+        return XceliumSimulator(options, rcfg, jinja_env)
     elif sim_name == 'vcs':
         return VcsSimulator(options, rcfg, jinja_env)
     # Add elif for other simulators here
@@ -69,6 +119,107 @@ def get_simulator(options, rcfg, jinja_env) -> SimulatorInterface:
     #    return QuestaSimulator(options, rcfg, jinja_env)
     else:
         raise ValueError(f"Unsupported simulator specified: {options.simulator}")
+
+
+class _ValidationErrorParser:
+
+    def error(self, message):
+        raise ValueError(message)
+
+
+def validate_resolved_simulator_options(options):
+    parser = _ValidationErrorParser()
+    if options.simulator == 'VCS':
+        validate_xcelium_switches_for_vcs(options, parser)
+        validate_vcs_runtime_options(options, parser)
+        return
+
+    if options.simulator == 'XRUN':
+        validate_vcs_switches_for_xcelium(options, parser)
+        validate_xcelium_runtime_options(options, parser)
+        return
+
+    raise ValueError("Unsupported simulator specified: {}".format(options.simulator))
+
+
+def resolve_run_simulator(rcfg, options):
+    selected_simulators = {}
+    for _, test_list in rcfg.all_vcomp.items():
+        for test_target in test_list.keys():
+            simulator = rcfg.tests_to_simulator.get(test_target, "XRUN").upper()
+            selected_simulators.setdefault(simulator, []).append(test_target)
+
+    if not selected_simulators:
+        rcfg.simulator = options.simulator
+        return options.simulator
+
+    if len(selected_simulators) > 1:
+        details = []
+        for simulator, tests in sorted(selected_simulators.items()):
+            preview = ", ".join(tests[:3])
+            if len(tests) > 3:
+                preview += ", ..."
+            details.append("{}: {}".format(simulator, preview))
+        rcfg.log.critical(
+            "Selected tests resolve to multiple simulators (%s). Mixed XRUN/VCS runs are not supported. "
+            "Please run each simulator group separately.",
+            "; ".join(details),
+        )
+        sys.exit(1)
+
+    resolved_simulator = next(iter(selected_simulators))
+    if getattr(options, "simulator_was_explicit", False) and options.simulator != resolved_simulator:
+        rcfg.log.critical(
+            "--simulator %s conflicts with the selected test cfg simulator %s. "
+            "Please remove the override or run matching tests only.",
+            options.simulator,
+            resolved_simulator,
+        )
+        sys.exit(1)
+
+    options.simulator = resolved_simulator
+    rcfg.simulator = resolved_simulator
+
+    try:
+        validate_resolved_simulator_options(options)
+    except ValueError as exc:
+        rcfg.log.critical("%s", exc)
+        sys.exit(1)
+
+    return resolved_simulator
+
+
+def get_active_job_limit(options, rcfg):
+    total_tests = sum(
+        icfg.target
+        for _, (icfgs, _) in rcfg.all_vcomp.items()
+        for icfg in icfgs
+    )
+    if total_tests <= 1:
+        return 1
+
+    if options.gui:
+        return 1
+
+    if options.simulator == 'VCS':
+        cpu_count = os.cpu_count() or 1
+        return max(1, min(total_tests, cpu_count))
+
+    return 1
+
+
+def path_from_sim_root(path, bazel_runfiles_main):
+    abs_path = os.path.abspath(path)
+    abs_runfiles = os.path.abspath(bazel_runfiles_main)
+    try:
+        rel_path = os.path.relpath(abs_path, abs_runfiles)
+    except ValueError:
+        return path
+
+    if rel_path.startswith(".."):
+        return path
+
+    return os.path.join("bazel_runfiles_main", rel_path).replace("\\", "/")
 
 
 # The jobs of the verification compilation and elaboration stages
@@ -95,9 +246,7 @@ class VCompJob(Job):
         #job_dir = "{}__VCOMP{}".format(self.name, self.rcfg.options.dir_suffix)
         job_dir = "{}__{}_VCOMP{}".format(self.name, self.simulator.get_name().upper(), self.rcfg.options.dir_suffix)
 
-        self.job_dir = os.path.join(self.rcfg.regression_dir, job_dir)
-        if options.msie_prim:
-            self.job_dir = self.job_dir + "_PRIM"
+        self.job_dir = self.simulator.get_vcomp_job_dir(os.path.join(self.rcfg.regression_dir, job_dir))
         self.log_path = os.path.join(self.job_dir, "cmp.log")
 
         self.main_cmdline = None
@@ -106,13 +255,12 @@ class VCompJob(Job):
     def pre_run(self):
         super(VCompJob, self).pre_run()
 
-        enable_debug_access = 0
+        options = self.rcfg.options
+        debug_mode = "default"
         if options.waves is not None:
-            enable_debug_access = 1
+            debug_mode = "waves"
         if options.gui:
-            enable_debug_access = 2
-
-        enable_cdnvip = 1 if options.cdn_vip else 0
+            debug_mode = "gui"
 
         compile_gen_opts = self.simulator.generate_compile_options(self)
         cov_opts = compile_gen_opts['cov_opts']
@@ -122,59 +270,37 @@ class VCompJob(Job):
         log.debug("workdir = %s", self.job_dir)
 
         if options.lmstat:
-            os.system("lmstat -a > lmstat.out")
+            with open("lmstat.out", "w") as lmstat_out:
+                subprocess.run(["lmstat", "-a"], stdout=lmstat_out, stderr=subprocess.STDOUT, check=False)
         else:
             log.debug("Skipping lmstat -a")
 
-        os.system("env > {}".format(os.path.join(self.job_dir, 'env.out')))
-        os.system("hostname > {}".format(os.path.join(self.job_dir, 'hostname.out')))
-
-        if options.msie_prim:
-            if not os.path.exists(self.job_dir):
-                os.mkdir(self.job_dir)
+        with open(os.path.join(self.job_dir, 'env.out'), 'w') as env_out:
+            for key, value in sorted(os.environ.items()):
+                env_out.write("{}={}\n".format(key, value))
+        with open(os.path.join(self.job_dir, 'hostname.out'), 'w') as hostname_out:
+            subprocess.run(["hostname"], stdout=hostname_out, stderr=subprocess.STDOUT, check=False)
 
         if options.compile_args_file and not os.path.exists(options.compile_args_file):
-            rcfg.log.critical(f"The specified compile arguments file does not exist: {options.compile_args_file}")
+            self.rcfg.log.critical(f"The specified compile arguments file does not exist: {options.compile_args_file}")
             sys.exit(1)
 
         if options.recompile:
             log.info("Removing vcomp library %s due to --recompile flag", self.job_dir)
-            #os.system("rm -rf {0}; mkdir -p {0}".format(self.job_dir))
-            # Use shutil for potentially more robust removal
-            import shutil
             shutil.rmtree(self.job_dir, ignore_errors=True)
             os.makedirs(self.job_dir, exist_ok=True)
 
         relpath, bazel_target = self.bazel_vcomp_target.split(':')
         relpath = relpath[2:] # Remove leading //
 
-        # Find bazel-bin
-        # FIXME this is repeated elsewhere, make it a lib function
-        p = subprocess.Popen("bazel info", shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-        p.wait()
-        assert p.returncode == 0
-        stdout, stderr = p.communicate()
-        bazel_bin = re.search(r'bazel-bin: (.*)', stdout.decode('ascii')).group(1)
-        # This is a gross assumption, but I can't see an easier way to find this in bazel
+        bazel_bin = get_bazel_bin()
         self.bazel_runfiles_main = os.path.join(bazel_bin, relpath, "{}.runfiles".format(bazel_target), "__main__")
 
         self.bazel_compile_args = self.simulator.get_bazel_compile_args_file(self.bazel_runfiles_main, relpath,
                                                                              bazel_target)
 
-        #for ta in options.tests:
-        #    tb_name = ta.btiglob.split(":")[0]
-        if options.msie_prim:
-            tb_name_for_msie = bazel_target
-            #self.bazel_compile_args = os.path.join("{}/{}/msie/{}_prim.f".format(options.proj_dir, relpath, tb_name))
-            self.bazel_compile_args = os.path.join(options.proj_dir, relpath, f"msie/{tb_name_for_msie}_prim.f")
-        elif options.msie_incr:
-            tb_name_for_msie = bazel_target
-            #self.bazel_compile_args = os.path.join(options.proj_dir, relpath,
-            #                                       "{}/{}/msie/{}_incr.f".format(options.proj_dir, relpath, tb_name))
-            self.bazel_compile_args = os.path.join(options.proj_dir, relpath, f"msie/{tb_name_for_msie}_incr.f")
-
-        self.bazel_runtime_args = os.path.join(self.bazel_runfiles_main, relpath,
-                                               "{}_runtime_args_{}.f".format(bazel_target, options.simulator.lower()))
+        self.bazel_runtime_args = self.simulator.get_bazel_runtime_args_file(self.bazel_runfiles_main, relpath,
+                                                                             bazel_target)
         self.compile_warning_waivers_path = os.path.join(self.bazel_runfiles_main, relpath,
                                                          "{}_compile_warning_waivers".format(bazel_target))
         # RTL file list for Emu (if needed by template, keep calculation here or move to simulator)
@@ -196,22 +322,21 @@ class VCompJob(Job):
             if tb_name_match:
                 tb_name = os.path.basename(tb_name_match.group(1))
 
-            template_context = {
-                'VCOMP_DIR': self.job_dir,
-                'cov_opts': cov_opts,
-                'bazel_runfiles_main': self.bazel_runfiles_main,
-                'bazel_compile_args': self.bazel_compile_args,
-                'bazel_compile_args_rtl': self.bazel_compile_args_emu_rtl, # Pass even if not used by all templates
-                'enable_debug_access': enable_debug_access,
-                'enable_cdnvip': enable_cdnvip, # Pass even if not used by all templates
-                'xprop_cmd': xprop_cmd,
-                'relpath': relpath,
-                'tb_name': tb_name, # Pass derived tb_name
-                'additional_defines': additional_defines,
-                'options': options, # Pass full options object
-                # Add simulator name if needed in template
-                'simulator_name': self.simulator.get_name(),
-            }
+        template_context = {
+            'VCOMP_DIR': self.job_dir,
+            'cov_opts': cov_opts,
+            'bazel_runfiles_main': self.bazel_runfiles_main,
+            'bazel_compile_args': self.bazel_compile_args,
+            'bazel_compile_args_rtl': self.bazel_compile_args_emu_rtl, # Pass even if not used by all templates
+            'debug_mode': debug_mode,
+            'xprop_cmd': xprop_cmd,
+            'relpath': relpath,
+            'tb_name': tb_name, # Pass derived tb_name
+            'additional_defines': additional_defines,
+            'options': options, # Pass full options object
+            # Add simulator name if needed in template
+            'simulator_name': self.simulator.get_name(),
+        }
 
         with open(vcomp_sh_path, 'w') as filep:
             filep.write(compile_template.render(**template_context))
@@ -223,6 +348,7 @@ class VCompJob(Job):
         log.debug("bazel_runfiles_main: %s", self.bazel_runfiles_main)
 
         if self.rcfg.options.no_compile:
+            self.simulator.validate_reusable_compile_artifacts(self)
             self.main_cmdline = "echo \"Bypassing {} due to --no-compile\"".format(self)
         else:
             self.main_cmdline = "bash {}".format(vcomp_sh_path)
@@ -259,37 +385,18 @@ class VCompJob(Job):
         else:
             # Proceed only if waiver and log files exist
             try:
-                # Read and evaluate the waiver patterns from the file
-                with open(self.compile_warning_waivers_path, 'r') as compile_warning_waivers_p:
-                    # Reads file content like "['\\*W,DEAPF', ...]"
-                    # Using eval is necessary if the file contains Python list literal syntax
-                    # Be cautious about security if the file source isn't trusted.
-                    warning_waivers_patterns_str = compile_warning_waivers_p.read()
-                    log.debug(f"Read waiver patterns string: {warning_waivers_patterns_str[:200]}...") # Log snippet
-                    warning_waivers_patterns = eval(warning_waivers_patterns_str)
-                    if not isinstance(warning_waivers_patterns, list):
-                        raise TypeError("Waiver file content did not evaluate to a list.")
-
-                # Pre-compile waiver regexes for efficiency
-                log.debug(f"Processing {len(warning_waivers_patterns)} waiver patterns from file...")
-                for p_idx, p in enumerate(warning_waivers_patterns):
-                    # Check if the item from eval is actually a compiled regex pattern
-                    if isinstance(p, re.Pattern):
-                        warning_waivers.append(p) # Directly add the compiled pattern object
-                        log.debug(f"Using pre-compiled waiver pattern {p_idx}: {p.pattern}")
-                    else:
-                        # Log if the item is something unexpected (not a string, not a pattern)
-                        log.warning(f"Skipping unexpected item type in waiver list at index {p_idx}: {type(p)} - {p}")
+                warning_waivers = load_warning_waivers(self.compile_warning_waivers_path)
+                log.debug(f"Loaded {len(warning_waivers)} waiver patterns from file.")
 
             except FileNotFoundError:
                 # This case is handled by the os.path.exists check above, but included for robustness
                 log.error(f"Waiver file disappeared unexpectedly: {self.compile_warning_waivers_path}")
                 if self.jobstatus == JobStatus.PASSED: self.jobstatus = JobStatus.FAILED
-            except SyntaxError as eval_err:
-                log.error(f"Syntax error evaluating waiver file '{self.compile_warning_waivers_path}': {eval_err}")
+            except SyntaxError as parse_err:
+                log.error(f"Syntax error parsing waiver file '{self.compile_warning_waivers_path}': {parse_err}")
                 if self.jobstatus == JobStatus.PASSED: self.jobstatus = JobStatus.FAILED
             except Exception as e:
-                # Catch other potential errors during file reading/eval/compilation
+                # Catch other potential errors during file reading/parsing/compilation
                 log.error(f"Unexpected error processing waiver file '{self.compile_warning_waivers_path}': {e}")
                 # Fail the job if waivers couldn't be processed correctly
                 if self.jobstatus == JobStatus.PASSED: self.jobstatus = JobStatus.FAILED
@@ -379,6 +486,10 @@ class TestJob(Job):
 
     LOG_NAME = 'stdout.log'
 
+    @property
+    def execution_mode(self):
+        return "parallel"
+
     class RegexWrap():
 
         def __init__(self):
@@ -456,6 +567,7 @@ class TestJob(Job):
         # simname = "%s__%s__%s" % (self.vcomper.name, self.name, strdate)
         simname = "%s__%s__%s__%d%s" % (self.vcomper.name, self.simulator.get_name(), self.name, seed,
                                         self.rcfg.options.dir_suffix)
+        self.simname = simname
         self.job_dir = os.path.join(self.rcfg.regression_dir, simname)
         self._log_path = os.path.join(self.job_dir, self.LOG_NAME)
 
@@ -472,8 +584,22 @@ class TestJob(Job):
         sim_opts = self.simulator.generate_sim_options(self, seed)
 
         sockets = []
-        dynamic_args = self.btcj.dynamic_args()
-        for socket_name, socket_command in dynamic_args['sockets'].items():
+        runtime_options = self.btcj.dynamic_args()
+        dynamic_simulator = runtime_options['simulator']
+        if dynamic_simulator != self.simulator.get_name().upper():
+            raise ValueError(
+                "Test cfg {} resolved simulator {} but simmer is running with {}.".format(
+                    self.target,
+                    dynamic_simulator,
+                    self.simulator.get_name().upper(),
+                ))
+        self.timeout = resolve_test_timeout_hours(
+            runtime_options,
+            options.timeout,
+            getattr(options, "timeout_was_explicit", False),
+        )
+        log.debug("Resolved timeout for %s: %s hours", self.name, self.timeout)
+        for socket_name, socket_command in runtime_options['sockets'].items():
             # While it would be nice to have the socket live in the job_dir,
             # Unfortunately, the paths are frequently too long resulting in:
             #  OSError: AF_UNIX path too long
@@ -485,33 +611,11 @@ class TestJob(Job):
             sockets.append((socket_name, socket_command, socket_file))
 
         # --- Add Test Name and Merge CLI/Bazel Options (Common Logic) ---
-        sim_opts += " +UVM_TESTNAME={uvm_testname} ".format(uvm_testname=dynamic_args['uvm_testname'], )
+        sim_opts += " +UVM_TESTNAME={uvm_testname} ".format(uvm_testname=runtime_options['uvm_testname'], )
+        combined_sim_args = merge_test_runtime_sim_opts(runtime_options, options.sim_opts)
+        sim_opts += ' ' + format_sim_opts_dict(combined_sim_args)
 
-        # The simmer CLI allows sim_opts to not specify a value, e.g "--sim-opts +UVM_CONFIG_DB_TRACE"
-        # However, the simmer code that merges CLI sim_opts and verilog_dv_test_cfg sim_opts requires them to have the same formatting
-        # Therefore, we need to map the CLI sim_opts to have a value defined for every +arg and use an '=' in formatting
-        if options.sim_opts:
-            cli_sim_opts = [so.split("=", maxsplit=1) for so in options.sim_opts]
-            for cso in cli_sim_opts:
-                if len(cso) == 0:
-                    raise ValueError("Unexpected split, 0 items")
-                elif len(cso) == 1:
-                    cso.append("")
-                elif len(cso) == 2:
-                    cso[0] = cso[0] + "="
-                else:
-                    raise ValueError("Unexpected split, more than 2 items")
-            cli_sim_opts = dict(cli_sim_opts)
-        else:
-            cli_sim_opts = {}
-
-        combined_sim_args = dynamic_args.get('sim_opts', {}).copy()
-        # combined_sim_args is a dictionary, but the key may have equal sign in it to be joined
-        combined_sim_args.update(cli_sim_opts) # Apply the CLI sim_opts on top of the bazel sim_opts
-        bazel_test_cfg_sim_args = ["".join(btcsa) for btcsa in combined_sim_args.items()]
-        sim_opts += ' ' + (' '.join(bazel_test_cfg_sim_args)).replace('\"', ' ')
-
-        pre_run_cmd = dynamic_args.get('pre_run', '')
+        pre_run_cmd = runtime_options['pre_run']
 
         default_capture = 'hdl_top'
         waves_db = self.job_dir
@@ -520,29 +624,11 @@ class TestJob(Job):
         wave_tcl_path = os.path.join(self.job_dir, "waves.tcl") # Standard name
 
         if options.waves is not None:
-            wave_type = options.wave_type.lower()
-            if wave_type == 'shm':
-                waves_db = os.path.join(waves_db, "waves.shm")
-            elif wave_type == 'vwdb':
-                waves_db = os.path.join(waves_db, 'waves')
-                sim_opts += ' -debug_opts verisium_pp '
-            elif wave_type == 'vcd':
-                default_capture = 'hdl_top.dut'
-                waves_db = os.path.join(waves_db, "waves.vcd")
-            elif wave_type == 'evcd':
-                default_capture = 'hdl_top.dut'
-                waves_db = os.path.join(waves_db, "waves.evcd")
-            elif options.wave_type == 'fsdb':
-                waves_db = os.path.join(waves_db, "waves.fsdb")
-                verdi_pli = os.path.join(os.environ['VERDI_HOME'], 'share/PLI/IUS/LINUX64/boot',
-                                         'debpli.so:novas_pli_boot')
-                sim_opts += " -loadpli1 {} ".format(verdi_pli)
-                sim_opts += " +UVM_VERDI_TRACE=UVM_AWARE+HIER+RAL+TLM+COMPWAVE "
-                sim_opts += " +fsdb+delta +fsdb+force +fsdb+functions +fsdb+struct=on "
-                sim_opts += " +fsdb+parameter=on +fsdb+sva_status +fsdb+sva_success "
-                sim_opts += " +fsdb+autoflush "
-            else:
-                raise ValueError("{} not allowed".format(options.wave_type))
+            wave_capture = self.simulator.get_wave_capture_options(self, wave_tcl_path)
+            sim_opts += wave_capture['sim_opts']
+            wave_tcl_path = wave_capture['wave_tcl_path']
+            waves_db = wave_capture['waves_db']
+            default_capture = wave_capture['default_capture']
 
             options.probes = options.waves if options.waves != [] else [default_capture]
             delta = " -event" if options.wave_delta else ""
@@ -563,25 +649,21 @@ class TestJob(Job):
         else: # No waves requested
             # Still need a basic run Tcl for -input/-do
             nwaves_tcl_path = os.path.join(self.job_dir, "nwaves.tcl")
-            if options.simulator.upper() == 'VCS':
-                sim_opts += " -ucli -do {} ".format(nwaves_tcl_path)
-                # Populate tcl_commands based on options.gui condition
-                tcl_commands = ["config reversedebug on", "run"] if options.gui else ["run"]
-            elif options.simulator.upper() == 'XRUN':
-                sim_opts += " -input {} ".format(nwaves_tcl_path)
-                tcl_commands = ["run"]
-            with open(nwaves_tcl_path, 'w') as filep:
-                filep.write("\n".join(tcl_commands))
+            no_wave_capture = self.simulator.get_no_wave_capture_options(self, nwaves_tcl_path)
+            sim_opts += no_wave_capture['sim_opts']
+            tcl_commands = no_wave_capture['tcl_commands']
+            if tcl_commands:
+                with open(nwaves_tcl_path, 'w') as filep:
+                    filep.write("\n".join(tcl_commands))
 
-        common_plusargs = []
         if options.uvm_set_int:
             sim_opts += ' +uvm_set_config_int=' + ' +uvm_set_config_int='.join(options.uvm_set_int)
         if options.uvm_set_str:
             sim_opts += ' +uvm_set_config_string=' + ' +uvm_set_config_string='.join(options.uvm_set_str)
         if options.sim_opts_file:
-            fh = open(options.sim_opts_file, 'r')
-            for line in fh:
-                sim_opts += ' ' + line.strip()
+            with open(options.sim_opts_file, 'r') as sim_opts_file:
+                for line in sim_opts_file:
+                    sim_opts += ' ' + line.strip()
 
         if options.verbosity:
             if 'UVM_VERBOSITY' not in sim_opts:
@@ -607,21 +689,13 @@ class TestJob(Job):
             sim_opts += ' +uvm_set_config_string=' + ' +uvm_set_config_string='.join(options.uvm_set_config_string)
         if options.gui:
             sim_opts += self.simulator.get_gui_command_options()
-        if options.mce:
-            sim_opts += " -mce "
-            sim_opts += " -mce_pie "
-            sim_opts += " -mce_newperf "
-            sim_opts += " -mce_parallel_probing 0 "
-            sim_opts += " -mce_sim_cpu_configuration {} ".format(options.mce_sim_cfg)
-            sim_opts += " -mce_sim_thread_count {} ".format(options.mce_sim_count)
-            sim_opts += " -mce_split_max_size {} ".format(self.rcfg.options.mce_split_max_size)
-        if options.profile:
-            sim_opts += " -profile "
 
         # --- Runtime Args File (Delegate path) ---
         bazel_runtime_args_file = self.vcomper.bazel_runtime_args # Get path from vcomper
         if os.path.exists(bazel_runtime_args_file):
-            sim_opts += " -f {} ".format(bazel_runtime_args_file)
+            sim_opts += " -f {} ".format(
+                path_from_sim_root(bazel_runtime_args_file, self.vcomper.bazel_runfiles_main)
+            )
         else:
             log.warning(f"Runtime args file not found: {bazel_runtime_args_file}")
 
@@ -691,18 +765,15 @@ class TestJob(Job):
         log.debug('Created %s', testscript_path)
 
         # Render rerun.sh
-        # Calculate cmd_line_sim_opts needed for rerun template
-        cmd_line_sim_opts_str = ""
-
         with open(rerun_script_path, 'w') as filep:
             tmp = locals()
             del tmp['self']
             tmp['job'] = self
             cmd_line_sim_opts = ""
             if options.sim_opts_file:
-                fh = open(options.sim_opts_file, 'r')
-                for line in fh:
-                    cmd_line_sim_opts += ' ' + line.strip()
+                with open(options.sim_opts_file, 'r') as sim_opts_file:
+                    for line in sim_opts_file:
+                        cmd_line_sim_opts += ' ' + line.strip()
             if options.sim_opts:
                 cmd_line_sim_opts += ' ' + (' '.join(options.sim_opts)).replace('\"', ' ')
             if cmd_line_sim_opts:
@@ -713,14 +784,12 @@ class TestJob(Job):
         log.debug('Created %s', rerun_script_path)
 
         # Create a symlink back the vcomp directory for easy reference
-        os.system("ln -snf %s %s" % (self.vcomper.job_dir, os.path.join(self.job_dir, '.vcomp')))
-        #os.symlink(self.vcomper.job_dir, os.path.join(self.job_dir, '.vcomp'), target_is_directory=True)
+        replace_symlink(os.path.join(self.job_dir, '.vcomp'), self.vcomper.job_dir)
 
         if not self.rcfg.tidy:
             # Use relative path for symlink for portability
             last_sim_link_target = os.path.relpath(self.job_dir, start=os.getcwd())
-            if os.path.lexists(".last_sim"): os.remove(".last_sim")
-            os.symlink(last_sim_link_target, ".last_sim")
+            replace_symlink(".last_sim", last_sim_link_target)
             log.debug("Created link to sim dir as '.last_sim'")
 
         self.main_cmdline = '/usr/bin/env bash %s' % (testscript_path)
@@ -737,9 +806,7 @@ class TestJob(Job):
         if self.job_lib.returncode != 0:
             # Use relative path for symlink for portability
             last_fail_link_target = os.path.relpath(self.job_dir, start=os.getcwd())
-            if os.path.lexists(".last_fail"):
-                os.remove(".last_fail")
-            os.symlink(last_fail_link_target, ".last_fail")
+            replace_symlink(".last_fail", last_fail_link_target)
 
             log.debug("Created link to sim dir as '.last_fail'")
             log.error(
@@ -775,24 +842,11 @@ class TestJob(Job):
         # Wave path logging (adjust based on actual file names if they differ)
         if options.waves is not None:
             wave_path = self.job_dir
-            wave_type = options.wave_type.lower()
-
-            if wave_type == 'shm':
-                abs_wave_path = os.path.join(wave_path, 'waves.shm')
-            elif wave_type == 'vcd':
-                abs_wave_path = os.path.join(wave_path, 'waves.vcd')
-            elif wave_type == 'evcd':
-                abs_wave_path = os.path.join(wave_path, 'waves.evcd')
-            elif wave_type == 'vwdb':
-                abs_wave_path = os.path.join(wave_path, 'waves.db')
-            elif wave_type == 'fsdb':
-                abs_wave_path = os.path.join(wave_path, 'waves.fsdb')
-            else:
-                raise ValueError("Not allowed wave: {}".format(options.wave_type))
+            abs_wave_path = self.simulator.get_wave_artifact_path(wave_path, options.wave_type)
 
             if os.path.exists(abs_wave_path):
                 #log.info("Waves available: {}".format(abs_wave_path))
-                os.system("chmod -R 755 {}".format(abs_wave_path))
+                subprocess.run(["chmod", "-R", "755", abs_wave_path], check=False)
             else:
                 log.error("Dumped waves, but waves file doesn't exist.")
 
@@ -808,6 +862,7 @@ class TestJob(Job):
                 "job_dir": wave_path,
                 "wave_file_path": absolute_wave_path,
                 "bazel_runfiles_dir": bazel_runfiles_dir,
+                "wave_view_command": self.simulator.get_wave_view_command(absolute_wave_path, wave_path),
             }
             run_wave_script_content = RUN_WAVE_TEMPLATE.render(run_wave_template_vars)
 
@@ -821,9 +876,9 @@ class TestJob(Job):
 
         if self.rcfg.tidy and self.jobstatus.successful:
             log.debug("tidy=%s removing %s", self.rcfg.tidy, self.job_dir)
-            os.system("rm -rf {}".format(self.job_dir))
+            shutil.rmtree(self.job_dir, ignore_errors=True)
             if os.path.exists(".last_sim"):
-                os.system("rm .last_sim")
+                os.remove(".last_sim")
 
         # If iteration count hasnt been hit yet, add another copy onto the run list
         if self.icfg.spawn_count <= self.icfg.target:
@@ -870,12 +925,14 @@ def main(rcfg, options):
     """
     uname = os.uname()
     rcfg.log.info("Running on %s", uname[1])
+    resolved_simulator = resolve_run_simulator(rcfg, options)
+    rcfg.log.info("Resolved simulator for this run: %s", resolved_simulator.upper())
 
     # --- Instantiate the selected simulator ---
     try:
-        # Pass the global jinja environment 'env'
-        simulator = get_simulator(options, rcfg, env)
-        rcfg.log.info(f"Using Simulator: {simulator.get_name()}")
+        # Pass the global Jinja environment.
+        simulator = get_simulator(options, rcfg, jinja2_env)
+        rcfg.log.info("Using Simulator: %s", simulator.get_name().upper())
     except ValueError as e:
         rcfg.log.critical(str(e))
         sys.exit(1)
@@ -885,7 +942,6 @@ def main(rcfg, options):
     btcj_jobs = []
     btbj_jobs = []
     trd = []
-    cov = {} 
     webroot_path = "/nfs/regression/webroot/"
 
     bazel_shutdown_job = job_lib.BazelShutdownJob(rcfg)
@@ -913,9 +969,6 @@ def main(rcfg, options):
             # Test depends on its config being built
             t.add_dependency(btcj)
 
-            for _ in range(1, min(icfg.target, rcfg.options.parallel_max)):
-                tclone = t.clone()
-                tests.append(tclone)
         rcfg.all_vcomp[vcomp] = (icfgs, tests)
 
     suppress_via_vcomp_jobs = False
@@ -934,10 +987,9 @@ def main(rcfg, options):
 
     try:
         jm_opts = {
-            'parallel_max': options.parallel_max,
-            'parallel_interval': options.parallel_interval,
             'idle_print_seconds': options.idle_print_seconds,
-            'quit_count': options.quit_count
+            'quit_count': options.quit_count,
+            'active_job_limit': get_active_job_limit(options, rcfg),
         }
         jm = job_lib.JobManager(jm_opts, log)
 
@@ -1004,24 +1056,13 @@ def main(rcfg, options):
     report_header = {}
     if options.report:
         if options.coverage:
-            sim_name = options.simulator.lower()
-            if sim_name == 'xrun': 
-                for vcomp in vcomp_jobs.values():
-                    log.info("Before merge: Vcomp {}.".format(vcomp))
-                    cmd = 'runmod xrun -- imc -exec {} -verbose'.format(os.path.join(vcomp.cov_work_dir, "merge_exec.tcl"))
-                    p = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, shell=True)
-                    p.wait()
-                    assert p.returncode == 0
-            elif sim_name == 'vcs':
-                pass #pass for now
-            else:
-                raise ValueError(f"Unsupported simulator specified: {options.simulator}")
+            simulator.run_report_coverage_merge(vcomp_jobs)
         
         report_header = rv_utils.get_report_header(rcfg)
         if report_header is not None and 'tag' in report_header:
             if '-' in report_header['tag']:
                 report_header['tag'] = ''
-        rrt = regression_report.RegressionReport(rcfg, env, webroot_path)
+        rrt = regression_report.RegressionReport(rcfg, jinja2_env, webroot_path)
         rrt.run(report_header, trd, rv_utils.get_coverage_data(rcfg, vcomp_jobs), category_stats)
 
     failures = {}
@@ -1036,6 +1077,8 @@ def main(rcfg, options):
 
     for message in rcfg.deferred_messages:
         log.info(message)
+
+    simulator.cleanup_shared_runtime_artifacts(vcomp_jobs)
 
     rcfg.log.exit_if_warnings_or_errors("Previous errors")
 
