@@ -7,4 +7,4 @@
 {DEFINES}
 {FLISTS}
 -top {INST_TOP}
--f {RULEFILE}
+-file {RULEFILE}

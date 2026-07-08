@@ -26,6 +26,16 @@ def add_vcs_arguments(parser):
                       default=False,
                       action='store_true',
                       help='Enable VCS compile profiling with -pcmakeprof -reportstats.')
+    gvcs.add_argument('--smartlog',
+                      dest='smartlog',
+                      default=False,
+                      action='store_true',
+                      help='Enable VCS smartlog (-sml) for batch compile and sim commands.')
+    gvcs.add_argument('--vcs-runner',
+                      type=str,
+                      default=None,
+                      help='Override the command prefix used to launch VCS, simv, and Verdi. '
+                           'Defaults to RV_VCS_RUNNER or "runmod vcs --".')
     gvcs.add_argument('--dtl',
                       default=False,
                       action='store_true',
@@ -50,6 +60,26 @@ def add_vcs_arguments(parser):
                       default=False,
                       action='store_true',
                       help='Add VCS runtime -report=xprop.')
+    gvcs.add_argument('--vso',
+                      default=False,
+                      action='store_true',
+                      help='Enable VSO.ai metadata options for VCS compile and sim commands.')
+    gvcs.add_argument('--vso-workdir',
+                      type=str,
+                      default=None,
+                      help='Override the VSO.ai workdir used for VCS runtime metadata.')
+    gvcs.add_argument('--vso-dbdir',
+                      type=str,
+                      default=None,
+                      help='Override the VSO.ai dbdir used for init/finalize/merge learning state.')
+    gvcs.add_argument('--vso-buildname',
+                      type=str,
+                      default=None,
+                      help='Override the VSO.ai buildname used for VCS compile metadata.')
+    gvcs.add_argument('--vso-target-metric',
+                      type=str,
+                      default=None,
+                      help='Override the VSO.ai target metric list used during init (for example: line,fsm,tgl,assert).')
 
 
 def validate_vcs_switches_for_xcelium(options, parser):
@@ -64,6 +94,10 @@ def validate_vcs_switches_for_xcelium(options, parser):
         vcs_only_switches.append('--vcs-cm-hier')
     if options.vcs_profile:
         vcs_only_switches.append('--vcs-profile')
+    if options.smartlog:
+        vcs_only_switches.append('--smartlog')
+    if options.vcs_runner is not None:
+        vcs_only_switches.append('--vcs-runner')
     if options.dtl:
         vcs_only_switches.append('--dtl')
     if options.fgp is not None:
@@ -76,6 +110,16 @@ def validate_vcs_switches_for_xcelium(options, parser):
         vcs_only_switches.append('--vcs-xprop-banner')
     if options.vcs_xprop_report:
         vcs_only_switches.append('--vcs-xprop-report')
+    if options.vso:
+        vcs_only_switches.append('--vso')
+    if options.vso_workdir is not None:
+        vcs_only_switches.append('--vso-workdir')
+    if options.vso_dbdir is not None:
+        vcs_only_switches.append('--vso-dbdir')
+    if options.vso_buildname is not None:
+        vcs_only_switches.append('--vso-buildname')
+    if options.vso_target_metric is not None:
+        vcs_only_switches.append('--vso-target-metric')
     if vcs_only_switches:
         parser.error(
             "The following switches are VCS-only and cannot be used with Xcelium: {}. "
@@ -114,6 +158,37 @@ def validate_vcs_runtime_options(options, parser):
             "Do not combine them with '--xprop D'. Stopping before Bazel starts.")
     if options.fgp is not None and options.fgp < 1:
         parser.error("--fgp must be a positive integer thread count. Stopping before Bazel starts.")
+    if options.vcs_runner is not None and not options.vcs_runner.strip():
+        parser.error("--vcs-runner must not be empty. Stopping before Bazel starts.")
+    if any([
+        options.vso_workdir is not None,
+        options.vso_dbdir is not None,
+        options.vso_buildname is not None,
+        options.vso_target_metric is not None,
+    ]) and not options.vso:
+        parser.error(
+            "VSO.ai detail switches require '--vso'. "
+            "Stopping before Bazel starts.")
+    if options.vso_workdir is not None and not options.vso_workdir.strip():
+        parser.error("--vso-workdir must not be empty. Stopping before Bazel starts.")
+    if options.vso_dbdir is not None and not options.vso_dbdir.strip():
+        parser.error("--vso-dbdir must not be empty. Stopping before Bazel starts.")
+    if options.vso_buildname is not None and not options.vso_buildname.strip():
+        parser.error("--vso-buildname must not be empty. Stopping before Bazel starts.")
+    if options.vso_target_metric is not None and not options.vso_target_metric.strip():
+        parser.error("--vso-target-metric must not be empty. Stopping before Bazel starts.")
+    if options.vso and options.vso_target_metric is None and not options.cm:
+        parser.error(
+            "VSO.ai init requires coverage targeting information. "
+            "Please pass '--cm ...' or '--vso-target-metric ...'. Stopping before Bazel starts."
+        )
+    if options.vso and options.vso_target_metric is None and options.cm is not None:
+        supported_vso_metrics = {'line', 'fsm', 'tgl', 'assert', 'A'}
+        if not any(token in supported_vso_metrics for token in options.cm.split('+')):
+            parser.error(
+                "Could not derive a VSO.ai target metric from '--cm {}'. "
+                "Please pass '--vso-target-metric ...' explicitly. Stopping before Bazel starts.".format(options.cm)
+            )
     if options.dtl and options.gui:
         parser.error(
             "--dtl currently supports batch/UCLI flow only; --gui is not yet supported. "

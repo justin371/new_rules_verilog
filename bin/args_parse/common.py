@@ -175,6 +175,14 @@ def add_regression_arguments(parser):
                         default=60 * 20,
                         help=('Print the state of the queues every few minutes if nothing has finished.\n'
                               'Helpful for debugging hanging tests.\n'))
+    gregre.add_argument('--jobs',
+                        type=int,
+                        default=None,
+                        help='Maximum concurrent compile/simulation jobs. Defaults to the host CPU count.')
+    gregre.add_argument('--simmer-profile',
+                        default=False,
+                        action='store_true',
+                        help='Print simmer phase/job runtime details for performance tuning.')
     gregre.add_argument('--no-stdout',
                         default=False,
                         action='store_true',

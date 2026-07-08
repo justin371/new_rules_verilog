@@ -130,3 +130,10 @@ class SimulatorInterface(abc.ABC):
         active simulations. The default implementation does nothing.
         """
         return
+
+    def get_vso_build_name(self, vcomp_job):
+        """Return the VSO.ai buildname for a compile job.
+
+        The default implementation keeps the job name unchanged.
+        """
+        return vcomp_job.name

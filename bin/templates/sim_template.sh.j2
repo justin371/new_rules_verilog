@@ -9,6 +9,9 @@ set -o pipefail
 export PROJ_DIR={{ job.vcomper.rcfg.proj_dir }}
 export SIMRESULTS={{ job.job_dir }}
 export TEST_LOG_PATH={{ job._log_path }} # Export log path
+export SIM_WORK_DIR="{{ sim_working_dir }}"
+export VIP_LOG_DIR="$SIMRESULTS"
+export SVT_LOG_DIR="$SIMRESULTS"
 
 # Store user arguments safely
 ARGS=("$@")
@@ -89,7 +92,8 @@ function testFunction {
     #echo "Simulation working directory: {{ sim_working_dir }}"
     #echo "Simulation log file: {{ job._log_path }}" # Already exported as TEST_LOG_PATH
 
-    # Go back to sim results dir for main simulation
+    # Run from the per-test simulation directory so simulator, VIP, and debug
+    # scratch logs stay with the test instead of leaking into bazel_runfiles_main.
     cd "$SIMRESULTS"
 
     # Enter the simulation working directory

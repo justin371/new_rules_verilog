@@ -16,7 +16,8 @@ BSUB_OPTIONS="-I -q syn" # Common bsub options
 echo "Preparing to open wave file..."
 echo "Job directory: {{ job_dir }}"
 echo "Wave file: {{ wave_file_path }}"
-echo "Target run directory: {{ bazel_runfiles_dir }}"
+echo "Runfiles directory: {{ bazel_runfiles_dir }}"
+echo "Target run directory: {{ job_dir }}"
 
 # Check if bazel_runfiles_main directory exists
 if [ ! -d "{{ bazel_runfiles_dir }}" ]; then
@@ -25,8 +26,8 @@ if [ ! -d "{{ bazel_runfiles_dir }}" ]; then
     exit 1
 fi
 
-echo "Changing directory to {{ bazel_runfiles_dir }}"
-cd "{{ bazel_runfiles_dir }}"
+echo "Changing directory to {{ job_dir }}"
+cd "{{ job_dir }}"
 
 WAVE_VIEW_COMMAND='{{ wave_view_command }}'
 

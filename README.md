@@ -25,6 +25,30 @@ test --action_env=HOME
 test --action_env=LM_LICENSE_FILE
 ```
 
+For Synopsys VCS flows, you can add a named Bazel config in `.bazelrc` and invoke it explicitly. Example:
+
+```bazelrc
+build:vcs --@rules_verilog//:verilog_rtl_lint_test_command="runmod -t vcs --"
+```
+
+Then run a VCS-enabled target with:
+
+```bash
+bazel build --config=vcs //tests/vcs_filelist_validation:dv_tb_vcs
+```
+
+Note: `--config=vcs` only selects the VCS/Verdi wrapper commands. Targets that need VCS-specific behavior must still set `simulator = "VCS"`.
+
+For `simmer` VCS runs, `--simulator VCS` is enough. The VCS, `simv`, and Verdi launcher prefix defaults to `runmod vcs --`.
+
+```bash
+simmer -t //hw/dv/project_benches/sys/tb:some_vcs_test --simulator VCS
+```
+
+Override the launcher with `RV_VCS_RUNNER` or `--vcs-runner` only when a project needs a different module wrapper.
+
+VCS is supported through the two-step `simmer` flow. `verilog_dv_unit_test` and `verilog_rtl_unit_test` remain XRUN-only.
+
 ### Python Dependencies
 rules_verilog is also dependent on several python libraries. These are defined in requirements.txt and maybe installed in the package manager of your choice. The recommended flow is to install them via the pip_install rule in your `WORKSPACE` file:
 
@@ -66,6 +90,7 @@ Load rules into your `BUILD` files from [@rules_verilog//verilog:defs.bzl](veril
 
 ### Migration Notes
 - [Simulator migration checklist](docs/simulator_migration_checklist.md)
+- [Simmer VCS and Xcelium flow](docs/simmer_vcs_xcelium.md)
 
 ## Caveats
 - The SVUnit package always adds svunit_pkg.sv to the compiler command line after the user flists.  Without compiler library discovery, user flists cannot include/import anything that depends on svunit_pkg.
@@ -77,4 +102,4 @@ Load rules into your `BUILD` files from [@rules_verilog//verilog:defs.bzl](veril
 These rules were written with the Cadence and Synopsys tools as the underlying compiler and simulator. Abstraction leaks are prevalent throughout the rules.
 
 ### UVM Testbenches
-While rules for unit tests exist, the [verilog_dv_tb](docs/defs.md#verilog_dv_tb) and [verilog_dv_test_cfg](docs/defs.md#verilog_dv_test_cfg) rules are intended to work in conjunction with an external script capable of spawning many parallel simulations. Documentation throughout this codebase refers to a tool called `simmer` which may be released in a future version.
+While rules for XRUN unit tests exist, VCS testbenches use [verilog_dv_tb](docs/defs.md#verilog_dv_tb), [verilog_dv_test_cfg](docs/defs.md#verilog_dv_test_cfg), and `simmer` for two-step compile and simulation.

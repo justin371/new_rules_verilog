@@ -1,6 +1,7 @@
 #!/usr/bin/env python
 
 import argparse
+import mmap
 import os
 import platform
 import re
@@ -104,6 +105,58 @@ def get_file_tail(filepath, n_lines=25):
     except Exception:
         return []
 
+
+def scan_static_log(filepath, error_limit):
+    """Scan logs without dynamic signature directives using mmap."""
+    def decode_line(line):
+        return line.decode('utf-8', errors='replace').replace('\r\n', '\n')
+
+    def find_lines(data, markers, required_marker=None):
+        line_starts = set()
+        for marker in markers:
+            offset = 0
+            while True:
+                match_start = data.find(marker, offset)
+                if match_start == -1:
+                    break
+                line_start = data.rfind(b'\n', 0, match_start) + 1
+                line_end = data.find(b'\n', match_start)
+                line_end = len(data) if line_end == -1 else line_end + 1
+                if required_marker is None or required_marker in data[line_start:line_end]:
+                    line_starts.add(line_start)
+                offset = match_start + len(marker)
+        lines = []
+        for line_start in sorted(line_starts):
+            line_end = data.find(b'\n', line_start)
+            line_end = len(data) if line_end == -1 else line_end + 1
+            lines.append(decode_line(data[line_start:line_end]))
+        return lines
+
+    with open(filepath, 'rb') as log_file:
+        if os.path.getsize(filepath) == 0:
+            return [], [], [], False
+        with mmap.mmap(log_file.fileno(), 0, access=mmap.ACCESS_READ) as data:
+            if data.find(b"TEST_CHECK_") != -1:
+                return None
+
+            error_lines = []
+            seen_line_starts = set()
+            byte_error_regex = re.compile(err_regex.pattern.encode('utf-8'))
+            for match in byte_error_regex.finditer(data):
+                line_start = data.rfind(b'\n', 0, match.start()) + 1
+                if line_start in seen_line_starts:
+                    continue
+                line_end = data.find(b'\n', match.end())
+                line_end = len(data) if line_end == -1 else line_end + 1
+                error_lines.append(decode_line(data[line_start:line_end]))
+                seen_line_starts.add(line_start)
+                if len(error_lines) >= error_limit:
+                    break
+            seed_lines = find_lines(data, [b"SVSEED", b"random seed used"])
+            run_time_lines = find_lines(data, [b"real\t"], required_marker=b"user\t")
+            found_finish = any(data.find(signature.encode('utf-8')) != -1 for signature in finish_signatures)
+            return error_lines, seed_lines, run_time_lines, found_finish
+
 def main():
     # 1. Initialize Regex
     compile_error_regex()
@@ -128,47 +181,33 @@ def main():
                 err_log.write(f"#E log file size {size_mb:.2f}MB exceeds limit {options.file_size_limit}MB\n")
             sys.exit(1)
 
-    # 4. Initialize State
-    error_lines = []
-    seed_lines = []
-    run_time_lines = []
-    found_finish = False
-    
-    # 5. Scan File
-    # Using errors='replace' handles unicode issues in C (much faster than try/except loop)
     try:
-        with open(logfile, 'r', encoding='utf-8', errors='replace') as f:
-            for line in f:
-                
-                # A. Check for dynamic enable/disable (Optimization: fast string check first)
-                if "TEST_CHECK_" in line:
-                    if update_signatures(line):
-                        continue # Skip error check on the configuration line itself
-                
-                # B. Check for Errors
-                # This is the most expensive operation, done once per line
-                if err_regex.search(line):
-                    error_lines.append(line)
-                    if len(error_lines) >= options.error_limit:
-                        break # Optimization: Stop reading if error limit reached
-                
-                # C. Check for Finish signature (Optimized: stop checking once found)
-                elif not found_finish and finish_regex.search(line):
-                    found_finish = True
-                
-                # D. Gather Metadata (Seeds and Runtime)
-                # Using simple string substring checks is faster than regex
-                elif "SVSEED" in line or "random seed used" in line:
-                    seed_lines.append(line)
-                elif "real\t" in line and "user\t" in line: # Specific check for time format
-                    run_time_lines.append(line)
-                    
+        scan_result = scan_static_log(logfile, options.error_limit)
+        if scan_result is None:
+            error_lines = []
+            seed_lines = []
+            run_time_lines = []
+            found_finish = False
+            with open(logfile, 'r', encoding='utf-8', errors='replace') as f:
+                for line in f:
+                    if "TEST_CHECK_" in line and update_signatures(line):
+                        continue
+                    if err_regex.search(line):
+                        error_lines.append(line)
+                        if len(error_lines) >= options.error_limit:
+                            break
+                    elif not found_finish and finish_regex.search(line):
+                        found_finish = True
+                    elif "SVSEED" in line or "random seed used" in line:
+                        seed_lines.append(line)
+                    elif "real\t" in line and "user\t" in line:
+                        run_time_lines.append(line)
+        else:
+            error_lines, seed_lines, run_time_lines, found_finish = scan_result
     except FileNotFoundError:
         print(f"Error: File {logfile} not found.")
         sys.exit(1)
 
-    # 6. Generate Reports
-    
     # CASE 1: Errors Found
     if error_lines:
         print(f"Error found in {logfile}")

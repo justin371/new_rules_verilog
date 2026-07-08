@@ -1,6 +1,0 @@
-# This is a template used in the bazel verilog_rtl_unit_test rule
-# These commands are intended to be passed to VCS to create the waveform database for an rtl unit test if the appropriate command line flag is set
-fsdbDumpfile "waves.fsdb"
-fsdbDumpvars 0 {TOP_BASE_NAME} "+all"
-run
-exit

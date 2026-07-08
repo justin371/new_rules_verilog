@@ -272,7 +272,7 @@ class SubprocessJobRunner(JobRunner):
 
 class JobManager():
     """Manages multiple concurrent jobs"""
-    POLL_SLEEP_SECONDS = 3
+    POLL_SLEEP_SECONDS = 0.25
 
     def __init__(self, options, log):
         self.log = log
@@ -302,8 +302,10 @@ class JobManager():
 
         self._skipped = []
 
+        self._jobs_added = threading.Event()
+
         self._run_jobs_thread = threading.Thread(name="_run_jobs", target=self._run_jobs)
-        self._run_jobs_thread.setDaemon(True)
+        self._run_jobs_thread.daemon = True
         self._run_jobs_thread_active = True
         self._run_jobs_thread.start()
 
@@ -335,7 +337,7 @@ class JobManager():
                             self._move_children_to_skipped(job)
                         self._active.pop(i)
                         self._last_done_or_idle_print = datetime.datetime.now()
-                        #self._done.append(job)
+                        self._done.append(job)
                         # Ideally this would be before post_run, but pass_fail status may be set there
                         self._move_todo_to_ready()
                         self._move_ready_to_active()
@@ -346,7 +348,8 @@ class JobManager():
 
                 time.sleep(self.POLL_SLEEP_SECONDS)
             if not len(self._active):
-                time.sleep(self.POLL_SLEEP_SECONDS)
+                self._jobs_added.wait()
+                self._jobs_added.clear()
 
     def _move_children_to_skipped(self, job):
         for child in job._children:
@@ -446,6 +449,7 @@ class JobManager():
             raise ValueError("Tried to add a non-Job job {} of type {}".format(job, type(job)))
         if not self._done_grace_exit:
             bisect.insort_right(self._todo, job)
+            self._jobs_added.set()
         else:
             self._skipped.append(job)
 
@@ -454,12 +458,13 @@ class JobManager():
         self.log.info("Waiting until all jobs are completed.")
         while len(self._todo) or len(self._ready) or len(self._active):
             self.log.debug("still waiting")
-            time.sleep(30)
+            time.sleep(self.POLL_SLEEP_SECONDS)
 
     def stop(self):
         """Stop the job runner thread (cpu intenstive). This is really more of a pause than a full stop&exit."""
         self._run_jobs_thread_active = False
         self.exited_prematurely = True
+        self._jobs_added.set()
 
     def kill(self):
         self.stop()
@@ -478,14 +483,10 @@ class BazelTBJob(Job):
             self.vcomper.add_dependency(self)
 
         self.job_dir = self.vcomper.job_dir # Don't actually need a dir, but jobrunner/manager want it defined
-        if self.rcfg.options.no_compile:
-            self.main_cmdline = "echo \"Bypassing {} due to --no-compile\"".format(target)
+        if self.rcfg.options.no_compile or self.rcfg.options.no_bazel:
+            self.main_cmdline = "echo \"Bypassing {} due to --no-compile/--no-bazel\"".format(target)
         else:
-            self.main_cmdline = "bazel run {}".format(target)
-
-        self.suppress_output = True
-        if self.rcfg.options.tool_debug:
-            self.suppress_output = False
+            self.main_cmdline = "bazel build {}".format(target)
 
     def post_run(self):
         super(BazelTBJob, self).post_run()
@@ -510,11 +511,10 @@ class BazelTestCfgJob(Job):
             self.add_dependency(vcomper)
 
         self.job_dir = self.vcomper.job_dir # Don't actually need a dir, but jobrunner/manager want it defined
-        self.main_cmdline = "bazel build {}".format(self.bazel_target)
-
-        self.suppress_output = True
-        if self.rcfg.options.tool_debug:
-            self.suppress_output = False
+        if self.rcfg.options.no_bazel:
+            self.main_cmdline = "echo \"Bypassing {} due to --no-bazel\"".format(self.bazel_target)
+        else:
+            self.main_cmdline = "bazel build {}".format(self.bazel_target)
 
     def post_run(self):
         super(BazelTestCfgJob, self).post_run()

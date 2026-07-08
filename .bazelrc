@@ -7,6 +7,12 @@ build --//:verilog_rtl_cdc_test_command="runmod -t jg --"
 build --//:verilog_rtl_unit_test_command="runmod -t xrun --"
 build --//:verilog_rtl_lint_test_command="runmod -t xrun --"
 
+# Optional Synopsys VCS/Verdi wrappers. Use with `--config=vcs`.
+# Note: this only overrides tool wrapper commands. Targets still need
+# `simulator = "VCS"` where simulator-specific behavior is required.
+# Example: `bazel build --config=vcs //tests/vcs_filelist_validation:dv_tb_vcs`
+build:vcs --//:verilog_rtl_lint_test_command="runmod -t vcs --"
+
 #If true, Bazel tries to load external repositories from the Bzlmod system before looking into the WORKSPACE file
 ## Enable Bzlmod for every Bazel command
 common --noenable_bzlmod

@@ -43,6 +43,7 @@ class IterationCfg():
         self.target = target  # Total number of iterations to spawn
         self.spawn_count = 1  # Current count of spawned iterations
         self.jobs = []  # List of jobs associated with this iteration config
+        self.vso_assignments = []  # Optional VSO ask-all planned runs for this test template
 
     def inc(self, job):
         """Increment spawn count and add a job to the iteration"""
@@ -136,7 +137,8 @@ def print_summary(rcfg, vcomp_jobs, icfgs, jm, trd):
         for icfg in icfgs:
             if not icfg.jobs[0].vcomper is vcomp:
                 continue
-            max_job_time = max(icfg.jobs, key=lambda x: x.job_time)._get_total_time_str()
+            timed_jobs = [job for job in icfg.jobs if job.jobstatus in [job.jobstatus.PASSED, job.jobstatus.FAILED]]
+            max_job_time = max(timed_jobs, key=lambda x: x.job_time)._get_total_time_str() if timed_jobs else ""
             passed = [j for j in icfg.jobs if j.jobstatus.completed and j.jobstatus.successful]
             failed = [j for j in icfg.jobs if j.jobstatus == j.jobstatus.FAILED]
             skipped = [j for j in icfg.jobs if j.jobstatus not in [j.jobstatus.FAILED, j.jobstatus.PASSED]]
@@ -217,6 +219,51 @@ def print_summary(rcfg, vcomp_jobs, icfgs, jm, trd):
         with open(REGRESSION_LOG_PATH, 'a') as file:
             formatted_string = "\n" + "Simulation Summary\n" + "\n".join(map(str, table_data_formatted))
             file.write(formatted_string)
+
+
+def print_simmer_profile(rcfg, jm):
+    if not getattr(rcfg.options, "simmer_profile", False):
+        return
+
+    def job_name(job):
+        name = str(job)
+        if name.startswith("<") and name.endswith(">"):
+            return str(getattr(job, "name", name))
+        return name
+
+    rows = []
+    for duration, name, detail in getattr(rcfg, "profile_events", []):
+        rows.append((duration, "PHASE", name, "DONE", "", detail))
+    for job in getattr(jm, "_done", []):
+        rows.append((
+            job.duration_s,
+            job.__class__.__name__,
+            job_name(job),
+            str(job.jobstatus),
+            getattr(job, "job_dir", "") or "",
+            getattr(job, "main_cmdline", "") or "",
+        ))
+    for job in getattr(jm, "_skipped", []):
+        rows.append((
+            0,
+            job.__class__.__name__,
+            job_name(job),
+            str(job.jobstatus),
+            getattr(job, "job_dir", "") or "",
+            getattr(job, "main_cmdline", "") or "",
+        ))
+
+    rows.sort(key=lambda row: row[0], reverse=True)
+    lines = ["{:<9} {:<18} {:<8} {}".format("seconds", "kind", "status", "item")]
+    lines.append("{:<9} {:<18} {:<8} {}".format("-------", "----", "------", "----"))
+    for duration, kind, name, status, job_dir, detail in rows:
+        lines.append("{:<9.2f} {:<18} {:<8} {}".format(duration, kind, status, name))
+        if job_dir:
+            lines.append("{}dir: {}".format(" " * LOGGER_INDENT, job_dir))
+        if detail:
+            lines.append("{}cmd: {}".format(" " * LOGGER_INDENT, detail))
+
+    rcfg.log.summary("Simmer Profile\n%s", "\n".join(" " * LOGGER_INDENT + line for line in lines))
 
 
 def calc_simresults_location(checkout_path):

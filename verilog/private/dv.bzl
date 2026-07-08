@@ -20,11 +20,6 @@ DVTBInfo = provider(fields = {
     "simulator": "Simulator selected for this DV testbench.",
 })
 
-def _resolve_unit_test_default_file(simulator, selected_file, xrun_default_file, vcs_default_file):
-    if simulator == "VCS" and selected_file.short_path == xrun_default_file.short_path:
-        return vcs_default_file
-    return selected_file
-
 def _sanitize_vcs_defines(defines):
     sanitized = {}
     for key, value in defines.items():
@@ -83,6 +78,19 @@ def _validate_runtime_args(runtime_args, simulator):
                         "Use bazel_runfiles_main/... or an absolute path instead."
                         .format(simulator, arg)
                     )
+
+def _select_simulator_args(ctx, base_attr, legacy_attr, simulator):
+    base_args = getattr(ctx.attr, base_attr)
+    legacy_args = getattr(ctx.attr, legacy_attr)
+    if base_args and legacy_args:
+        fail(
+            "{} sets both '{}' and legacy '{}'. Use '{}' only; each verilog_dv_tb target supports exactly one simulator."
+            .format(ctx.label, base_attr, legacy_attr, base_attr)
+        )
+    if legacy_args:
+        print("{}: '{}' is legacy; use '{}' with simulator = '{}' instead.".format(ctx.label, legacy_attr, base_attr, simulator))
+        return legacy_args
+    return base_args
 
 def _verilog_dv_test_base_cfg_impl(ctx):
     parent_uvm_testnames = [dep[DVTestInfo].uvm_testname for dep in reversed(ctx.attr.inherits) if hasattr(dep[DVTestInfo], "uvm_testname")]
@@ -489,17 +497,19 @@ def _verilog_dv_tb_impl(ctx):
     #xrun_extra_compile_args.append("-top {}".format(top))
     #vcs_extra_compile_args.append("-top hdl_top -top hvl_top")
     #xrun_extra_compile_args.append("-top hdl_top -top hvl_top")    
+    selected_compile_args = ctx.attr.extra_compile_args
     if simulator == "VCS":
-        compile_args.extend(_sanitize_vcs_compile_args(ctx.attr.extra_compile_args_vcs))
+        selected_compile_args = _select_simulator_args(ctx, "extra_compile_args", "extra_compile_args_vcs", simulator)
+        compile_args.extend(_sanitize_vcs_compile_args(selected_compile_args))
     else:
-        compile_args.extend(ctx.attr.extra_compile_args)
-    pldm_ice_extra_compile_args.extend(ctx.attr.extra_compile_args)
-    pldm_sa_extra_compile_args.extend(ctx.attr.extra_compile_args)
+        compile_args.extend(selected_compile_args)
+    pldm_ice_extra_compile_args.extend(selected_compile_args)
+    pldm_sa_extra_compile_args.extend(selected_compile_args)
 
     if simulator == "VCS":
         compile_template = ctx.file._compile_args_template_vcs
         compile_defines = "\n".join(["+define+{}{}".format(key, value) for key, value in _sanitize_vcs_defines(defines).items()])
-        compile_flists = flists_to_arguments(ctx.attr.shells + ctx.attr.deps, VerilogInfo, "transitive_flists", "\n-f")
+        compile_flists = flists_to_arguments(ctx.attr.shells + ctx.attr.deps, VerilogInfo, "transitive_flists", "\n-file")
     else:
         compile_template = ctx.file._compile_args_template_xrun
         compile_defines = "\n".join(["-define {}{}".format(key, value) for key, value in defines.items()])
@@ -525,7 +535,7 @@ def _verilog_dv_tb_impl(ctx):
     )
     if simulator == "VCS":
         runtime_template = ctx.file._default_sim_opts_vcs
-        runtime_args = ctx.attr.extra_runtime_args_vcs
+        runtime_args = _select_simulator_args(ctx, "extra_runtime_args", "extra_runtime_args_vcs", simulator)
         _validate_runtime_args(runtime_args, "VCS")
         runtime_dpi = flists_to_arguments(
             ctx.attr.shells + ctx.attr.deps,
@@ -662,23 +672,17 @@ verilog_dv_tb = rule(
             doc = "Coverage configuration file to provide to simmer.",
         ),
         "extra_compile_args": attr.string_list(
-            doc = "Additional flags to pass to the Xcelium compile/elaboration step.\n" +
-                  "Used only when simulator = XRUN.\n",
+            doc = "Additional flags to pass to the selected simulator compile/elaboration step.\n",
         ),
         "extra_compile_args_vcs": attr.string_list(
-            doc = "Additional flags to pass to the VCS compile/elaboration step.\n" +
-                  "Used only when simulator = VCS.\n" +
-                  "When these arguments reference filelists or sources, prefer runfiles-root-relative paths such as hw/... and external/... instead of ../ traversals.\n",
+            doc = "Legacy alias for extra_compile_args when simulator = VCS. Do not use in new targets.\n",
         ),
         "extra_runtime_args": attr.string_list(
-            doc = "Additional flags to pass to Xcelium simulation runs. These flags will not be provided to compilation.\n" +
-                  "Used only when simulator = XRUN.\n" +
+            doc = "Additional flags to pass to selected simulator runs. These flags will not be provided to compilation.\n" +
                   "Simulation runs execute from the per-test sim directory, so path-bearing arguments should generally use absolute paths or bazel_runfiles_main/... paths.\n",
         ),
         "extra_runtime_args_vcs": attr.string_list(
-            doc = "Additional flags to pass to VCS simulation runs. These flags will not be provided to compilation.\n" +
-                  "Used only when simulator = VCS.\n" +
-                  "Simulation runs execute from the per-test sim directory, so path-bearing arguments should generally use absolute paths or bazel_runfiles_main/... paths.\n",
+            doc = "Legacy alias for extra_runtime_args when simulator = VCS. Do not use in new targets.\n",
         ),
         "extra_runfiles": attr.label_list(
             allow_files = True,
@@ -742,23 +746,11 @@ def _verilog_dv_unit_test_impl(ctx):
     flists = get_transitive_srcs([], ctx.attr.deps, VerilogInfo, "transitive_flists")
     flists_list = flists.to_list()
     simulator = ctx.attr.simulator
-
-    unit_test_template = _resolve_unit_test_default_file(
-        simulator,
-        ctx.file.ut_sim_template,
-        ctx.file._ut_sim_template_xrun_default,
-        ctx.file._ut_sim_template_vcs_default,
-    )
-    default_sim_opts = _resolve_unit_test_default_file(
-        simulator,
-        ctx.file.default_sim_opts,
-        ctx.file._default_sim_opts_xrun_default,
-        ctx.file._default_sim_opts_vcs_default,
-    )
-    dpi_tool_name = "vcs" if simulator == "VCS" else None
-    simulator_command = ctx.attr._command_override[ToolEncapsulationInfo].command
     if simulator == "VCS":
-        simulator_command = ctx.attr._command_override_vcs[ToolEncapsulationInfo].command
+        fail("verilog_dv_unit_test {} does not support simulator = 'VCS'. Use the VCS two-step flow via verilog_dv_tb + simmer instead.".format(ctx.label))
+    unit_test_template = ctx.file.ut_sim_template
+    default_sim_opts = ctx.file.default_sim_opts
+    simulator_command = ctx.attr._command_override[ToolEncapsulationInfo].command
 
     ctx.actions.expand_template(
         template = unit_test_template,
@@ -766,7 +758,7 @@ def _verilog_dv_unit_test_impl(ctx):
         substitutions = {
             "{SIMULATOR_COMMAND}": simulator_command,
             "{DEFAULT_SIM_OPTS}": "-f {}".format(default_sim_opts.short_path),
-            "{DPI_LIBS}": flists_to_arguments(ctx.attr.deps, VerilogInfo, "transitive_dpi", "-sv_lib", "", dpi_tool_name),
+            "{DPI_LIBS}": flists_to_arguments(ctx.attr.deps, VerilogInfo, "transitive_dpi", "-sv_lib", "", None),
             "{FLISTS}": " ".join(["-f {}".format(f.short_path) for f in flists_list]),
             "{SIM_ARGS}": " ".join(ctx.attr.sim_args),
         },
@@ -800,19 +792,18 @@ verilog_dv_unit_test = rule(
         "simulator": attr.string(
             default = "XRUN",
             values = ["XRUN", "VCS"],
-            doc = "Simulator to use for this unit test. XRUN uses Cadence defaults and VCS uses Synopsys defaults.\n",
+            doc = "Simulator to use for this unit test. Only XRUN is supported here.\n" +
+                  "For VCS, use the two-step flow via verilog_dv_tb and simmer.\n",
         ),
         "ut_sim_template": attr.label(
             allow_single_file = True,
             default = Label("@rules_verilog//vendors/cadence:verilog_dv_unit_test.sh.template"),
-            doc = "The template to generate the bash script to run the simulation.\n" +
-                  "When left at the default Cadence label and simulator = VCS, the rule automatically switches to the Synopsys unit-test template.\n",
+            doc = "The template to generate the bash script to run the simulation.\n",
         ),
         "default_sim_opts": attr.label(
             allow_single_file = True,
             default = "@rules_verilog//vendors/cadence:verilog_dv_unit_test_opts.f",
-            doc = "Default simulator options to pass to the simulator.\n" +
-                  "When left at the default Cadence label and simulator = VCS, the rule automatically switches to the Synopsys default opts file.\n",
+            doc = "Default simulator options to pass to the simulator.\n",
             # TODO remove this and just make it part of the template?
         ),
         "sim_args": attr.string_list(
@@ -824,26 +815,6 @@ verilog_dv_unit_test = rule(
             doc = "Allows custom override of simulator command in the event of wrapping via modulefiles.\n" +
                   "Example override in project's .bazelrc:\n" +
                   '  build --@rules_verilog//:verilog_dv_unit_test_command="runmod -t xrun --"',
-        ),
-        "_command_override_vcs": attr.label(
-            default = Label("@rules_verilog//:verilog_dv_unit_test_command_vcs"),
-            doc = "Default command encapsulation for VCS dv unit tests.",
-        ),
-        "_ut_sim_template_xrun_default": attr.label(
-            default = Label("@rules_verilog//vendors/cadence:verilog_dv_unit_test.sh.template"),
-            allow_single_file = True,
-        ),
-        "_ut_sim_template_vcs_default": attr.label(
-            default = Label("@rules_verilog//vendors/synopsys:verilog_dv_unit_test.sh.template"),
-            allow_single_file = True,
-        ),
-        "_default_sim_opts_xrun_default": attr.label(
-            default = Label("@rules_verilog//vendors/cadence:verilog_dv_unit_test_opts.f"),
-            allow_single_file = True,
-        ),
-        "_default_sim_opts_vcs_default": attr.label(
-            default = Label("@rules_verilog//vendors/synopsys:verilog_dv_unit_test_opts.f"),
-            allow_single_file = True,
         ),
     },
     outputs = {"out": "%{name}_run.sh"},

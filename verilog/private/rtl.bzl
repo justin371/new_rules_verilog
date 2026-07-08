@@ -12,8 +12,24 @@ def _resolve_unit_test_default_file(simulator, selected_file, xrun_default_file,
         return vcs_default_file
     return selected_file
 
+def _split_label_package_name(label):
+    value = str(label)
+    if "//" in value:
+        value = value.split("//", 1)[1]
+    if ":" in value:
+        package, name = value.split(":", 1)
+    else:
+        package = value
+        name = value.rsplit("/", 1)[-1]
+    return package, name
+
+def _label_matches_default(selected_label, default_label):
+    selected_package, selected_name = _split_label_package_name(selected_label)
+    default_package, default_name = _split_label_package_name(default_label)
+    return selected_package == default_package and selected_name == default_name
+
 def _resolve_label_default_file(simulator, selected_label, xrun_default_label, xrun_default_file, vcs_default_file):
-    if simulator == "VCS" and str(selected_label) == xrun_default_label:
+    if simulator == "VCS" and _label_matches_default(selected_label, xrun_default_label):
         return vcs_default_file
     return xrun_default_file
 
@@ -270,7 +286,8 @@ def verilog_rtl_pkg(
         name,
         direct,
         no_synth = False,
-        deps = []):
+        deps = [],
+        visibility = None):
     """A single Systemverilog package.
 
     This rule is a specialized case of verilog_rtl_library. Systemverilog
@@ -289,6 +306,7 @@ def verilog_rtl_pkg(
       deps: Other packages this target is dependent on.
 
         See verilog_rtl_library::deps.
+      visibility: Bazel target visibility.
     """
     verilog_rtl_library(
         name = name,
@@ -297,6 +315,7 @@ def verilog_rtl_pkg(
         is_pkg = True,
         no_synth = no_synth,
         enable_gumi = False,
+        visibility = visibility,
     )
 
 def verilog_rtl_shell(
@@ -350,6 +369,9 @@ def _verilog_rtl_unit_test_impl(ctx):
     srcs_list = trans_srcs.to_list()
     flists = get_transitive_srcs([], ctx.attr.shells + ctx.attr.deps, VerilogInfo, "transitive_flists")
     flists_list = flists.to_list()
+    simulator = ctx.attr.simulator
+    if simulator == "VCS":
+        fail("verilog_rtl_unit_test {} does not support simulator = 'VCS'. Use the VCS two-step flow via simmer instead.".format(ctx.label))
 
     top = ""
     for dep in ctx.attr.deps:
@@ -374,26 +396,10 @@ def _verilog_rtl_unit_test_impl(ctx):
     else:
         post_fa = " \\"
 
-    simulator = ctx.attr.simulator
-    ut_sim_template = _resolve_unit_test_default_file(
-        simulator,
-        ctx.file.ut_sim_template,
-        ctx.file._ut_sim_template_xrun_default,
-        ctx.file._ut_sim_template_vcs_default,
-    )
-    ut_sim_waves_template = _resolve_unit_test_default_file(
-        simulator,
-        ctx.file.ut_sim_waves_template,
-        ctx.file._ut_sim_waves_template_xrun_default,
-        ctx.file._ut_sim_waves_template_vcs_default,
-    )
+    ut_sim_template = ctx.file.ut_sim_template
+    ut_sim_waves_template = ctx.file.ut_sim_waves_template
     simulator_command = ctx.attr.command_override[ToolEncapsulationInfo].command
-    if simulator == "VCS" and str(ctx.attr.command_override.label) == "@rules_verilog//:verilog_rtl_unit_test_command":
-        simulator_command = ctx.attr._command_override_vcs[ToolEncapsulationInfo].command
-
     wave_viewer_command = ctx.attr.wave_viewer_command[ToolEncapsulationInfo].command
-    if simulator == "VCS" and str(ctx.attr.wave_viewer_command.label) == "@rules_verilog//:verilog_rtl_wave_viewer_command":
-        wave_viewer_command = ctx.attr._wave_viewer_command_vcs[ToolEncapsulationInfo].command
 
     waves_cmd = ctx.actions.declare_file(ctx.label.name + "_waves.tcl")
     ctx.actions.expand_template(
@@ -450,7 +456,8 @@ verilog_rtl_unit_test = rule(
         "simulator": attr.string(
             default = "XRUN",
             values = ["XRUN", "VCS"],
-            doc = "Simulator to use for this RTL unit test. XRUN uses Cadence defaults and VCS uses Synopsys defaults.\n",
+            doc = "Simulator to use for this RTL unit test. Only XRUN is supported here.\n" +
+                  "For VCS, use the two-step flow via simmer.\n",
         ),
         "ut_sim_template": attr.label(
             allow_single_file = True,
@@ -462,8 +469,7 @@ verilog_rtl_unit_test = rule(
                   "    post_flist_args = [\n" +
                   "    \"--directory <path_to_test_directory_from_workspace>\",\n" +
                   " ]," +
-                  "```\n" +
-                  "When left at the default Cadence label and simulator = VCS, the rule automatically switches to the Synopsys unit-test template.\n",
+                  "```\n",
         ),
         "ut_sim_waves_template": attr.label(
             allow_single_file = True,
@@ -471,8 +477,7 @@ verilog_rtl_unit_test = rule(
             doc = "The template to generate the waves command script to run in the test.\n" +
                   "When using the SVUnit ut_sim_template or a custom SVUnit invocation, the default verilog_rtl_unit_test_waves.tcl.template will not work. " +
                   "You must either write your own waves script or use the SVUnit waves template: " +
-                  "@rules_verilog//vendors/cadence:verilog_rtl_unit_test_svunit_waves.tcl.template\n" +
-                  "When left at the default Cadence label and simulator = VCS, the rule automatically switches to the Synopsys waves template.\n",
+                  "@rules_verilog//vendors/cadence:verilog_rtl_unit_test_svunit_waves.tcl.template\n",
         ),
         "command_override": attr.label(
             default = Label("@rules_verilog//:verilog_rtl_unit_test_command"),
@@ -484,32 +489,7 @@ verilog_rtl_unit_test = rule(
             default = Label("@rules_verilog//:verilog_rtl_wave_viewer_command"),
             doc = "Allows custom override of waveform viewer command in the event of wrapping via modulefiles.\n" +
                   "Example override in project's .bazelrc:\n" +
-                  '  build --@rules_verilog//:verilog_rtl_wave_viewer_command="runmod xrun --"\n' +
-                  "When left at the default label and simulator = VCS, the rule automatically switches to the Verdi wrapper command.\n",
-        ),
-        "_command_override_vcs": attr.label(
-            default = Label("@rules_verilog//:verilog_rtl_unit_test_command_vcs"),
-            doc = "Default command encapsulation for VCS rtl unit tests.",
-        ),
-        "_wave_viewer_command_vcs": attr.label(
-            default = Label("@rules_verilog//:verilog_rtl_wave_viewer_command_vcs"),
-            doc = "Default waveform viewer command encapsulation for VCS rtl unit tests.",
-        ),
-        "_ut_sim_template_xrun_default": attr.label(
-            default = Label("@rules_verilog//vendors/cadence:verilog_rtl_unit_test.sh.template"),
-            allow_single_file = True,
-        ),
-        "_ut_sim_template_vcs_default": attr.label(
-            default = Label("@rules_verilog//vendors/synopsys:verilog_rtl_unit_test.sh.template"),
-            allow_single_file = True,
-        ),
-        "_ut_sim_waves_template_xrun_default": attr.label(
-            default = Label("@rules_verilog//vendors/cadence:verilog_rtl_unit_test_waves.tcl.template"),
-            allow_single_file = True,
-        ),
-        "_ut_sim_waves_template_vcs_default": attr.label(
-            default = Label("@rules_verilog//vendors/synopsys:verilog_rtl_unit_test_waves.tcl.template"),
-            allow_single_file = True,
+                  '  build --@rules_verilog//:verilog_rtl_wave_viewer_command="runmod xrun --"\n',
         ),
         "data": attr.label_list(
             allow_files = True,
@@ -592,7 +572,7 @@ def _verilog_rtl_lint_test_impl(ctx):
         substitutions = {
             "{RULEFILE}": rulefile.short_path,
             "{DEFINES}": " ".join(defines),
-            "{FLISTS}": " ".join(["-f {}".format(f.short_path) for f in trans_flists.to_list()]),
+            "{FLISTS}": " ".join(["{} {}".format("-file" if simulator == "VCS" else "-f", f.short_path) for f in trans_flists.to_list()]),
             "{TOP_PATH}": top_path,
             "{INST_TOP}": ctx.attr.top,
             "{LINT_PARSER}": lint_parser.short_path,
@@ -610,7 +590,7 @@ def _verilog_rtl_lint_test_impl(ctx):
             "{SIMULATOR_COMMAND}": simulator_command,
             "{COMMAND_SCRIPT}": ctx.outputs.command_script.short_path,
             "{DEFINES}": " ".join(defines),
-            "{FLISTS}": " ".join(["-f {}".format(f.short_path) for f in trans_flists.to_list()]),
+            "{FLISTS}": " ".join(["{} {}".format("-file" if simulator == "VCS" else "-f", f.short_path) for f in trans_flists.to_list()]),
             "{TOP_PATH}": top_path,
             "{DESIGN_INFO}": " ".join(["{}".format(design_info.short_path) for design_info in ctx.files.design_info]),
             "{RULEFILE}": rulefile.short_path,
@@ -745,7 +725,7 @@ verilog_rtl_lint_test = rule(
         ),
         "_lint_parser_vcs_default": attr.label(
             allow_single_file = True,
-            default = "@rules_verilog//bin:lint_parser_vcs",
+            default = "@rules_verilog//bin:lint_parser_vcs.py",
         ),
         "_rulefile_vcs_default": attr.label(
             allow_single_file = True,

@@ -6,12 +6,10 @@ import ast
 import fnmatch
 import os
 import re
-import shlex
 import subprocess
 import sys
-from tempfile import TemporaryFile
-import datetime
 import json
+import time
 
 ################################################################################
 # rules_verilog lib imports
@@ -21,6 +19,11 @@ from lib import rv_utils
 # that doesn't format, but more work than its worth
 LOGGER_INDENT = 8
 BENCHES_REL_DIR = os.environ.get('BENCHES_REL_DIR', 'benches')
+DISCOVERY_CACHE_FILES = (
+    "all_vcomp.json",
+    "tests_to_tags.json",
+    "tests_to_simulator.json",
+)
 
 
 class RegressionConfig():
@@ -45,15 +48,32 @@ class RegressionConfig():
             os.mkdir(self.regression_dir)
 
         self.invocation_dir = os.getcwd()  # Directory where regression was started
+        self.profile_events = []
+        self.deferred_messages = []  # Messages to be printed at completion
+        self.current_time = 0        # Timestamp for regression
 
-        # Run test discovery if needed
-        if not self.options.no_compile or not os.path.exists(
-                self.proj_dir + "/" + "all_vcomp.json") or not os.path.exists(self.proj_dir + "/" +
-                                                                              "tests_to_tags.json") or not os.path.exists(self.proj_dir + "/" +
-                                                                                                                           "tests_to_simulator.json"):
-            if not self.options.no_bazel:
-                self.test_discovery_all()
-        self.test_discovery_match()
+        # Subsystem configuration (with tag associations)
+        self.category_total_cases = {}
+        self.load_category_config(options.category_cfg)
+
+        self.use_cached_discovery = self._profile_step(
+            "discovery_cache_check",
+            "check discovery json freshness",
+            self._should_use_cached_discovery,
+        )
+        if not self.use_cached_discovery:
+            if self.options.no_bazel:
+                self.log.critical("Discovery cache missing or stale. Please rerun without --no-bazel.")
+            self._profile_step(
+                "test_discovery_all",
+                "bazel query/cquery/build test cfg metadata",
+                self.test_discovery_all,
+            )
+        self._profile_step(
+            "test_discovery_match",
+            "filter requested bench:test globs",
+            self.test_discovery_match,
+        )
 
         # Verify tests were found
         total_tests = sum([iterations for vcomp in self.all_vcomp.values() for test, iterations in vcomp.items()])
@@ -73,12 +93,13 @@ class RegressionConfig():
                 "tidy=%s passing tests will automatically be cleaned up. Use --nt to prevent automatic cleanup.",
                 self.tidy)
 
-        self.deferred_messages = []  # Messages to be printed at completion
-        self.current_time = 0        # Timestamp for regression
-
-        # Subsystem configuration (with tag associations)
-        self.category_total_cases = {}
-        self.load_category_config(options.category_cfg)
+    def _profile_step(self, name, detail, func):
+        start = time.time()
+        try:
+            return func()
+        finally:
+            if getattr(self.options, "simmer_profile", False):
+                self.profile_events.append((time.time() - start, name, detail))
 
     def load_category_config(self, cfg_path: str = None):
         """
@@ -143,11 +164,17 @@ class RegressionConfig():
         :param d: Dictionary to save
         :param j: Filename to save to
         """
+        path = os.path.join(self.proj_dir, j)
+        temporary_path = "{}.{}.tmp".format(path, os.getpid())
         try:
-            with open(self.proj_dir + "/" + j, "w") as f:
+            with open(temporary_path, "w") as f:
                 json.dump(d, f, indent=4)
+            os.replace(temporary_path, path)
         except Exception as e:
             self.log.critical("Failed to create '%s' file: %s", j, e)
+        finally:
+            if os.path.exists(temporary_path):
+                os.remove(temporary_path)
 
     def json_to_dict(self, j):
         """
@@ -167,6 +194,104 @@ class RegressionConfig():
             self.log.critical("'%s' not found. Please compile first!", j)
             sys.exit(0)
 
+    def _cache_path(self, filename):
+        return os.path.join(self.proj_dir, filename)
+
+    def _have_discovery_cache(self):
+        return all(os.path.exists(self._cache_path(filename)) for filename in DISCOVERY_CACHE_FILES)
+
+    def _iter_discovery_dependency_paths(self):
+        for root, dirs, files in os.walk(self.proj_dir):
+            dirs[:] = [
+                directory for directory in dirs
+                if directory != ".git" and not directory.startswith("bazel-")
+            ]
+            for filename in files:
+                if filename in ("BUILD", "BUILD.bazel") or filename.endswith(".bzl"):
+                    yield os.path.join(root, filename)
+
+    def _discovery_cache_is_fresh(self):
+        if not self._have_discovery_cache():
+            return False
+
+        oldest_cache_mtime = min(os.path.getmtime(self._cache_path(filename)) for filename in DISCOVERY_CACHE_FILES)
+        for dependency_path in self._iter_discovery_dependency_paths():
+            if os.path.getmtime(dependency_path) > oldest_cache_mtime:
+                self.log.debug("Discovery cache invalidated by %s", dependency_path)
+                return False
+        return True
+
+    def _should_use_cached_discovery(self):
+        if self.options.no_bazel:
+            return self._have_discovery_cache()
+        if self._discovery_cache_is_fresh():
+            self.log.info("Using cached test discovery")
+            return True
+        return False
+
+    def _split_btglob(self, btiglob):
+        try:
+            btglob, iterations = btiglob.split("@")
+            try:
+                iterations = int(iterations)
+            except ValueError:
+                self.log.critical("Iterations (value after @) must be an integer: '%s'", btiglob)
+        except ValueError:
+            btglob = btiglob
+            iterations = 1
+
+        try:
+            bglob, tglob = btglob.split(":")
+        except ValueError:
+            pwd = os.getcwd()
+            benches_dir = os.path.join(self.proj_dir, BENCHES_REL_DIR)
+            if not (benches_dir in pwd and len(benches_dir) < len(pwd)):
+                self.log.critical("Not in a benches/ directory. Must provide bench:test style glob.")
+            bglob = pwd[len(benches_dir) + 1:]
+            tglob = btglob
+        return bglob, tglob, iterations
+
+    def _bench_glob_to_regex(self, bench_glob):
+        return re.escape(bench_glob).replace(r"\*", ".*").replace(r"\?", ".")
+
+    def _build_vcomp_discovery_query(self):
+        bench_globs = sorted({self._split_btglob(ta.btiglob)[0] for ta in self.options.tests})
+        if not bench_globs or bench_globs == ["*"]:
+            return "kind(dv_tb, //{}/...)".format(BENCHES_REL_DIR)
+
+        queries = [
+            'filter(":{regex}$", kind(dv_tb, //{benches}/...))'.format(
+                regex=self._bench_glob_to_regex(bench_glob),
+                benches=BENCHES_REL_DIR,
+            )
+            for bench_glob in bench_globs
+        ]
+        return " union ".join("({})".format(query) for query in queries)
+
+    def _build_test_cfg_query(self, vcomp):
+        vcomp_path, _ = vcomp.split(':')
+        test_wildcard = os.path.join(vcomp_path, "tests", "...")
+        if self.options.allow_no_run:
+            return 'attr(abstract, 0, kind(dv_test_base_cfg, {test_wildcard} intersect allpaths({test_wildcard}, {vcomp})))'.format(
+                test_wildcard=test_wildcard,
+                vcomp=vcomp,
+            )
+        return 'attr(no_run, 0, attr(abstract, 0, kind(dv_test_base_cfg, {test_wildcard} intersect allpaths({test_wildcard}, {vcomp}))))'.format(
+            test_wildcard=test_wildcard,
+            vcomp=vcomp,
+        )
+
+    def _run_command(self, cmd, shell=False):
+        self.log.debug(" > %s", cmd if isinstance(cmd, str) else " ".join(cmd))
+        result = subprocess.run(
+            cmd,
+            shell=shell,
+            check=False,
+            capture_output=True,
+            text=True,
+        )
+        return result.returncode, result.stdout, result.stderr
+
     def test_discovery_all(self):
         """
         Discover all available tests in the checkout
@@ -175,108 +300,70 @@ class RegressionConfig():
         self.log.summary("Starting test discovery")
         dtp = rv_utils.DatetimePrinter(self.log)
 
-        # Query for all testbenches using bazel
-        cmd = "bazel query \"kind(dv_tb, //{}/...)\"".format(BENCHES_REL_DIR)
-        self.log.debug(" > %s", cmd)
+        # Query only the benches requested by the current test globs.
+        cmd = 'bazel query "{}"'.format(self._build_vcomp_discovery_query())
+        dtp.reset()
+        returncode, stdout, stderr = self._run_command(cmd, shell=True)
+        dtp.stop_and_print()
+        if returncode:
+            self.log.critical("bazel bench discovery failed: %s", stderr)
+        self.all_vcomp = dict((label, {}) for label in stdout.splitlines() if label)
+
+        if not self.all_vcomp:
+            self.tests_to_tags = {}
+            self.tests_to_simulator = {}
+            return
+
+        combined_test_query = " union ".join(
+            "({})".format(self._build_test_cfg_query(vcomp)) for vcomp in sorted(self.all_vcomp)
+        )
 
         dtp.reset()
-        with TemporaryFile() as stdout_fp, TemporaryFile() as stderr_fp:
-            p = subprocess.Popen(cmd, stdout=stdout_fp, stderr=stderr_fp, shell=True)
-            p.wait()
-            stdout_fp.seek(0)
-            stderr_fp.seek(0)
-            stdout = stdout_fp.read()
-            stderr = stderr_fp.read()
-            if p.returncode:
-                self.log.critical("bazel bench discovery failed: %s", stderr.decode('ascii'))
-
+        returncode, stdout, stderr = self._run_command(
+            'bazel cquery "{}"'.format(combined_test_query),
+            shell=True,
+        )
         dtp.stop_and_print()
-        self.all_vcomp = stdout.decode('ascii').split('\n')
-        self.all_vcomp = dict([(av, {}) for av in self.all_vcomp if av])
+        if returncode:
+            self.log.critical("bazel test discovery failed:\n%s", stderr)
 
-        all_tbs = []
-        for ta in self.options.tests:
-            tb_name = ta.btiglob.split(":")[0]
-            query = "*:{}".format(tb_name)  # Match against bazel label
-            tb_match = fnmatch.filter(self.all_vcomp.keys(), query)
-            all_tbs = all_tbs + tb_match
+        query_results = re.sub(r"\([a-z0-9]{7,64}\) *", "", stdout.replace('\n', ' ')).split()
 
-        self.all_vcomp = stdout.decode('ascii').split('\n')
-        self.all_vcomp = dict([(av, {}) for av in all_tbs if av])
-
-        vcomp_to_query_results = {}
-
-        # Discover tests for each vcomponent
-        for vcomp, tests in self.all_vcomp.items():
-            vcomp_path, _ = vcomp.split(':')
-            test_wildcard = os.path.join(vcomp_path, "tests", "...")
-            if self.options.allow_no_run:
-                cmd = 'bazel cquery "attr(abstract, 0, kind(dv_test_base_cfg, {test_wildcard} intersect allpaths({test_wildcard}, {vcomp})))"'.format(
-                    test_wildcard=test_wildcard, vcomp=vcomp)
-            else:
-                cmd = 'bazel cquery "attr(no_run, 0, attr(abstract, 0, kind(dv_test_base_cfg, {test_wildcard} intersect allpaths({test_wildcard}, {vcomp}))))"'.format(
-                    test_wildcard=test_wildcard, vcomp=vcomp)
-
-            self.log.debug(" > %s", cmd)
-
+        text = []
+        if query_results:
             dtp.reset()
-
-            with TemporaryFile() as stdout_fp, TemporaryFile() as stderr_fp:
-                cmd = shlex.split(cmd)
-                p = subprocess.Popen(cmd, stdout=stdout_fp, stderr=stderr_fp, shell=False, bufsize=-1)
-                p.wait()
-                stdout_fp.seek(0)
-                stderr_fp.seek(0)
-                stdout = stdout_fp.read()
-                stderr = stderr_fp.read()
-                if p.returncode:
-                    self.log.critical("bazel test discovery failed:\n%s", stderr.decode('ascii'))
-
+            returncode, stdout, stderr = self._run_command(
+                [
+                    "bazel",
+                    "build",
+                    *query_results,
+                    "--aspects",
+                    "@rules_verilog//verilog/private:dv.bzl%verilog_dv_test_cfg_info_aspect",
+                ]
+            )
             dtp.stop_and_print()
-            query_results = stdout.decode('ascii').replace('\n', ' ')
-            query_results = re.sub(r"\([a-z0-9]{7,64}\) *", "", query_results)
-            vcomp_to_query_results[vcomp] = query_results
-
-        # Build test configurations
-        for vcomp, tests in self.all_vcomp.items():
-            query_results = vcomp_to_query_results[vcomp]
-            cmd = "bazel build {} --aspects @rules_verilog//verilog/private:dv.bzl%verilog_dv_test_cfg_info_aspect".format(
-                query_results)
-            self.log.debug(" > %s", cmd)
-
-            dtp.reset()
-            with TemporaryFile() as stdout_fp, TemporaryFile() as stderr_fp:
-                cmd = shlex.split(cmd)
-                p = subprocess.Popen(cmd, stdout=stdout_fp, stderr=stderr_fp, shell=False, bufsize=-1)
-                p.wait()
-                stdout_fp.seek(0)
-                stderr_fp.seek(0)
-                stdout = stdout_fp.read()
-                stderr = stderr_fp.read()
-                if p.returncode:
-                    self.log.critical("bazel test discovery failed:\n%s", stderr.decode('ascii'))
-
-            dtp.stop_and_print()
-            text = stdout.decode('ascii').split('\n') + stderr.decode('ascii').split('\n')
+            if returncode:
+                self.log.critical("bazel test discovery failed:\n%s", stderr)
+            text = stdout.split('\n') + stderr.split('\n')
 
             # Parse test information from output
-            ttv = [
-                re.search(
-                    r'verilog_dv_test_cfg_info\(@(?:@)?(?P<test>[^,]+), @(?:@)?(?P<vcomp>[^,]+), (?P<tags>\[.*\]), (?P<simulator>[A-Z0-9_]+)\)',
-                    line,
-                ) for line in text
-            ]
-            ttv = [match for match in ttv if match]
+        ttv = [
+            re.search(
+                r'verilog_dv_test_cfg_info\(@(?:@)?(?P<test>[^,]+), @(?:@)?(?P<vcomp>[^,]+), (?P<tags>\[.*\]), (?P<simulator>[A-Z0-9_]+)\)',
+                line,
+            ) for line in text
+        ]
+        ttv = [match for match in ttv if match]
 
-            # Extract matching tests, tags, and simulator
-            matching_tests = [
-                (mt.group('test'), ast.literal_eval(mt.group('tags')), mt.group('simulator'))
-                for mt in ttv
-                if mt.group('vcomp') == vcomp
-            ]
-            self.tests_to_tags.update([(test_name, tags) for test_name, tags, _ in matching_tests])
-            self.tests_to_simulator.update([(test_name, simulator) for test_name, _, simulator in matching_tests])
-            tests.update(dict([(t[0], 0) for t in matching_tests]))
+        matching_tests = [
+            (mt.group('test'), mt.group('vcomp'), ast.literal_eval(mt.group('tags')), mt.group('simulator'))
+            for mt in ttv
+        ]
+        self.tests_to_tags = {test_name: tags for test_name, _, tags, _ in matching_tests}
+        self.tests_to_simulator = {test_name: simulator for test_name, _, _, simulator in matching_tests}
+        for test_name, vcomp, _, _ in matching_tests:
+            if vcomp in self.all_vcomp:
+                self.all_vcomp[vcomp][test_name] = 0
 
         # Log discovered tests in table format
         table_output = []
@@ -304,33 +391,14 @@ class RegressionConfig():
         Filters the discovered tests to those that should be run
         """
         # Load test information from JSON files if using no_compile or no_bazel
-        if self.options.no_compile or self.options.no_bazel:
+        if self.use_cached_discovery:
             self.all_vcomp = self.json_to_dict("all_vcomp.json")
             self.tests_to_tags = self.json_to_dict("tests_to_tags.json")
             self.tests_to_simulator = self.json_to_dict("tests_to_simulator.json")
 
         # Process each test specification from command line
         for ta in self.options.tests:
-            try:
-                btglob, iterations = ta.btiglob.split("@")
-                try:
-                    iterations = int(iterations)
-                except ValueError:
-                    self.log.critical("Iterations (value after @) must be an integer: '%s'", ta.btiglob)
-            except ValueError:
-                btglob = ta.btiglob
-                iterations = 1
-
-            try:
-                bglob, tglob = btglob.split(":")
-            except ValueError:
-                # Handle case where only test glob is provided (when in testbench directory)
-                pwd = os.getcwd()
-                benches_dir = os.path.join(self.proj_dir, BENCHES_REL_DIR)
-                if not (benches_dir in pwd and len(benches_dir) < len(pwd)):
-                    self.log.critical("Not in a benches/ directory. Must provide bench:test style glob.")
-                bglob = pwd[len(benches_dir) + 1:]
-                tglob = btglob
+            bglob, tglob, iterations = self._split_btglob(ta.btiglob)
 
             # Find matching vcomponents
             query = "*:{}".format(bglob)

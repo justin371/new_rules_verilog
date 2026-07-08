@@ -7,7 +7,6 @@
 -ntb_opts uvm-1.2
 -lca
 -lrt
-+vpi
 +libext+.sv+.svh+.v+.vh+.vams+.vp+.svp
 +systemverilogext+.sv+.svh
 
@@ -18,7 +17,7 @@
 
 -timescale=1ns/1ps
 
--partcomp=adaptive_sched -fastpartcomp=j4
+-partcomp=adaptive_sched -fastpartcomp=j8
 -Mupdate
 
 # Support MDA of interface/module instances and interface ports

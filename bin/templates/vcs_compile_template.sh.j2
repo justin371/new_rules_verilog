@@ -1,8 +1,10 @@
 #!/usr/bin/env bash
 
+mkdir -p {{ VCOMP_DIR }}/csrc && \
+
 cd {{ bazel_runfiles_main }} && \
 
-runmod vcs -- vcs \
+{{ vcs_runner }} vcs \
   -full64 \
   -Mdir={{ VCOMP_DIR }}/csrc \
   -Mlib={{ VCOMP_DIR }}/csrc \
@@ -22,13 +24,16 @@ runmod vcs -- vcs \
     -file {{ options.compile_args_file }} \
   {% endif -%}
 
+  {% if options.vso -%}
+    -vso cso \
+    -vso_opts buildname={{ vso_build_name }} \
+    -vso_opts workdir={{ vso_workdir }} \
+  {% endif -%}
+
   -file {{ bazel_compile_args }} \
   {% for define in additional_defines -%}
     +define+{{ define }} \
   {% endfor -%}
-  {% if debug_mode == "default" -%}
-    -debug_access+f \
-  {% endif -%}
   {% if debug_mode == "waves" -%}
     {% if options.dtl -%}
       -kdb=common_elab \
@@ -36,18 +41,22 @@ runmod vcs -- vcs \
       -kdb \
     {% endif -%}
     -debug_access+all+designer+simctrl \
+    +vpi \
     +define+UVM_VERDI_COMPWAVE \
   {% endif -%}
   {% if debug_mode == "gui" -%}
     -kdb \
     -debug_access+all+reverse \
+    +vpi \
   {% endif -%}
-  {% if xprop_cmd -%}
+  {% if options.xprop_was_explicit and xprop_cmd -%}
     {{ xprop_cmd }} \
   {% endif -%}
   {% if cov_opts -%}
     {{ cov_opts }} \
   {% endif -%}
-  -sml \
+  {% if options.smartlog or options.waves is not none or options.gui -%}
+    -sml \
+  {% endif -%}
   -l {{ VCOMP_DIR }}/cmp.log \
   -o {{ VCOMP_DIR }}/simv
