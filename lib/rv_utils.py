@@ -95,10 +95,11 @@ def print_summary(rcfg, vcomp_jobs, icfgs, jm, trd):
     :param trd: List to store test results data
     """
     trd.clear()
+    regression_log_path = None
     total_tests = sum([icfg.target for _, (icfgs, _) in rcfg.all_vcomp.items() for icfg in icfgs])
     if total_tests > 1:
         if not rcfg.options.no_run:
-            REGRESSION_LOG_PATH = create_regression_log_file(rcfg)
+            regression_log_path = create_regression_log_file(rcfg)
     else:
         if rcfg.options.report:
             current_time = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -205,7 +206,7 @@ def print_summary(rcfg, vcomp_jobs, icfgs, jm, trd):
     rcfg.log.summary("Job Results\n%s", "\n".join(table_data_formatted))
     
     if total_tests > 1 and not rcfg.options.no_run:
-        with open(REGRESSION_LOG_PATH, 'a') as file:
+        with open(regression_log_path, 'a') as file:
             formatted_string = "Job Results\n" + "\n".join(map(str, table_data_formatted))
             file.write(formatted_string)
 
@@ -216,9 +217,10 @@ def print_summary(rcfg, vcomp_jobs, icfgs, jm, trd):
     rcfg.log.summary("Simulation Summary\n%s", "\n".join(table_data_formatted))
     
     if total_tests > 1 and not rcfg.options.no_run:
-        with open(REGRESSION_LOG_PATH, 'a') as file:
+        with open(regression_log_path, 'a') as file:
             formatted_string = "\n" + "Simulation Summary\n" + "\n".join(map(str, table_data_formatted))
             file.write(formatted_string)
+    return regression_log_path
 
 
 def print_simmer_profile(rcfg, jm):

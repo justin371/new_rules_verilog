@@ -183,6 +183,12 @@ def add_regression_arguments(parser):
                         default=False,
                         action='store_true',
                         help='Print simmer phase/job runtime details for performance tuning.')
+    gregre.add_argument('--history', '--his',
+                        nargs='?',
+                        const=10,
+                        default=None,
+                        type=int,
+                        help='Print recent simmer simulation records. Defaults to 10 entries.')
     gregre.add_argument('--no-stdout',
                         default=False,
                         action='store_true',
