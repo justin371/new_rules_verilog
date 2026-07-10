@@ -547,10 +547,11 @@ class BazelTBJob(Job):
         return 'Bazel("{}")'.format(self.bazel_target)
 
 class BazelTestCfgJob(Job):
-    """Bazel build for a testcfg only needs to be run once per test cfg, not per iteration. So split it out into its own job"""
+    """Build all selected test configs for one vcomp in a single Bazel invocation."""
 
-    def __init__(self, rcfg, target, vcomper):
-        self.bazel_target = target
+    def __init__(self, rcfg, targets, vcomper):
+        self.bazel_targets = [targets] if isinstance(targets, str) else list(targets)
+        self.bazel_target = self.bazel_targets[0]
         super(BazelTestCfgJob, self).__init__(rcfg, self)
         self.vcomper = vcomper
         if vcomper:
@@ -558,9 +559,9 @@ class BazelTestCfgJob(Job):
 
         self.job_dir = self.vcomper.job_dir # Don't actually need a dir, but jobrunner/manager want it defined
         if self.rcfg.options.no_bazel:
-            self.main_cmdline = "echo \"Bypassing {} due to --no-bazel\"".format(self.bazel_target)
+            self.main_cmdline = "echo \"Bypassing test cfg build due to --no-bazel\""
         else:
-            self.main_cmdline = "bazel build {}".format(self.bazel_target)
+            self.main_cmdline = "bazel build {}".format(" ".join(self.bazel_targets))
 
     def post_run(self):
         super(BazelTestCfgJob, self).post_run()
@@ -570,9 +571,9 @@ class BazelTestCfgJob(Job):
             self.jobstatus = JobStatus.FAILED
             self.log.error("%s failed. Log in %s", self, os.path.join(self.job_dir, "stderr.log"))
 
-    def dynamic_args(self):
+    def dynamic_args(self, target=None):
         """Additional arugmuents to specific to each simulation"""
-        path, target = self.bazel_target.split(":")
+        path, target = (target or self.bazel_target).split(":")
         path_to_dynamic_args_files = os.path.join(self.rcfg.proj_dir, "bazel-bin", path[2:],
                                                   "{}_dynamic_args.py".format(target))
         with open(path_to_dynamic_args_files, 'r') as filep:
@@ -581,4 +582,4 @@ class BazelTestCfgJob(Job):
         return normalize_test_runtime_options(dynamic_args)
 
     def __repr__(self):
-        return 'Bazel("{}")'.format(self.bazel_target)
+        return 'Bazel({} test cfgs)'.format(len(self.bazel_targets))

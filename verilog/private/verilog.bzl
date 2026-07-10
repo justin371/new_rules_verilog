@@ -81,16 +81,15 @@ def flists_to_arguments(deps, provider, field, prefix, separator = "", tool_name
     # Emit Bazel short_path entries so generated filelists stay rooted at the
     # runfiles tree, e.g. hw/... and external/..., instead of machine-specific
     # absolute paths or fragile ../ relative traversals.
-    trans = []
+    transitive = []
     for dep in deps:
         if provider in dep:
-            trans.extend(getattr(dep[provider], field).to_list())
+            transitive.append(getattr(dep[provider], field))
 
         # else:
         #     trans.extend(dep[DefaultInfo].files.to_list())
 
-    trans_depset = depset(trans)
-    trans = trans_depset.to_list()
+    trans = depset(transitive = transitive).to_list()
 
     if tool_name == "vcs":
         formatted_args = []
@@ -107,7 +106,6 @@ def flists_to_arguments(deps, provider, field, prefix, separator = "", tool_name
 
 def _verilog_test_impl(ctx):
     trans_srcs = get_transitive_srcs([], ctx.attr.shells + ctx.attr.deps, VerilogInfo, "transitive_sources")
-    srcs_list = trans_srcs.to_list()
     flists = get_transitive_srcs([], ctx.attr.shells + ctx.attr.deps, VerilogInfo, "transitive_flists")
     flists_list = flists.to_list()
 
@@ -141,7 +139,10 @@ def _verilog_test_impl(ctx):
     else:
         tool_runfiles = depset([])
 
-    runfiles = ctx.runfiles(files = flists_list + srcs_list + ctx.files.data, transitive_files = tool_runfiles)
+    runfiles = ctx.runfiles(
+        files = ctx.files.data,
+        transitive_files = depset(transitive = [trans_srcs, flists, tool_runfiles]),
+    )
 
     # runfiles = ctx.runfiles(files = flists_list + srcs_list)
     return [DefaultInfo(

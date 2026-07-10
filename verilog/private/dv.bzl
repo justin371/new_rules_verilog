@@ -403,13 +403,13 @@ def _verilog_dv_library_impl(ctx):
     trans_flists = get_transitive_srcs([out], ctx.attr.deps, VerilogInfo, "transitive_flists", allow_other_outputs = False)
     trans_dpi = get_transitive_srcs(all_sos, ctx.attr.deps, VerilogInfo, "transitive_dpi", allow_other_outputs = False)
 
-    all_files = depset(trans_srcs.to_list() + trans_flists.to_list())
+    all_files = depset(transitive = [trans_srcs, trans_flists])
 
     return [
         VerilogInfo(transitive_sources = trans_srcs, transitive_flists = trans_flists, transitive_dpi = trans_dpi),
         DefaultInfo(
             files = all_files,
-            runfiles = ctx.runfiles(files = trans_srcs.to_list() + trans_flists.to_list()),
+            runfiles = ctx.runfiles(transitive_files = all_files),
         ),
     ]
 
@@ -603,13 +603,9 @@ def _verilog_dv_tb_impl(ctx):
     return [
         DefaultInfo(
             files = all_files,
-            runfiles = ctx.runfiles(files =
-                trans_srcs.to_list() +
-                trans_flists.to_list() +
-                out_deps.to_list() +
-                ctx.files.ccf +
-                ctx.files.extra_runfiles +
-                [runtime_template]
+            runfiles = ctx.runfiles(
+                files = ctx.files.ccf + ctx.files.extra_runfiles + [runtime_template],
+                transitive_files = all_files,
             ),
         ),
         DVTBInfo(

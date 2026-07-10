@@ -74,6 +74,31 @@ class SimmerResultsTest(unittest.TestCase):
         self.assertEqual("FAILED", run["status"])
         self.assertEqual(1, run["summary"]["skipped"])
 
+    def test_multi_test_history_keeps_summary_and_one_representative_test(self):
+        run = self._completed_run()
+        run["planned_tests"] = 3
+        run["tests"] = [
+            {
+                "status": "PASSED",
+                "stdout_log": "pass.log"
+            },
+            {
+                "status": "FAILED",
+                "stdout_log": "fail.log"
+            },
+            {
+                "status": "PASSED",
+                "stdout_log": "pass2.log"
+            },
+        ]
+        run["summary"] = {"passed": 2, "failed": 1, "skipped": 0, "total": 3}
+
+        simmer_results.save_run(self.project_dir, run)
+
+        stored = simmer_results.load_store(self.project_dir)["last_run"]
+        self.assertEqual(run["summary"], stored["summary"])
+        self.assertEqual(["fail.log"], [test["stdout_log"] for test in stored["tests"]])
+
 
 if __name__ == "__main__":
     unittest.main()

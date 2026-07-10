@@ -102,6 +102,23 @@ class JobManagerLaunchTest(unittest.TestCase):
         self.assertIn("--no-compile/--no-bazel", tb_job.main_cmdline)
         self.assertIn("--no-bazel", cfg_job.main_cmdline)
 
+    def test_test_cfg_job_batches_targets_and_reads_each_dynamic_args_file(self):
+        log = _Logger()
+        rcfg = SimpleNamespace(options=SimpleNamespace(timeout=1, no_bazel=False), log=log, proj_dir="/repo")
+        vcomper = SimpleNamespace(
+            job_dir="vcomp_dir",
+            _children=[],
+            add_dependency=lambda _job: None,
+            increase_priority=lambda _priority: None,
+        )
+        job = BazelTestCfgJob(rcfg, ["//pkg/tests:first", "//pkg/tests:second"], vcomper)
+
+        self.assertEqual("bazel build //pkg/tests:first //pkg/tests:second", job.main_cmdline)
+        with mock.patch("builtins.open", mock.mock_open(read_data="{'simulator': 'VCS'}")) as open_file:
+            job.dynamic_args("//pkg/tests:second")
+        open_file.assert_called_once_with(os.path.join("/repo", "bazel-bin", "pkg/tests", "second_dynamic_args.py"),
+                                          'r')
+
     def test_add_job_wakes_idle_scheduler(self):
         log = _Logger()
         manager = JobManager({"idle_print_seconds": 60, "quit_count": 1}, log)

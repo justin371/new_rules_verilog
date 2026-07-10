@@ -178,7 +178,8 @@ def add_regression_arguments(parser):
     gregre.add_argument('--jobs',
                         type=int,
                         default=None,
-                        help='Maximum concurrent compile/simulation jobs. Defaults to the host CPU count.')
+                        help=('Maximum concurrent compile/simulation jobs. Defaults to the host CPU count, '
+                              'adjusted for VCS FGP or Xcelium MCE threads.'))
     gregre.add_argument('--simmer-profile',
                         default=False,
                         action='store_true',

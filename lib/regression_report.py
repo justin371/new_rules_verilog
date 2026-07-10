@@ -44,7 +44,7 @@ class RegressionReport():
         self.project_info = {}
 
         # category info
-        self.category_stats = {} 
+        self.category_stats = {}
         self.processed_category_stats = []
 
     def process_trd(self, trd):
@@ -93,109 +93,6 @@ class RegressionReport():
                                 "" if failed == 0 else str(failed), "" if total == 0 else str(total),
                                 f"{passed / total * 100:.2f}", "", ""])
 
-    def update_past_report_page(self, phtml, rlist, prlist, cclist, cflist, ori_rlist, ori_prlist):
-        """
-        Update 'Past Result' part of regression report page
-        """
-
-        # Reverser for date order
-        rlist.reverse()
-        prlist.reverse()
-        cclist.reverse()
-        cflist.reverse()
-
-        if len(rlist) > 0:
-            # new page index
-            page_info = [f'                  <li><a href="{r}.html">{r}_{pr}%_{cc}_{cf}</a></li>\n' for r, pr, cc, cf in zip(rlist, prlist, cclist, cflist)]
-            chart_info = [f'      const labels = {ori_rlist};\n      const data0 = {ori_prlist}\n']
-
-            for pr in rlist:
-                start_index_0 = None
-                end_index_0 = None
-                start_index_1 = None
-                end_index_1 = None
-                with open(phtml + '/' + pr + '.html', 'r', encoding='utf-8') as f:
-                    lines = f.readlines()
-                for i, line in enumerate(lines):
-                    if line.strip() == "<!-- update past result -->":
-                        if start_index_0 is None:
-                            start_index_0 = i
-                        else:
-                            end_index_0 = i
-                    if line.strip() == "<!-- update chart -->":
-                        if start_index_1 is None:
-                            start_index_1 = i
-                        else:
-                            end_index_1 = i
-                            break
-                # new lines
-                updated_lines = (
-                    lines[:start_index_0 + 1] +  # before past result comment
-                    page_info +                # new lines
-                    lines[end_index_0:start_index_1 + 1] + # after past result comment
-                    chart_info +               # new lines
-                    lines[end_index_1:]        # after chart comment
-                )
-                # write back to html
-                with open(phtml + '/' + pr + '.html', 'w', encoding='utf-8') as file:
-                    file.writelines(updated_lines)
-
-    def update_all_tb_navigation(self, bpath):
-        navigation_info = [f'                <li class="toctree-l2"><a class="reference internal" href="../{b}/index.html">{b}</a></li>\n' for b in self.project_info[self.proj_name]]
-
-        ppath = os.path.dirname(bpath)
-        for b in self.project_info[self.proj_name]:
-            b_dir = os.path.join(ppath, b)
-            if not os.path.isdir(b_dir):
-                continue
-
-            for rh in os.listdir(b_dir):
-                if not rh.endswith('.html'):
-                    continue
-
-                rp = os.path.join(b_dir, rh)
-
-                with open(rp, 'r', encoding='utf-8') as f:
-                    lines = f.readlines()
-
-                start_index = None
-                end_index = None
-                for i, line in enumerate(lines):
-                    if line.strip() == "<!-- update navigation -->":
-                        if start_index is None:
-                            start_index = i
-                        else:
-                            end_index = i
-                            break
-
-                if start_index is None or end_index is None:
-                    continue
-
-                updated_lines = (
-                    lines[:start_index + 1] +
-                    navigation_info +
-                    lines[end_index:]
-                )
-
-                with open(rp, 'w', encoding='utf-8') as f:
-                    f.writelines(updated_lines)
-
-    def change_permissions_recursively(self, bpath):
-        for root, dirs, files in os.walk(bpath):
-            try:
-                os.chmod(root, 0o777)
-            except PermissionError as e:
-                self.rcfg.log.info(f"P Error!!! Cannot chmod dir {root}: {e}")
-            except Exception as e:
-                self.rcfg.log.info(f"E Error!!! Cannot chmod dir {root}: {e}")
-            for file in files:
-                try:
-                    os.chmod(os.path.join(root, file), 0o777)
-                except PermissionError as e:
-                    self.rcfg.log.info(f"P Error!!! Cannot chmod dir {root}/{file}: {e}")
-                except Exception as e:
-                    self.rcfg.log.info(f"E Error!!! Cannot chmod dir {root}/{file}: {e}")
-
     def process_category_stats(self):
         """
         Process category statistics (strict mode) into template-friendly format
@@ -217,28 +114,30 @@ class RegressionReport():
 
             # Append processed data (match table columns in template)
             self.processed_category_stats.append([
-                category,          # name（like module_func_reset、soc_path_ddr）
-                str(total),        # total case number
-                str(executed),     # finished case number
-                completion_rate,   # rate of completion
-                str(passed),       # pass rate
-                pass_rate          
+                category, # name（like module_func_reset、soc_path_ddr）
+                str(total), # total case number
+                str(executed), # finished case number
+                completion_rate, # rate of completion
+                str(passed), # pass rate
+                pass_rate
             ])
 
     def run(self, header, trd, cov, category_stats):
         """
         API for simmer to create report page
         """
+        self.prepare(header, trd, cov, category_stats)
+        self.render_home_page()
+        self.render_bench_page()
+        self.render_regression_page()
+
+    def prepare(self, header, trd, cov, category_stats):
         self.header = header
         self.cov = cov
         self.category_stats = category_stats
         self.process_trd(trd)
         self.process_category_stats()
         self.proj_name = self.header["project_name"]
-        # Create html
-        self.render_home_page()
-        self.render_bench_page()
-        self.render_regression_page()
 
     def render_home_page(self):
         """
@@ -264,7 +163,7 @@ class RegressionReport():
         rendered_html = self.HOME_TEMPLATE.render(
             project=self.project_info,
         )
-        
+
         # Write html
         with open(html_file_path, 'w', encoding='utf-8') as f:
             f.write(rendered_html)
@@ -293,7 +192,7 @@ class RegressionReport():
             project_name=self.header["project_name"],
             project=self.project_info,
         )
-        
+
         # Write html
         with open(html_file_path, 'w', encoding='utf-8') as f:
             f.write(rendered_html)
@@ -391,11 +290,6 @@ class RegressionReport():
             cov_code_list = [regressions[ts]['cov_func'] for ts in remain_list if ts in regressions.keys()]
             cov_func_list = [regressions[ts]['cov_func'] for ts in remain_list if ts in regressions.keys()]
 
-            # Update old regression report page
-            self.update_past_report_page(bench_path, 
-                                        remain_list[:-1], passrate_list[:-1], cov_code_list[:-1], cov_func_list[:-1],
-                                        remain_list, passrate_list) 
-
             # Render
             rendered_html = self.REGRESSION_REPORT_TEMPLATE.render(
                 header=self.header,
@@ -420,7 +314,3 @@ class RegressionReport():
             # Update regressions json
             with open(json_file_path, 'w', encoding='utf-8') as f:
                 json.dump(regressions, f, ensure_ascii=False, indent=4)
-
-        #self.rcfg.log.summary("bench path is {}".format(bench_path))
-        self.update_all_tb_navigation(bench_path)
-        #self.change_permissions_recursively(bench_path)

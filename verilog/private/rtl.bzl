@@ -184,10 +184,9 @@ def _verilog_rtl_library_impl(ctx):
     trans_flists = get_transitive_srcs([ctx.outputs.flist], ctx.attr.deps, VerilogInfo, "transitive_flists", allow_other_outputs = False)
     trans_dpi = get_transitive_srcs([], ctx.attr.deps, VerilogInfo, "transitive_dpi", allow_other_outputs = False)
 
-    runfiles_list = trans_srcs.to_list() + trans_flists.to_list() + trans_dpi.to_list()
-    runfiles = ctx.runfiles(files = runfiles_list)
+    runfiles = ctx.runfiles(transitive_files = depset(transitive = [trans_srcs, trans_flists, trans_dpi]))
 
-    all_files = depset(trans_srcs.to_list() + trans_flists.to_list())
+    all_files = depset(transitive = [trans_srcs, trans_flists])
 
     return [
         ShellInfo(
