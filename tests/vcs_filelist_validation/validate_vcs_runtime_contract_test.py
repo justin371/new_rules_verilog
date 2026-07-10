@@ -90,6 +90,11 @@ class VcsRuntimeContractTest(unittest.TestCase):
         with self.assertRaises(SystemExit):
             parse_args(["--jobs", "0"])
 
+    def test_category_config_is_explicitly_enabled(self):
+        self.assertIsNone(parse_args([]).category_cfg)
+        self.assertEqual("", parse_args(["--category-cfg"]).category_cfg)
+        self.assertEqual("custom.json", parse_args(["--category-cfg", "custom.json"]).category_cfg)
+
     def test_vcs_simv_runtime_keeps_dash_f_filelist(self):
         options = parse_args(["-t", "unit:test", "--simulator", "VCS"])
         simulator = VcsSimulator(options, DummyRegressionConfig(), None)
