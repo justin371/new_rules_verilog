@@ -6,13 +6,10 @@ import getpass
 import os
 import re
 import json
-import shlex
-import jinja2
 import shutil
 import subprocess
-from typing import Dict, Optional, List
+from typing import Dict, Optional
 from bs4 import BeautifulSoup
-from tempfile import TemporaryFile
 
 LOGGER_INDENT = 8
 SIMRESULTS = os.environ.get('SIMRESULTS', '')
@@ -315,7 +312,7 @@ def get_report_header(rcfg):
         header['tag'] = tag_info
         header["revision"] = short_revision
         header["commit"] = repo_url.rstrip(".git") + "/commit/" + commit_id
-    except subprocess.CalledProcessError as e:
+    except subprocess.CalledProcessError:
         print("Error: Not a Git repository or Git command failed.")
         return None
     return header

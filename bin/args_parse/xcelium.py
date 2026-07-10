@@ -5,6 +5,22 @@ from .common import COVFILE
 
 def add_xcelium_arguments(parser):
     gxrun = parser.add_argument_group("Xcelium arguments")
+    gxrun.add_argument('--wave-exclude',
+                       type=str,
+                       default="x",
+                       help='Exclude a scope or object pattern from Xcelium wave probing.')
+    gxrun.add_argument('--wave-delta',
+                       default=False,
+                       action='store_true',
+                       help='Capture delta cycles for Xcelium SHM waves.')
+    gxrun.add_argument('--probe-packed',
+                       type=int,
+                       default=128,
+                       help='Maximum packed-array probe depth for Xcelium waves.')
+    gxrun.add_argument('--probe-unpacked',
+                       type=int,
+                       default=128,
+                       help='Maximum unpacked-array probe depth for Xcelium waves.')
     gxrun.add_argument('--profile',
                        default=False,
                        action='store_true',
@@ -89,6 +105,14 @@ def validate_xcelium_switches_for_vcs(options, parser):
     xcelium_only_switches = []
     if options.profile:
         xcelium_only_switches.append('--profile')
+    if options.wave_exclude != "x":
+        xcelium_only_switches.append('--wave-exclude')
+    if options.wave_delta:
+        xcelium_only_switches.append('--wave-delta')
+    if options.probe_packed != 128:
+        xcelium_only_switches.append('--probe-packed')
+    if options.probe_unpacked != 128:
+        xcelium_only_switches.append('--probe-unpacked')
     if options.mce:
         xcelium_only_switches.append('--mce')
     if options.mce_build_count != 4:

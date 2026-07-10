@@ -337,7 +337,7 @@ class VcsSimulator(SimulatorInterface):
 
         # Coverage (Functional/Code)
         if self.options.cm:
-            vcomp_job.cov_work_dir = os.path.join(self.rcfg.regression_dir, vcomp_job.name + "__COV_WORK_VCS")
+            vcomp_job.cov_work_dir = os.path.join(self.rcfg.regression_dir, vcomp_job.name + "__COV_WORK_VCS.vdb")
             # No need to create dir here, VCS does it with -cm_dir
             opts['cov_opts'] += ' -cm_dir {} '.format(vcomp_job.cov_work_dir)
             # Translate coverage level options if needed
@@ -480,7 +480,7 @@ class VcsSimulator(SimulatorInterface):
         merge_sh = os.path.join(self.rcfg.regression_dir, "{}_vcs_cov_merge.sh".format(vcomp_job.name))
         merged_db_path = os.path.join(self.rcfg.regression_dir, "{}__MERGED_COV.vdb".format(vcomp_job.name))
         report_dir = os.path.join(self.rcfg.regression_dir, "{}__vcs_cov_report".format(vcomp_job.name))
-        cov_db_path = "{}.vdb".format(vcomp_job.cov_work_dir)
+        cov_db_path = vcomp_job.cov_work_dir
         merge_template = self.env.get_template('vcs_cov_merge_template.sh.j2')
 
         with open(merge_sh, 'w') as filep:
@@ -488,6 +488,8 @@ class VcsSimulator(SimulatorInterface):
                 cov_db_path=cov_db_path,
                 merged_db_path=merged_db_path,
                 report_dir=report_dir,
+                urg_command=self.get_tool_command("urg"),
+                verdi_command=self.get_tool_command("verdi"),
             ))
         st = os.stat(merge_sh)
         os.chmod(merge_sh, st.st_mode | stat.S_IEXEC)

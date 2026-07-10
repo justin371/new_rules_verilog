@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
-set -e
+set -euo pipefail
 
-simmer -t {{ job.vcomper.name }}:{{ job.name }} --seed {{ seed }} {{ reproduce_args }} "$@"
+SIMMER_BIN="${SIMMER_BIN:-simmer}"
+exec "$SIMMER_BIN" -t {{ rerun_target }} --seed {{ seed }} {{ reproduce_args }} "$@"

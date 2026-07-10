@@ -1,5 +1,9 @@
 # Verilog rules for Bazel
 
+This repository pins Bazel 7.7.1 in `.bazelversion`. The final supported host is
+Red Hat Linux with Python 3.12; macOS checks are useful for rule generation but
+do not replace licensed VCS/Xcelium runs on Red Hat.
+
 ## Setup
                                                                                                   
 Add the following to your `WORKSPACE` file:
@@ -47,18 +51,61 @@ simmer -t //hw/dv/project_benches/sys/tb:some_vcs_test --simulator VCS
 
 Override the launcher with `RV_VCS_RUNNER` or `--vcs-runner` only when a project needs a different module wrapper.
 
-VCS is supported through the two-step `simmer` flow. `verilog_dv_unit_test` and `verilog_rtl_unit_test` remain XRUN-only.
+VCS regression testbenches use the two-step `simmer` flow. Small DV and RTL unit
+tests support both `simulator = "XRUN"` and `simulator = "VCS"`.
+
+### Unit tests with Xcelium and VCS
+
+Select the backend on each unit-test target:
+
+```starlark
+verilog_rtl_unit_test(
+    name = "counter_test_xrun",
+    deps = [":counter_test_top"],
+    simulator = "XRUN",
+)
+
+verilog_rtl_unit_test(
+    name = "counter_test_vcs",
+    deps = [":counter_test_top"],
+    simulator = "VCS",
+)
+```
+
+Site wrappers can be configured independently without mixing vendor arguments:
+
+```bazelrc
+build:xrun --@rules_verilog//:verilog_dv_unit_test_command="runmod -t xrun --"
+build:xrun --@rules_verilog//:verilog_rtl_unit_test_command="runmod -t xrun --"
+
+build:vcs --@rules_verilog//:verilog_dv_unit_test_command_vcs="runmod vcs -- vcs"
+build:vcs --@rules_verilog//:verilog_rtl_unit_test_command_vcs="runmod vcs -- vcs"
+build:vcs --@rules_verilog//:verilog_rtl_wave_viewer_command_vcs="runmod vcs -- verdi"
+```
+
+Run both backends on the Red Hat workstation:
+
+```bash
+bazel test --config=xrun //path/to:counter_test_xrun
+bazel test --config=vcs //path/to:counter_test_vcs
+```
+
+VCS RTL unit tests accept `--waves`, `--launch`, `--compile-arg <arg>`, and
+`--run-arg <arg>` after Bazel's `--` separator.
 
 ### Python Dependencies
-rules_verilog is also dependent on several python libraries. These are defined in requirements.txt and maybe installed in the package manager of your choice. The recommended flow is to install them via the pip_install rule in your `WORKSPACE` file:
+rules_verilog is also dependent on several python libraries. These are defined in requirements.txt and may be installed in the package manager of your choice. The recommended flow is to install them via the `pip_parse` rule in your `WORKSPACE` file:
 
 ```skylark
-load("@rules_python//python:pip.bzl", "pip_install")
+load("@rules_python//python:pip.bzl", "pip_parse")
 
-pip_install(
+pip_parse(
     name = "pip_deps",
-    requirements = "@rules_verilog//:requirements.txt",
+    requirements_lock = "@rules_verilog//:requirements.txt",
 )
+
+load("@pip_deps//:requirements.bzl", "install_deps")
+install_deps()
 ```
 
 ## Rules
@@ -91,6 +138,7 @@ Load rules into your `BUILD` files from [@rules_verilog//verilog:defs.bzl](veril
 ### Migration Notes
 - [Simulator migration checklist](docs/simulator_migration_checklist.md)
 - [Simmer VCS and Xcelium flow](docs/simmer_vcs_xcelium.md)
+- [EDA workflow review and low-use features](docs/eda_workflow_review.md)
 
 ## Caveats
 - The SVUnit package always adds svunit_pkg.sv to the compiler command line after the user flists.  Without compiler library discovery, user flists cannot include/import anything that depends on svunit_pkg.
@@ -102,4 +150,8 @@ Load rules into your `BUILD` files from [@rules_verilog//verilog:defs.bzl](veril
 These rules were written with the Cadence and Synopsys tools as the underlying compiler and simulator. Abstraction leaks are prevalent throughout the rules.
 
 ### UVM Testbenches
-While rules for XRUN unit tests exist, VCS testbenches use [verilog_dv_tb](docs/defs.md#verilog_dv_tb), [verilog_dv_test_cfg](docs/defs.md#verilog_dv_test_cfg), and `simmer` for two-step compile and simulation.
+Use one-step `verilog_dv_unit_test`/`verilog_rtl_unit_test` for small tests under
+either simulator. Full VCS UVM regressions should use
+[verilog_dv_tb](docs/defs.md#verilog_dv_tb),
+[verilog_dv_test_cfg](docs/defs.md#verilog_dv_test_cfg), and `simmer` so the
+compiled `simv` can be reused across tests.

@@ -125,6 +125,22 @@ class VcsRuntimeContractTest(unittest.TestCase):
         with self.assertRaises(SystemExit):
             parse_args(["-t", "unit:test", "--simulator", "XRUN", "--smartlog"])
 
+    def test_tool_specific_arguments_are_rejected_by_the_other_backend(self):
+        with self.assertRaises(SystemExit):
+            parse_args(["-t", "unit:test", "--simulator", "VCS", "--probe-packed", "64"])
+        with self.assertRaises(SystemExit):
+            parse_args(["-t", "unit:test", "--simulator", "XRUN", "--gui"])
+
+        common = self._read_repo_file("bin/args_parse/common.py")
+        vcs = self._read_repo_file("bin/args_parse/vcs.py")
+        xcelium = self._read_repo_file("bin/args_parse/xcelium.py")
+        self.assertNotIn("--gui", common)
+        self.assertNotIn("--wave-delta", common)
+        self.assertNotIn("--probe-packed", common)
+        self.assertIn("--gui", vcs)
+        self.assertIn("--wave-delta", xcelium)
+        self.assertIn("--probe-packed", xcelium)
+
     def test_vcs_compile_template_defaults_to_incremental_compile(self):
         template = self._read_repo_file("bin/templates/vcs_compile_template.sh.j2")
 
@@ -179,11 +195,41 @@ class VcsRuntimeContractTest(unittest.TestCase):
             text=True,
         )
 
+    def test_vcs_coverage_uses_one_vdb_path_for_simulation_and_merge(self):
+        options = parse_args([
+            "-t", "unit:test", "--simulator", "VCS", "--cm", "line",
+            "--vcs-runner", "site-vcs --",
+        ])
+        simulator = VcsSimulator(options, DummyRegressionConfig(), None)
+        vcomp = DummyVcompJob()
+
+        with mock.patch.object(simulator, "setup_coverage_merge"):
+            compile_options = simulator.generate_compile_options(vcomp)
+
+        self.assertTrue(vcomp.cov_work_dir.endswith(".vdb"))
+        self.assertIn("-cm_dir {}".format(vcomp.cov_work_dir), compile_options["cov_opts"])
+
+        template = self._read_repo_file("bin/templates/vcs_cov_merge_template.sh.j2")
+        self.assertIn("{{ urg_command }}", template)
+        self.assertIn("{{ verdi_command }}", template)
+
     def test_rerun_preserves_original_options_without_forcing_waves(self):
         template = self._read_repo_file("bin/templates/rerun_template.sh.j2")
 
         self.assertIn("{{ reproduce_args }}", template)
+        self.assertIn("{{ rerun_target }}", template)
+        self.assertIn("${SIMMER_BIN:-simmer}", template)
+        self.assertNotIn("job.vcomper.name", template)
         self.assertNotIn("--waves --simulator", template)
+
+    def test_generated_helper_scripts_are_workspace_and_launcher_portable(self):
+        sim_template = self._read_repo_file("bin/templates/sim_template.sh.j2")
+        waves_template = self._read_repo_file("bin/templates/run_waves_template.sh.j2")
+
+        self.assertIn("{{ check_test_path }}", sim_template)
+        self.assertNotIn("bazel-bin/external/rules_verilog", sim_template)
+        self.assertIn("SIMMER_WAVE_LAUNCHER", waves_template)
+        self.assertNotIn("/global/tools/lsf", waves_template)
 
     def test_simmer_log_and_profile_performance_contracts(self):
         source = self._read_repo_file("bin/simmer.py")
@@ -194,14 +240,14 @@ class VcsRuntimeContractTest(unittest.TestCase):
         self.assertIn("completed without simulation log", source)
         self.assertLess(source.index('"coverage_merge"'), source.index("print_simmer_profile(rcfg, jm)"))
 
-    def test_vcs_unit_test_rules_are_blocked_in_favor_of_two_step_flow(self):
+    def test_vcs_unit_test_rules_use_simulator_specific_defaults(self):
         dv_bzl = self._read_repo_file("verilog/private/dv.bzl")
         rtl_bzl = self._read_repo_file("verilog/private/rtl.bzl")
 
-        self.assertIn("verilog_dv_unit_test {} does not support simulator = 'VCS'", dv_bzl)
-        self.assertIn("Use the VCS two-step flow via verilog_dv_tb + simmer instead.", dv_bzl)
-        self.assertIn("verilog_rtl_unit_test {} does not support simulator = 'VCS'", rtl_bzl)
-        self.assertIn("Use the VCS two-step flow via simmer instead.", rtl_bzl)
+        self.assertIn('filelist_flag = "-file"', dv_bzl)
+        self.assertIn("_ut_sim_template_vcs_default", dv_bzl)
+        self.assertIn('filelist_flag = "-file"', rtl_bzl)
+        self.assertIn("_ut_sim_waves_template_vcs_default", rtl_bzl)
 
 
 if __name__ == "__main__":

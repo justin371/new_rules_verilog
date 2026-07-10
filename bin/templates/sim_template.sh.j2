@@ -181,7 +181,7 @@ function testFunction {
     # echo "--- Parsing Simulation Log ---"
     # Ensure we are in the job directory
     cd "$SIMRESULTS"
-    local check_test_script="$PROJ_DIR/bazel-bin/external/rules_verilog/bin/check_test" # Path to checker script
+    local check_test_script={{ check_test_path }}
     local log_file_to_check="{{ job._log_path }}" # Log file path
 
     if [ -f "$check_test_script" ] && [ -f "$log_file_to_check" ]; then

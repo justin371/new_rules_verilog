@@ -23,16 +23,6 @@ def add_debug_arguments(parser):
                         type=str,
                         default=None,
                         help='Load the local wave.tcl file for waveform. Only used with --wave-tcl + path of wave.tcl')
-    gdebug.add_argument('--wave-exclude',
-                        type=str,
-                        default="x",
-                        help=('Exclude the specified object or the specified scope from the probe. '
-                              'Only used with --wave.\n'
-                              'Examples: \n'
-                              '--wave-exclude "a_inst" \n'
-                              '--wave-exclude {a_inst b_inst} \n'
-                              '--wave-exclude "a_inst*" \n'))
-
     gdebug.add_argument('--wave-start',
                         type=int,
                         default=0,
@@ -41,26 +31,10 @@ def add_debug_arguments(parser):
                         type=int,
                         default=99999999,
                         help='Specify the sim time in ns to end dumping the waveform.')
-    gdebug.add_argument('--wave-delta',
-                        default=False,
-                        action='store_true',
-                        help='Capture delta-cycles for SHM waveform types.')
     gdebug.add_argument('--wave-depth',
                         type=int,
                         default=999,
                         help='Probe hirarchical depth. Only used with --waves. Default is all hierarchies')
-    gdebug.add_argument('--probe-packed',
-                        type=int,
-                        default=128,
-                        help='Packed probe depth. Only used with --waves. Default is 1024.')
-    gdebug.add_argument('--probe-unpacked',
-                        type=int,
-                        default=128,
-                        help='Unpacked probe depth. Only used with --waves. Default is 1024.')
-    gdebug.add_argument('--gui',
-                        default=False,
-                        action='store_true',
-                        help='run simulation in gui mode for C/DV debug, only applicable with single test and supported only for VCS')
     gdebug.add_argument('--verbosity',
                         type=str,
                         default=None,

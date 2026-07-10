@@ -1,11 +1,6 @@
 #!/usr/bin/env bash
 
-# Exit on any error
-set -e
-
-# --- Configuration (can be set here or passed as variables) ---
-BSUB_COMMAND_PATH="/global/tools/lsf/10.1/linux3.10-glibc2.17-x86_64/bin/bsub"
-BSUB_OPTIONS="-I -q syn" # Common bsub options
+set -euo pipefail
 
 # --- Dynamic values passed from Python ---
 # job_dir (passed for informational purposes in the script)
@@ -29,13 +24,17 @@ fi
 echo "Changing directory to {{ job_dir }}"
 cd "{{ job_dir }}"
 
-WAVE_VIEW_COMMAND='{{ wave_view_command }}'
+WAVE_VIEW_COMMAND={{ wave_view_command }}
 
-echo "Executing bsub command:"
-echo "${BSUB_COMMAND_PATH} ${BSUB_OPTIONS} ${WAVE_VIEW_COMMAND}"
-eval "${BSUB_COMMAND_PATH} ${BSUB_OPTIONS} ${WAVE_VIEW_COMMAND}" &
+if [ -n "${SIMMER_WAVE_LAUNCHER:-}" ]; then
+    echo "Executing: ${SIMMER_WAVE_LAUNCHER} ${WAVE_VIEW_COMMAND}"
+    eval "${SIMMER_WAVE_LAUNCHER} ${WAVE_VIEW_COMMAND}"
+else
+    echo "Executing: ${WAVE_VIEW_COMMAND}"
+    eval "${WAVE_VIEW_COMMAND}"
+fi
 
 echo "Returning to previous directory."
 cd - > /dev/null # Suppress output of 'cd -'
 
-echo "Script finished. Wave viewer submitted via bsub."
+echo "Wave viewer exited."

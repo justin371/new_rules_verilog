@@ -1,5 +1,7 @@
 # vim: set ft=bzl :
 # lib/simulators/BUILD
+load("@pip_deps//:requirements.bzl", "requirement")
+
 package(default_visibility = ["//visibility:public"])
 
 py_library(
@@ -13,8 +15,7 @@ py_library(
     srcs = ["xcelium.py"],
     deps = [
         ":base",
-        # Add deps needed by xcelium.py, e.g., from project root if needed
-        # "//lib:cmn_logging", # Example if needed, but likely not directly
+        requirement("jinja2"),
     ],
 )
 

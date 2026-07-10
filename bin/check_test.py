@@ -74,8 +74,6 @@ def update_signatures(line):
     Parses line for Enable/Disable commands.
     Returns True if signatures were updated.
     """
-    global active_signatures
-    
     # Fast string check before running regex
     if "TEST_CHECK_ENABLE" in line:
         match = enable_regex.match(line)

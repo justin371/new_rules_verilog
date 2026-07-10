@@ -1,5 +1,6 @@
 # vim: set ft=bzl :
 load("@rules_python//python:defs.bzl", "py_binary", "py_library")
+load("@pip_deps//:requirements.bzl", "requirement")
 
 package(default_visibility = ["//visibility:public"])
 
@@ -12,7 +13,10 @@ exports_files([
 py_binary(
     name = "lint_parser_hal",
     srcs = ["lint_parser_hal.py"],
-    deps = ["//lib:cmn_logging"],
+    deps = [
+        "//lib:cmn_logging",
+        requirement("beautifulsoup4"),
+    ],
 )
 
 py_binary(
@@ -40,9 +44,11 @@ py_binary(
         "//lib:regression",
         "//lib:rv_utils",
         "//lib:runtime_options",
+        "//lib:sim_artifacts",
         "//lib:simmer_results",
         "//lib/simulators:simulators",
         "//lib:regression_report",
+        requirement("jinja2"),
     ],
 )
 

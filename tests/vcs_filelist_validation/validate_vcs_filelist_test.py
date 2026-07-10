@@ -42,6 +42,14 @@ def read_runfile(relative_path):
     raise AssertionError("Missing runfile: {}".format(path))
 
 
+def runfile_exists(relative_path):
+    try:
+        read_runfile(relative_path)
+    except AssertionError:
+        return False
+    return True
+
+
 def assert_contains(contents, needle, relative_path):
     if needle not in contents:
         raise AssertionError("Expected {!r} in {}".format(needle, relative_path))
@@ -82,11 +90,27 @@ class VcsFilelistValidationTest(unittest.TestCase):
 
         for relative_path, needles in filelist_checks.items():
             contents = read_runfile(relative_path)
+            self.assertNotIn("../", contents, relative_path)
             assert_has_filelist_flag(contents, relative_path)
             assert_lacks_legacy_filelist_flag(contents, relative_path)
             for needle in needles:
                 assert_contains(contents, needle, relative_path)
         for relative_path, needles in content_checks.items():
+            contents = read_runfile(relative_path)
+            for needle in needles:
+                assert_contains(contents, needle, relative_path)
+
+        self.assertFalse(runfile_exists("tests/vcs_filelist_validation/dv_tb_vcs_compile_args_pldm_ice.f"))
+        self.assertFalse(runfile_exists("tests/vcs_filelist_validation/dv_tb_vcs_compile_args_pldm_sa.f"))
+
+    def test_unit_test_scripts_select_the_requested_simulator(self):
+        scripts = {
+            "tests/vcs_filelist_validation/dv_unit_vcs_run.sh": ["vcs", "-file", "./simv"],
+            "tests/vcs_filelist_validation/dv_unit_xrun_run.sh": ["xrun", "-f"],
+            "tests/vcs_filelist_validation/rtl_unit_vcs": ["vcs", "-file", "waves.fsdb"],
+            "tests/vcs_filelist_validation/rtl_unit_xrun": ["xrun", "-f", "waves.shm"],
+        }
+        for relative_path, needles in scripts.items():
             contents = read_runfile(relative_path)
             for needle in needles:
                 assert_contains(contents, needle, relative_path)

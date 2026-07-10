@@ -1,0 +1,12 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+{SIMULATOR_COMMAND} \
+    -full64 \
+    {DPI_LIBS} \
+    {DEFAULT_SIM_OPTS} \
+    {FLISTS} \
+    {SIM_ARGS} \
+    -o ./simv
+
+./simv "$@"

@@ -1,5 +1,6 @@
 # vim: set ft=bzl :
 load("@rules_python//python:defs.bzl", "py_library")
+load("@pip_deps//:requirements.bzl", "requirement")
 
 package(default_visibility = ["//visibility:public"])
 
@@ -28,6 +29,7 @@ py_library(
 py_library(
     name = "rv_utils",
     srcs = ["rv_utils.py"],
+    deps = [requirement("beautifulsoup4")],
 )
 
 py_library(
@@ -38,6 +40,11 @@ py_library(
 py_library(
     name = "runtime_options",
     srcs = ["runtime_options.py"],
+)
+
+py_library(
+    name = "sim_artifacts",
+    srcs = ["sim_artifacts.py"],
 )
 
 py_library(

@@ -6,7 +6,6 @@
 import argparse
 import os
 import re
-import subprocess
 import sys
 
 ################################################################################
@@ -86,7 +85,6 @@ class AscentLintLog(object):
         self.dirs_with_notes = {}
         self.file_map = {}
 
-        fieldnames = ['severity', 'rulename', 'file', 'details', 'status', 'comments']
         found_file_map = False
 
         # Can't use CSV. Need the full logfile because need to grab the file definitions
@@ -94,7 +92,7 @@ class AscentLintLog(object):
             for line in logp:
                 if line.strip() == "Lint engine run exited with errors upstream. Skipping report.":
                     log.critical("Ascent failed before it can render a report. Exiting")
-                match = re.match("([IWE])\s+([A-Z_]+):\s+(\S+):(\d+)\s+(.*)\s+New", line)
+                match = re.match(r"([IWE])\s+([A-Z_]+):\s+(\S+):(\d+)\s+(.*)\s+New", line)
                 if match:
                     self.issues.append(
                         AscentMessage(match.group(2), match.group(1),
@@ -103,7 +101,7 @@ class AscentLintLog(object):
                 if line.startswith("File Definitions"):
                     found_file_map = True
                 if found_file_map:
-                    match = re.match("([a-zA-Z0-9_]+\.s?vh?(_\d+)?)\s+(.{0,2}\S+)", line)
+                    match = re.match(r"([a-zA-Z0-9_]+\.s?vh?(_\d+)?)\s+(.{0,2}\S+)", line)
                     if match:
                         self.file_map[match.group(1)] = match.group(3)
 
@@ -283,7 +281,7 @@ def main(options, log):
     try:
         newest_lint_log = AscentLintLog("lint.rpt", log)
         newest_lint_log.stats()
-    except Exception as exc:
+    except Exception:
         log.error("Failed to parse lint.rpt")
 
     log.exit_if_warnings_or_errors("Lint parsing failed due to previous errors")

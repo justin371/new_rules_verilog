@@ -1,22 +1,16 @@
 # lib/simulators/xcelium.py
 import os
-import sys
 import stat
 import glob
 import shutil
 import logging
 import subprocess
 
+import jinja2
+
 from .base import SimulatorInterface
 
 log = logging.getLogger(__name__)
-
-# Determine the absolute path to the directory containing this script's package
-# Adjust based on your actual structure if lib/simulators is not directly under the main script dir
-simulators_dir_path = os.path.dirname(os.path.realpath(__file__))
-project_root_path = os.path.abspath(os.path.join(simulators_dir_path, os.pardir, os.pardir))
-sys.path.append(project_root_path) # Add project root to path if necessary
-
 
 class XceliumSimulator(SimulatorInterface):
     """Implementation for Cadence XRUN simulator (including EMU variant)."""
@@ -26,13 +20,8 @@ class XceliumSimulator(SimulatorInterface):
 
     def get_compile_template(self, vcomp_job):
         if self.options.emulator.upper() != '':
-            # Use the absolute path to locate the 'templates' directory
-            dir_path = os.path.dirname(os.path.realpath(sys.modules['__main__'].__file__))
-            # Get the path from the environment variable EMU_JINJA2_PATH
             emu_template_path = os.getenv('EMU_JINJA2_PATH')
             if emu_template_path:
-                import jinja2 # Import locally if needed
-                # fetch xrun_emu_compile_template.sh.j2 from project specific folder
                 emu_loader = jinja2.FileSystemLoader(searchpath=emu_template_path)
                 emu_env = jinja2.Environment(loader=emu_loader)
                 try:
@@ -40,14 +29,16 @@ class XceliumSimulator(SimulatorInterface):
                     log.debug("Using EMU compile template from EMU_JINJA2_PATH")
                     return template
                 except jinja2.TemplateNotFound:
-                    log.error(("%s EMU_JINJA2_PATH environment variable is set, but "
-                               "xrun_emu_compile_template.sh.j2 not found in %s"), vcomp_job, emu_template_path)
-                    sys.exit(1) # Or raise an exception
+                    raise RuntimeError(
+                        "{} EMU template xrun_emu_compile_template.sh.j2 was not found in {}".format(
+                            vcomp_job,
+                            emu_template_path,
+                        )
+                    )
             else:
-                log.error(("%s EMU_JINJA2_PATH environment variable is not set, please set the path "
-                           "where xrun_emu_compile_template.sh.j2 is located, "
-                           "default path is in digital/emu/script"), vcomp_job)
-                sys.exit(1) # Or raise an exception
+                raise RuntimeError(
+                    "{} requires EMU_JINJA2_PATH with xrun_emu_compile_template.sh.j2".format(vcomp_job)
+                )
         else:
             log.debug("Using standard XRUN compile template")
             return self.env.get_template('xrun_compile_template.sh.j2')
@@ -80,6 +71,9 @@ class XceliumSimulator(SimulatorInterface):
 
     def get_bazel_runtime_args_file(self, bazel_runfiles_main, relpath, bazel_target):
         return os.path.join(bazel_runfiles_main, relpath, "{}_runtime_args.f".format(bazel_target))
+
+    def get_bazel_emu_compile_args_file(self, bazel_runfiles_main, relpath, bazel_target):
+        return os.path.join(bazel_runfiles_main, relpath, "{}_rtl_compile_args".format(bazel_target))
 
     def generate_compile_options(self, vcomp_job):
         opts = {'cov_opts': '', 'xprop_cmd': None, 'additional_defines': []}
@@ -244,8 +238,6 @@ class XceliumSimulator(SimulatorInterface):
         Constructs the full simulation command string for XRUN, including logging.
         """
         options = self.options # Convenience alias
-        job = test_job # Convenience alias
-
         # Base executable and common flags
         # Handle runmod wrapper if used consistently
         base_exec = "runmod -t xrun -- " # Assume runmod for standard sim
@@ -255,10 +247,6 @@ class XceliumSimulator(SimulatorInterface):
             # but ensure -R isn't duplicated if GUI already adds it.
             if " -gui " not in sim_opts and " -R " not in sim_opts:
                 run_flags += " -gui" # Add gui if not already in sim_opts by GUI logic
-
-        # Snapshot location
-        # Use vcomp_job_dir directly, assuming it's the dir containing 'snapshot'
-        snapshot_arg = f"-snapshot {vcomp_job_dir}/snapshot:snap" # Check if 'snapshot:snap' is correct dir/file name
 
         # Combine basic parts (excluding logging and user args for now)
         cmd_parts = [
@@ -272,32 +260,30 @@ class XceliumSimulator(SimulatorInterface):
         # --- Handle Emulator Variations ---
         emu_type = options.emulator.upper()
         if emu_type == 'PLDM_SA' or emu_type == 'PLDM_SIM':
-            # Specific EMU command structure (adjust paths/libs as needed)
-            # Note: Original template used `xrun` directly, not `runmod`
             base_exec = "xrun"
-            emu_libs = "-sv_lib dv_common/global/libwc_time_dpi.so" # Example lib path
-            emu_xmlib = "-xmlibdirname hw_lib" # Example xmlib for this emu type
-            # Construct specific command parts for this EMU type
+            emu_dpi_lib = os.environ.get("RV_EMU_DPI_LIB", "dv_common/global/libwc_time_dpi.so")
+            emu_xmlib_dir = os.environ.get("RV_EMU_XMLIBDIR", "hw_lib")
             cmd_parts = [
                 base_exec,
-                "-R -64 -xmfatal NOTEXP", # Common EMU flags from original template
-                emu_xmlib,
-                emu_libs,
-                sim_opts # Pass the calculated sim_opts
-                # Snapshot might not be used or different for EMU? Verify. If needed add snapshot_arg here.
+                "-R -64 -xmfatal NOTEXP",
+                "-xmlibdirname {}".format(emu_xmlib_dir),
+                "-sv_lib {}".format(emu_dpi_lib),
+                sim_opts,
             ]
-            # NOTE: EMU log file was specified differently in original template:
-            # -l user_work/{{job.simname}}/sim.log
-            # We need to decide: Use -l or | tee? If -l works for EMU, use it.
-            # If EMU needs '| tee', handle it below. Let's assume for now '| tee' is safer.
-            log_handling = f"| tee {log_path}" # Use pipe tee
+            log_handling = f"| tee {log_path}"
 
-        elif emu_type == 'SIM': # Another emulator type from original template
+        elif emu_type == 'SIM':
             base_exec = "xrun"
-            emu_libs = "-sv_lib dv_common/global/libwc_time_dpi.so"
-            emu_xmlib = "-xmlibdirname sw_lib"
-            cmd_parts = [base_exec, "-R -64 -xmfatal NOTEXP", emu_xmlib, emu_libs, sim_opts]
-            log_handling = f"| tee {log_path}" # Use pipe tee
+            emu_dpi_lib = os.environ.get("RV_EMU_DPI_LIB", "dv_common/global/libwc_time_dpi.so")
+            emu_xmlib_dir = os.environ.get("RV_EMU_XMLIBDIR", "sw_lib")
+            cmd_parts = [
+                base_exec,
+                "-R -64 -xmfatal NOTEXP",
+                "-xmlibdirname {}".format(emu_xmlib_dir),
+                "-sv_lib {}".format(emu_dpi_lib),
+                sim_opts,
+            ]
+            log_handling = f"| tee {log_path}"
 
         else: # Standard XRUN simulation (not EMU)
             # Add user arguments if provided

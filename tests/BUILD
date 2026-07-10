@@ -40,6 +40,18 @@ py_test(
 )
 
 py_test(
+    name = "regression_report_test",
+    srcs = ["regression_report_test.py"],
+    deps = ["//lib:regression_report"],
+)
+
+py_test(
+    name = "sim_artifacts_test",
+    srcs = ["sim_artifacts_test.py"],
+    deps = ["//lib:sim_artifacts"],
+)
+
+py_test(
     name = "simmer_results_test",
     srcs = ["simmer_results_test.py"],
     deps = ["//lib:simmer_results"],

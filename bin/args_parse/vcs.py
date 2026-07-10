@@ -5,6 +5,10 @@ from lib import parser_actions
 
 def add_vcs_arguments(parser):
     gvcs = parser.add_argument_group("VCS arguments")
+    gvcs.add_argument('--gui',
+                      default=False,
+                      action='store_true',
+                      help='Run a single VCS simulation in the Verdi GUI.')
     gvcs.add_argument('--cm',
                       action=parser_actions.CMAction,
                       help=f'Enable Code Coverage for vcs only.\n{parser_actions.CMAction.format_options(indent=0)}')
@@ -86,6 +90,8 @@ def validate_vcs_switches_for_xcelium(options, parser):
     vcs_only_switches = []
     if options.cm:
         vcs_only_switches.append('--cm')
+    if options.gui:
+        vcs_only_switches.append('--gui')
     if options.vcs_cm_line is not None:
         vcs_only_switches.append('--vcs-cm-line')
     if options.vcs_cm_report is not None:
@@ -198,5 +204,3 @@ def validate_vcs_runtime_options(options, parser):
             options.wave_type = 'fsdb'
         if options.wave_type != 'fsdb':
             parser.error("VCS supports only --wave-type fsdb. Stopping before Bazel starts.")
-        if options.wave_delta:
-            parser.error("--wave-delta is supported only for Xcelium SHM waves. Stopping before Bazel starts.")

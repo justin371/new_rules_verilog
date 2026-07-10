@@ -94,6 +94,19 @@ extra_runtime_args_vcs
 
 Do not mix the unified and legacy names in the same target.
 
+## Argument ownership
+
+Simulator arguments are defined and validated in their own modules:
+
+- `bin/args_parse/vcs.py`: VCS coverage, FGP, DTL, VSO.ai, Verdi GUI, SmartLog.
+- `bin/args_parse/xcelium.py`: Xcelium coverage, MCE, MSIE, EMU and Xcelium-only probe controls.
+- `bin/args_parse/common.py`: simmer scheduling, test selection, shared UVM, shared wave scope/time and result behavior.
+
+Passing a vendor-specific option to the other backend fails before Bazel starts.
+Use `extra_compile_args` only for compile/elaboration flags and
+`extra_runtime_args` only for runtime flags. CLI `--sim-opts` overrides matching
+test-config simulation options.
+
 ## VCS defaults
 
 VCS compile filelists use `-file`. Runtime `simv` invocations use `-f`.
@@ -117,6 +130,28 @@ simmer -t <bench>:<test> --simulator VCS --xprop F
 
 VCS wave dumping supports FSDB only.
 
+### FSDB probe and viewer flow
+
+The default FSDB command probes `hdl_top`. Limit scope and time when possible:
+
+```bash
+simmer -t <bench>:<test> --simulator VCS \
+  --waves hdl_top.dut hdl_top.env \
+  --wave-depth 8 --wave-start 1000 --wave-end 50000
+```
+
+Successful wave runs create an executable `run_waves.sh` beside `waves.fsdb`.
+It launches Verdi directly by default. Sites using LSF can provide a launcher
+without editing the generated script:
+
+```bash
+SIMMER_WAVE_LAUNCHER="bsub -I -q syn" ./run_waves.sh
+```
+
+Use `--wave-tcl <file>` for project-specific FSDB dump/probe commands. Keep the
+generated default as the reference for `dump -file`, `dump -add`, timed enable/
+disable, flush and close ordering.
+
 ## Xcelium defaults
 
 Xcelium behavior is unchanged:
@@ -139,6 +174,63 @@ simulation jobs, job directories, and commands. Use it to identify whether time
 is going to Bazel setup, VCS compile, runtime simulation, or log checking.
 
 For quiet normal runs, avoid `--tool-debug`; it prints scheduler polling noise.
+
+### Large IP/VIP builds
+
+- Keep the VCS VCOMP directory between runs; `-Mupdate`, `-Mdir` and `-Mlib`
+  provide incremental compile reuse.
+- Use `--no-compile --no-bazel` only after the existing `simv` has been validated.
+- Keep stable third-party IP/VIP in separate Bazel libraries/filelists so a TB
+  edit does not rewrite their generated inputs.
+- Use `--fgp N` for runtime threading only after profiling; simmer reduces the
+  number of concurrent tests to account for those threads.
+- Avoid waves, `-debug_access`, VPI and SmartLog in throughput regressions.
+
+DTL (`--dtl`) and VSO.ai (`--vso`) are opt-in advanced flows. They are not
+enabled by default because they require feature-specific licenses, setup and
+real workload validation.
+
+## Coverage generation and merge
+
+VCS `--cm` writes one `.vdb` per vcomp and generates
+`<vcomp>_vcs_cov_merge.sh`. The same configured VCS runner is used for `urg`
+and Verdi. Xcelium `--coverage` keeps IMC generation and merge in the Xcelium
+adapter. Coverage switches from one backend are rejected by the other.
+
+Run report generation only when the regression database is complete. Keep raw
+per-test coverage until the merge succeeds; merged databases and HTML reports
+can then be archived while per-test databases are removed according to project
+retention policy.
+
+## Filelist paths
+
+Generated filelists use Bazel runfiles-root-relative paths. Main-workspace files
+look like `hw/...`; external repositories look like `external/<repo>/...`.
+`../` upward traversal is rejected by tests.
+
+Do not replace generated paths with environment variables. Runfiles-relative
+paths are hermetic, visible to Bazel and stable under the per-test
+`bazel_runfiles_main` symlink. Environment-variable expansion differs across
+EDA tools and nested filelist readers. Environment variables remain appropriate
+for site launchers and installed tool roots, not source paths owned by Bazel.
+
+## Rerun scripts
+
+Each test generates an executable `rerun.sh` with the full Bazel test target,
+seed and original simulator options. Run it directly from any directory. Set
+`SIMMER_BIN=/path/to/simmer` only when `simmer` is not on `PATH`.
+
+## Saving disk space
+
+- Passing tests are removed by default. `--nt` intentionally retains them.
+- Do not enable waves, coverage, SmartLog, VSO artifacts or `--nt` in routine
+  throughput regressions.
+- Reuse the VCS VCOMP directory instead of creating a new `--dir-suffix` for
+  every run.
+- Keep `.simmer_results.json` and compact regression logs; archive only failed
+  logs and selected FSDB/coverage artifacts.
+- Use `bazel clean` for stale Bazel outputs. Reserve `bazel clean --expunge` for
+  deliberate cache removal because the next build will be fully cold.
 
 ## Simulation history
 
@@ -183,4 +275,3 @@ simmer --use-color --history
 
 Runs that only discover tests, compile without running simulation, or fail
 before any simulation job starts are not recorded.
-

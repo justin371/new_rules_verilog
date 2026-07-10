@@ -590,14 +590,18 @@ def _verilog_dv_tb_impl(ctx):
 
     trans_srcs = get_transitive_srcs([], ctx.attr.deps + ctx.attr.shells, VerilogInfo, "transitive_sources", allow_other_outputs = True)
     trans_flists = get_transitive_srcs([], ctx.attr.deps + ctx.attr.shells, VerilogInfo, "transitive_flists", allow_other_outputs = False)
-    out_deps = depset([
+    generated_outputs = [
         ctx.outputs.compile_args,
-        ctx.outputs.compile_args_pldm_ice,
-        ctx.outputs.compile_args_pldm_sa,
         ctx.outputs.runtime_args,
         ctx.outputs.compile_warning_waivers,
-        ctx.outputs.executable
-    ])
+        ctx.outputs.executable,
+    ]
+    if simulator == "XRUN":
+        generated_outputs.extend([
+            ctx.outputs.compile_args_pldm_ice,
+            ctx.outputs.compile_args_pldm_sa,
+        ])
+    out_deps = depset(generated_outputs)
     all_files = depset([], transitive = [trans_srcs, trans_flists, out_deps])
 
     return [
@@ -742,20 +746,28 @@ def _verilog_dv_unit_test_impl(ctx):
     flists = get_transitive_srcs([], ctx.attr.deps, VerilogInfo, "transitive_flists")
     flists_list = flists.to_list()
     simulator = ctx.attr.simulator
-    if simulator == "VCS":
-        fail("verilog_dv_unit_test {} does not support simulator = 'VCS'. Use the VCS two-step flow via verilog_dv_tb + simmer instead.".format(ctx.label))
     unit_test_template = ctx.file.ut_sim_template
     default_sim_opts = ctx.file.default_sim_opts
     simulator_command = ctx.attr._command_override[ToolEncapsulationInfo].command
+    filelist_flag = "-f"
+    dpi_tool = None
+    if simulator == "VCS":
+        if unit_test_template.short_path == ctx.file._ut_sim_template_xrun_default.short_path:
+            unit_test_template = ctx.file._ut_sim_template_vcs_default
+        if default_sim_opts.short_path == ctx.file._default_sim_opts_xrun_default.short_path:
+            default_sim_opts = ctx.file._default_sim_opts_vcs_default
+        simulator_command = ctx.attr._command_override_vcs[ToolEncapsulationInfo].command
+        filelist_flag = "-file"
+        dpi_tool = "vcs"
 
     ctx.actions.expand_template(
         template = unit_test_template,
         output = ctx.outputs.out,
         substitutions = {
             "{SIMULATOR_COMMAND}": simulator_command,
-            "{DEFAULT_SIM_OPTS}": "-f {}".format(default_sim_opts.short_path),
-            "{DPI_LIBS}": flists_to_arguments(ctx.attr.deps, VerilogInfo, "transitive_dpi", "-sv_lib", "", None),
-            "{FLISTS}": " ".join(["-f {}".format(f.short_path) for f in flists_list]),
+            "{DEFAULT_SIM_OPTS}": "{} {}".format(filelist_flag, default_sim_opts.short_path),
+            "{DPI_LIBS}": flists_to_arguments(ctx.attr.deps, VerilogInfo, "transitive_dpi", "-sv_lib", "", dpi_tool),
+            "{FLISTS}": " ".join(["{} {}".format(filelist_flag, f.short_path) for f in flists_list]),
             "{SIM_ARGS}": " ".join(ctx.attr.sim_args),
         },
         is_executable = True,
@@ -788,8 +800,7 @@ verilog_dv_unit_test = rule(
         "simulator": attr.string(
             default = "XRUN",
             values = ["XRUN", "VCS"],
-            doc = "Simulator to use for this unit test. Only XRUN is supported here.\n" +
-                  "For VCS, use the two-step flow via verilog_dv_tb and simmer.\n",
+            doc = "Simulator to use for this one-step unit test. Supported values are XRUN and VCS.\n",
         ),
         "ut_sim_template": attr.label(
             allow_single_file = True,
@@ -811,6 +822,26 @@ verilog_dv_unit_test = rule(
             doc = "Allows custom override of simulator command in the event of wrapping via modulefiles.\n" +
                   "Example override in project's .bazelrc:\n" +
                   '  build --@rules_verilog//:verilog_dv_unit_test_command="runmod -t xrun --"',
+        ),
+        "_command_override_vcs": attr.label(
+            default = Label("@rules_verilog//:verilog_dv_unit_test_command_vcs"),
+            doc = "Default command encapsulation for VCS DV unit tests.",
+        ),
+        "_default_sim_opts_xrun_default": attr.label(
+            allow_single_file = True,
+            default = Label("@rules_verilog//vendors/cadence:verilog_dv_unit_test_opts.f"),
+        ),
+        "_default_sim_opts_vcs_default": attr.label(
+            allow_single_file = True,
+            default = Label("@rules_verilog//vendors/synopsys:verilog_dv_unit_test_opts.f"),
+        ),
+        "_ut_sim_template_xrun_default": attr.label(
+            allow_single_file = True,
+            default = Label("@rules_verilog//vendors/cadence:verilog_dv_unit_test.sh.template"),
+        ),
+        "_ut_sim_template_vcs_default": attr.label(
+            allow_single_file = True,
+            default = Label("@rules_verilog//vendors/synopsys:verilog_dv_unit_test.sh.template"),
         ),
     },
     outputs = {"out": "%{name}_run.sh"},

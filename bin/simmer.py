@@ -12,7 +12,6 @@ import random
 import re
 import shlex
 import shutil
-import stat
 import subprocess
 
 ################################################################################
@@ -21,7 +20,6 @@ import jinja2
 
 # Determine the absolute path to the directory containing this script
 dir_path = os.path.dirname(os.path.realpath(__file__))
-sys.path.append(os.path.dirname(__file__))
 
 ################################################################################
 # rules_verilog lib imports
@@ -33,6 +31,7 @@ from lib import cmn_logging
 from lib import job_lib
 from lib import regression
 from lib import rv_utils
+from lib import sim_artifacts
 from lib import simmer_results
 from lib.runtime_options import (
     format_sim_opts_dict,
@@ -211,20 +210,6 @@ def get_active_job_limit(options, rcfg):
     return max(1, min(total_tests, requested_jobs))
 
 
-def path_from_sim_root(path, bazel_runfiles_main):
-    abs_path = os.path.abspath(path)
-    abs_runfiles = os.path.abspath(bazel_runfiles_main)
-    try:
-        rel_path = os.path.relpath(abs_path, abs_runfiles)
-    except ValueError:
-        return path
-
-    if rel_path.startswith(".."):
-        return path
-
-    return os.path.join("bazel_runfiles_main", rel_path).replace("\\", "/")
-
-
 # The jobs of the verification compilation and elaboration stages
 class VCompJob(Job):
     # All found vcomp names to prevent collisions
@@ -306,10 +291,6 @@ class VCompJob(Job):
                                                                              bazel_target)
         self.compile_warning_waivers_path = os.path.join(self.bazel_runfiles_main, relpath,
                                                          "{}_compile_warning_waivers".format(bazel_target))
-        # RTL file list for Emu (if needed by template, keep calculation here or move to simulator)
-        self.bazel_compile_args_emu_rtl = os.path.join(self.bazel_runfiles_main, relpath,
-                                                       "{}_rtl_compile_args".format(bazel_target))
-
         # --- Template Rendering ---
         vcomp_sh_path = os.path.join(self.job_dir, "vcomp.sh")
         compile_template = self.simulator.get_compile_template(self)
@@ -330,7 +311,6 @@ class VCompJob(Job):
             'cov_opts': cov_opts,
             'bazel_runfiles_main': self.bazel_runfiles_main,
             'bazel_compile_args': self.bazel_compile_args,
-            'bazel_compile_args_rtl': self.bazel_compile_args_emu_rtl, # Pass even if not used by all templates
             'debug_mode': debug_mode,
             'xprop_cmd': xprop_cmd,
             'relpath': relpath,
@@ -343,13 +323,14 @@ class VCompJob(Job):
             # Add simulator name if needed in template
             'simulator_name': self.simulator.get_name(),
         }
+        if options.emulator:
+            template_context['bazel_compile_args_rtl'] = self.simulator.get_bazel_emu_compile_args_file(
+                self.bazel_runfiles_main,
+                relpath,
+                bazel_target,
+            )
 
-        with open(vcomp_sh_path, 'w') as filep:
-            filep.write(compile_template.render(**template_context))
-
-        # Make executable
-        st = os.stat(vcomp_sh_path)
-        os.chmod(vcomp_sh_path, st.st_mode | stat.S_IEXEC)
+        sim_artifacts.write_executable_script(vcomp_sh_path, compile_template.render(**template_context))
 
         log.debug("bazel_runfiles_main: %s", self.bazel_runfiles_main)
 
@@ -620,7 +601,6 @@ class TestJob(Job):
         log.debug("Preparing test: %s:%s (Simulator: %s)", self.vcomper.name, self.name, self.simulator.get_name())
 
         options = self.rcfg.options
-        vcomp_dir = self.vcomper.job_dir
 
         self.vso_assignment = None
         self.vso_run_id = None
@@ -778,7 +758,7 @@ class TestJob(Job):
         bazel_runtime_args_file = self.vcomper.bazel_runtime_args # Get path from vcomper
         if os.path.exists(bazel_runtime_args_file):
             sim_opts += " -f {} ".format(
-                path_from_sim_root(bazel_runtime_args_file, self.vcomper.bazel_runfiles_main)
+                sim_artifacts.runfiles_path(bazel_runtime_args_file, self.vcomper.bazel_runfiles_main)
             )
         else:
             log.warning(f"Runtime args file not found: {bazel_runtime_args_file}")
@@ -840,22 +820,19 @@ class TestJob(Job):
             # ---
             # Add test_name_seed specifically for VCS template if needed
             'test_name_seed': getattr(self, 'test_name_seed', None),
+            'check_test_path': shlex.quote(sim_artifacts.find_bazel_executable(self.rcfg.proj_dir, "check_test")),
         }
 
         # Render sim.sh
-        with open(testscript_path, 'w') as filep:
-            filep.write(sim_template.render(**script_context))
-        os.chmod(testscript_path, stat.S_IRWXU | stat.S_IRGRP | stat.S_IXGRP | stat.S_IROTH | stat.S_IXOTH) # 755
+        sim_artifacts.write_executable_script(testscript_path, sim_template.render(**script_context))
         log.debug('Created %s', testscript_path)
 
         # Render rerun.sh
-        with open(rerun_script_path, 'w') as filep:
-            filep.write(rerun_template.render(
-                job=self,
-                seed=seed,
-                reproduce_args=shlex.join(options.reproduce_args),
-            ))
-        os.chmod(rerun_script_path, stat.S_IRWXU | stat.S_IRGRP | stat.S_IXGRP | stat.S_IROTH | stat.S_IXOTH) # 755
+        sim_artifacts.write_executable_script(rerun_script_path, rerun_template.render(
+            rerun_target=shlex.quote(self.target),
+            seed=seed,
+            reproduce_args=shlex.join(options.reproduce_args),
+        ))
         log.debug('Created %s', rerun_script_path)
 
         # Create a symlink back the vcomp directory for easy reference
@@ -957,14 +934,10 @@ class TestJob(Job):
                 "job_dir": wave_path,
                 "wave_file_path": absolute_wave_path,
                 "bazel_runfiles_dir": bazel_runfiles_dir,
-                "wave_view_command": self.simulator.get_wave_view_command(absolute_wave_path, wave_path),
+                "wave_view_command": shlex.quote(self.simulator.get_wave_view_command(absolute_wave_path, wave_path)),
             }
             run_wave_script_content = RUN_WAVE_TEMPLATE.render(run_wave_template_vars)
-
-            with open(run_wave_script_path, 'w') as f:
-                f.write(run_wave_script_content)
-
-            os.chmod(run_wave_script_path, stat.S_IRWXU | stat.S_IRGRP | stat.S_IXGRP | stat.S_IROTH | stat.S_IXOTH)
+            sim_artifacts.write_executable_script(run_wave_script_path, run_wave_script_content)
             log.info(f"Run wave: {run_wave_script_path}")
 
         sys.stdout.flush()

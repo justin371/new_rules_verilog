@@ -1,0 +1,60 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+generate_waves=0
+launch_wave_viewer=0
+compile_args=()
+run_args=()
+
+while (( $# )); do
+    case "$1" in
+        --waves)
+            generate_waves=1
+            ;;
+        --launch)
+            generate_waves=1
+            launch_wave_viewer=1
+            ;;
+        --compile-arg)
+            compile_args+=("$2")
+            shift
+            ;;
+        --run-arg)
+            run_args+=("$2")
+            shift
+            ;;
+        *)
+            run_args+=("$1")
+            ;;
+    esac
+    shift
+done
+
+debug_args=()
+wave_args=()
+if (( generate_waves )); then
+    debug_args=(-kdb -debug_access+all)
+    wave_args=(-ucli -do "{WAVES_RENDER_CMD_PATH}")
+fi
+
+{SIMULATOR_COMMAND} \
+    -full64 \
+    -sverilog \
+    -licqueue \
+    -timescale=100fs/100fs \
+    +define+TBV \
+    +define+TIMESCALE_STEP_FS=100 \
+    +define+TIMESCALE_PREC_FS=100 \
+    "${debug_args[@]}" \
+    {PRE_FLIST_ARGS}
+    {FLISTS} \
+    {TOP} \
+    {POST_FLIST_ARGS} \
+    "${compile_args[@]}" \
+    -o ./simv
+
+./simv "${wave_args[@]}" "${run_args[@]}"
+
+if (( launch_wave_viewer )); then
+    {WAVE_VIEWER_COMMAND} -ssf waves.fsdb
+fi

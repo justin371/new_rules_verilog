@@ -2,17 +2,22 @@
 """Report regression result in HTML."""
 
 # standard lib imports
-import getpass
 import os
-import re
-import sys
-import subprocess
 import shutil
-from datetime import datetime, timedelta
+from datetime import datetime
 
 # Bigger libraries
 import json
-import jinja2
+
+
+def regression_history_series(regressions, timestamps):
+    """Return pass, code-coverage, and functional-coverage chart series."""
+    entries = [regressions[timestamp] for timestamp in timestamps if timestamp in regressions]
+    return (
+        [entry['passrate'] for entry in entries],
+        [entry['cov_code'] for entry in entries],
+        [entry['cov_func'] for entry in entries],
+    )
 
 
 class RegressionReport():
@@ -91,7 +96,7 @@ class RegressionReport():
             self.trd[b].append(["Total", "", "",
                                 "" if passed == 0 else str(passed), "" if skipped == 0 else str(skipped),
                                 "" if failed == 0 else str(failed), "" if total == 0 else str(total),
-                                f"{passed / total * 100:.2f}", "", ""])
+                                f"{passed / total * 100:.2f}" if total else "0.00", "", ""])
 
     def process_category_stats(self):
         """
@@ -286,9 +291,7 @@ class RegressionReport():
                 remain_list = sorted_list
 
             # Process regressions summary for chart
-            passrate_list = [regressions[ts]['passrate'] for ts in remain_list if ts in regressions.keys()]
-            cov_code_list = [regressions[ts]['cov_func'] for ts in remain_list if ts in regressions.keys()]
-            cov_func_list = [regressions[ts]['cov_func'] for ts in remain_list if ts in regressions.keys()]
+            passrate_list, cov_code_list, cov_func_list = regression_history_series(regressions, remain_list)
 
             # Render
             rendered_html = self.REGRESSION_REPORT_TEMPLATE.render(

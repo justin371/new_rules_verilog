@@ -369,8 +369,6 @@ def _verilog_rtl_unit_test_impl(ctx):
     flists = get_transitive_srcs([], ctx.attr.shells + ctx.attr.deps, VerilogInfo, "transitive_flists")
     flists_list = flists.to_list()
     simulator = ctx.attr.simulator
-    if simulator == "VCS":
-        fail("verilog_rtl_unit_test {} does not support simulator = 'VCS'. Use the VCS two-step flow via simmer instead.".format(ctx.label))
 
     top = ""
     for dep in ctx.attr.deps:
@@ -399,6 +397,25 @@ def _verilog_rtl_unit_test_impl(ctx):
     ut_sim_waves_template = ctx.file.ut_sim_waves_template
     simulator_command = ctx.attr.command_override[ToolEncapsulationInfo].command
     wave_viewer_command = ctx.attr.wave_viewer_command[ToolEncapsulationInfo].command
+    filelist_flag = "-f"
+    if simulator == "VCS":
+        ut_sim_template = _resolve_unit_test_default_file(
+            simulator,
+            ut_sim_template,
+            ctx.file._ut_sim_template_xrun_default,
+            ctx.file._ut_sim_template_vcs_default,
+        )
+        ut_sim_waves_template = _resolve_unit_test_default_file(
+            simulator,
+            ut_sim_waves_template,
+            ctx.file._ut_sim_waves_template_xrun_default,
+            ctx.file._ut_sim_waves_template_vcs_default,
+        )
+        if _label_matches_default(ctx.attr.command_override.label, ctx.attr._command_override_xrun_default.label):
+            simulator_command = ctx.attr._command_override_vcs[ToolEncapsulationInfo].command
+        if _label_matches_default(ctx.attr.wave_viewer_command.label, ctx.attr._wave_viewer_command_xrun_default.label):
+            wave_viewer_command = ctx.attr._wave_viewer_command_vcs[ToolEncapsulationInfo].command
+        filelist_flag = "-file"
 
     waves_cmd = ctx.actions.declare_file(ctx.label.name + "_waves.tcl")
     ctx.actions.expand_template(
@@ -415,7 +432,7 @@ def _verilog_rtl_unit_test_impl(ctx):
         substitutions = {
             "{SIMULATOR_COMMAND}": simulator_command,
             "{WAVE_VIEWER_COMMAND}": wave_viewer_command,
-            "{FLISTS}": " ".join(["-f {}".format(f.short_path) for f in flists_list]),
+            "{FLISTS}": " ".join(["{} {}".format(filelist_flag, f.short_path) for f in flists_list]),
             "{TOP}": top,
             "{PRE_FLIST_ARGS}": "\n".join(pre_fa),
             "{POST_FLIST_ARGS}": post_fa,
@@ -455,8 +472,7 @@ verilog_rtl_unit_test = rule(
         "simulator": attr.string(
             default = "XRUN",
             values = ["XRUN", "VCS"],
-            doc = "Simulator to use for this RTL unit test. Only XRUN is supported here.\n" +
-                  "For VCS, use the two-step flow via simmer.\n",
+            doc = "Simulator to use for this RTL unit test. Supported values are XRUN and VCS.\n",
         ),
         "ut_sim_template": attr.label(
             allow_single_file = True,
@@ -489,6 +505,34 @@ verilog_rtl_unit_test = rule(
             doc = "Allows custom override of waveform viewer command in the event of wrapping via modulefiles.\n" +
                   "Example override in project's .bazelrc:\n" +
                   '  build --@rules_verilog//:verilog_rtl_wave_viewer_command="runmod xrun --"\n',
+        ),
+        "_command_override_xrun_default": attr.label(
+            default = Label("@rules_verilog//:verilog_rtl_unit_test_command"),
+        ),
+        "_command_override_vcs": attr.label(
+            default = Label("@rules_verilog//:verilog_rtl_unit_test_command_vcs"),
+        ),
+        "_ut_sim_template_xrun_default": attr.label(
+            allow_single_file = True,
+            default = Label("@rules_verilog//vendors/cadence:verilog_rtl_unit_test.sh.template"),
+        ),
+        "_ut_sim_template_vcs_default": attr.label(
+            allow_single_file = True,
+            default = Label("@rules_verilog//vendors/synopsys:verilog_rtl_unit_test.sh.template"),
+        ),
+        "_ut_sim_waves_template_xrun_default": attr.label(
+            allow_single_file = True,
+            default = Label("@rules_verilog//vendors/cadence:verilog_rtl_unit_test_waves.tcl.template"),
+        ),
+        "_ut_sim_waves_template_vcs_default": attr.label(
+            allow_single_file = True,
+            default = Label("@rules_verilog//vendors/synopsys:verilog_rtl_unit_test_waves.tcl.template"),
+        ),
+        "_wave_viewer_command_xrun_default": attr.label(
+            default = Label("@rules_verilog//:verilog_rtl_wave_viewer_command"),
+        ),
+        "_wave_viewer_command_vcs": attr.label(
+            default = Label("@rules_verilog//:verilog_rtl_wave_viewer_command_vcs"),
         ),
         "data": attr.label_list(
             allow_files = True,
