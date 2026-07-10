@@ -6,6 +6,8 @@ import json
 import os
 import shlex
 import sys
+import uuid
+from contextlib import contextmanager
 
 RESULTS_FILENAME = ".simmer_results.json"
 SCHEMA_VERSION = 1
@@ -33,7 +35,31 @@ def _timestamp():
 
 
 def _run_id():
-    return datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+    return uuid.uuid4().hex
+
+
+@contextmanager
+def _store_lock(path):
+    with open(path + ".lock", "a+b") as lock:
+        if os.name == "nt":
+            import msvcrt
+            lock.seek(0, os.SEEK_END)
+            if lock.tell() == 0:
+                lock.write(b"\0")
+                lock.flush()
+            lock.seek(0)
+            msvcrt.locking(lock.fileno(), msvcrt.LK_LOCK, 1)
+        else:
+            import fcntl
+            fcntl.flock(lock, fcntl.LOCK_EX)
+        try:
+            yield
+        finally:
+            if os.name == "nt":
+                lock.seek(0)
+                msvcrt.locking(lock.fileno(), msvcrt.LK_UNLCK, 1)
+            else:
+                fcntl.flock(lock, fcntl.LOCK_UN)
 
 
 def create_run(argv, rcfg, planned_tests):
@@ -130,10 +156,10 @@ def finalize_run(run, regression_log_path=None, vso_finalize_merge_failed=False)
     }
 
     if tests:
-        if skipped:
-            run["status"] = "PARTIAL"
-        elif failed or vso_finalize_merge_failed:
+        if failed or vso_finalize_merge_failed:
             run["status"] = "FAILED"
+        elif skipped:
+            run["status"] = "PARTIAL"
         else:
             run["status"] = "PASSED"
         return
@@ -156,13 +182,11 @@ def load_store(project_dir):
     path = results_path(project_dir)
     if not os.path.exists(path):
         return _empty_store()
-    try:
-        with open(path, "r", encoding="utf-8") as filep:
-            store = json.load(filep)
-    except (OSError, json.JSONDecodeError):
-        return _empty_store()
-    if not isinstance(store, dict):
-        return _empty_store()
+    with open(path, "r", encoding="utf-8") as filep:
+        store = json.load(filep)
+    runs = store.get("runs", []) if isinstance(store, dict) else None
+    if not isinstance(runs, list) or any(not isinstance(run, dict) for run in runs):
+        raise ValueError("Invalid simmer history structure in {}".format(path))
     store.setdefault("schema_version", SCHEMA_VERSION)
     store.setdefault("last_run", None)
     store.setdefault("runs", [])
@@ -172,21 +196,31 @@ def load_store(project_dir):
 def save_run(project_dir, run, max_runs=MAX_RUNS):
     if not run.get("tests"):
         return
-    store = load_store(project_dir)
-    runs = [item for item in store.get("runs", []) if item.get("run_id") != run.get("run_id")]
-    runs.append(run)
-    runs = runs[-max_runs:]
-    store = {
-        "schema_version": SCHEMA_VERSION,
-        "last_run": run,
-        "runs": runs,
-    }
     path = results_path(project_dir)
-    temp_path = "{}.{}.tmp".format(path, os.getpid())
-    with open(temp_path, "w", encoding="utf-8") as filep:
-        json.dump(store, filep, indent=2)
-        filep.write("\n")
-    os.replace(temp_path, path)
+    with _store_lock(path):
+        try:
+            store = load_store(project_dir)
+        except (json.JSONDecodeError, ValueError):
+            corrupt_path = "{}.corrupt.{}".format(path, datetime.datetime.now().strftime("%Y%m%d_%H%M%S_%f"))
+            os.replace(path, corrupt_path)
+            print("Warning: moved invalid simmer history to {}".format(corrupt_path), file=sys.stderr)
+            store = _empty_store()
+        runs = [item for item in store.get("runs", []) if item.get("run_id") != run.get("run_id")]
+        runs.append(run)
+        store = {
+            "schema_version": SCHEMA_VERSION,
+            "last_run": run,
+            "runs": runs[-max_runs:],
+        }
+        temp_path = "{}.{}.{}.tmp".format(path, os.getpid(), uuid.uuid4().hex)
+        try:
+            with open(temp_path, "w", encoding="utf-8") as filep:
+                json.dump(store, filep, indent=2)
+                filep.write("\n")
+            os.replace(temp_path, path)
+        finally:
+            if os.path.exists(temp_path):
+                os.remove(temp_path)
 
 
 def _select_compile_log(run):
@@ -257,7 +291,10 @@ def _color_status(status, use_color):
 
 def format_history(project_dir, count, use_color=None):
     use_color = _resolve_use_color(use_color)
-    store = load_store(project_dir)
+    try:
+        store = load_store(project_dir)
+    except (OSError, ValueError) as exc:
+        return "Unable to read simmer history: {}".format(exc)
     runs = [run for run in store.get("runs", []) if run.get("tests")]
     if not runs:
         return "No simmer history found."

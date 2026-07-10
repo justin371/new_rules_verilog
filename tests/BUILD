@@ -39,6 +39,12 @@ py_test(
     deps = ["//lib:regression"],
 )
 
+py_test(
+    name = "simmer_results_test",
+    srcs = ["simmer_results_test.py"],
+    deps = ["//lib:simmer_results"],
+)
+
 buildifier(
     name = "buildifier_fix",
     lint_mode = "fix",
