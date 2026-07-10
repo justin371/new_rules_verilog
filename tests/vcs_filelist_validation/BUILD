@@ -46,6 +46,8 @@ py_test(
     main = "validate_vcs_runtime_contract_test.py",
     srcs = ["validate_vcs_runtime_contract_test.py"],
     data = [
+        "//bin:simmer.py",
+        "//bin:templates/rerun_template.sh.j2",
         "//bin:templates/vcs_compile_template.sh.j2",
         "//vendors/synopsys:verilog_dv_tb_compile_args.f.template",
         "//verilog/private:dv.bzl",
@@ -54,5 +56,6 @@ py_test(
     deps = [
         "//bin:args_parser_lib",
         "//lib/simulators:vcs",
+        "//lib/simulators:xcelium",
     ],
 )

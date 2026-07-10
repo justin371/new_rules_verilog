@@ -182,17 +182,16 @@ class RegressionConfig():
         :param j: Filename to load from
         :return: Loaded dictionary
         """
-        if os.path.exists(self.proj_dir + "/" + j):
-            try:
-                with open(self.proj_dir + "/" + j, "r") as f:
-                    bazel_data = f.read()
-            except Exception as e:
-                self.log.critical("Failed to open '%s' file: %s", j, e)
-            d = json.loads(bazel_data)
-            return d
-        else:
+        path = self._cache_path(j)
+        if not os.path.exists(path):
             self.log.critical("'%s' not found. Please compile first!", j)
-            sys.exit(0)
+            raise FileNotFoundError(path)
+        try:
+            with open(path, "r") as filep:
+                return json.load(filep)
+        except (OSError, json.JSONDecodeError) as exc:
+            self.log.critical("Failed to load '%s' file: %s", j, exc)
+            raise
 
     def _cache_path(self, filename):
         return os.path.join(self.proj_dir, filename)
@@ -281,11 +280,10 @@ class RegressionConfig():
             vcomp=vcomp,
         )
 
-    def _run_command(self, cmd, shell=False):
-        self.log.debug(" > %s", cmd if isinstance(cmd, str) else " ".join(cmd))
+    def _run_command(self, cmd):
+        self.log.debug(" > %s", " ".join(cmd))
         result = subprocess.run(
             cmd,
-            shell=shell,
             check=False,
             capture_output=True,
             text=True,
@@ -301,9 +299,9 @@ class RegressionConfig():
         dtp = rv_utils.DatetimePrinter(self.log)
 
         # Query only the benches requested by the current test globs.
-        cmd = 'bazel query "{}"'.format(self._build_vcomp_discovery_query())
+        cmd = ["bazel", "query", self._build_vcomp_discovery_query()]
         dtp.reset()
-        returncode, stdout, stderr = self._run_command(cmd, shell=True)
+        returncode, stdout, stderr = self._run_command(cmd)
         dtp.stop_and_print()
         if returncode:
             self.log.critical("bazel bench discovery failed: %s", stderr)
@@ -320,8 +318,7 @@ class RegressionConfig():
 
         dtp.reset()
         returncode, stdout, stderr = self._run_command(
-            'bazel cquery "{}"'.format(combined_test_query),
-            shell=True,
+            ["bazel", "cquery", combined_test_query],
         )
         dtp.stop_and_print()
         if returncode:

@@ -85,12 +85,11 @@ def create_regression_log_file(rcfg):
     return log_file_path
 
 
-def print_summary(rcfg, vcomp_jobs, icfgs, jm, trd):
+def print_summary(rcfg, vcomp_jobs, jm, trd):
     """
     Print a summary of regression results
     :param rcfg: Regression configuration object
     :param vcomp_jobs: Dictionary of vcomponent jobs
-    :param icfgs: List of iteration configurations
     :param jm: Job manager instance
     :param trd: List to store test results data
     """
@@ -153,7 +152,7 @@ def print_summary(rcfg, vcomp_jobs, icfgs, jm, trd):
                 assert len(passed) + len(failed) + len(skipped) == len(icfg.jobs), print(
                     len(passed), len(failed), len(skipped), len(icfg.jobs))
             except AssertionError as exc:
-                if not jm.exceeded_prematurely:
+                if not jm.exited_prematurely:
                     raise exc
 
             test_set = ("", icfg.jobs[0].name, str(max_job_time), str(len(passed)) if passed else "", str(len(skipped)) if skipped else "",

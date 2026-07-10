@@ -5,6 +5,7 @@ package(default_visibility = ["//visibility:public"])
 
 exports_files([
     "lint_parser_vcs.py",
+    "simmer.py",
     "templates/vcs_compile_template.sh.j2",
 ])
 
@@ -28,6 +29,7 @@ py_binary(
 
 py_binary(
     name = "simmer",
+    data = glob(["templates/**"]),
     srcs = ["simmer.py"],
     deps = [
         "//bin:check_test",
