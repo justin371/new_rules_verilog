@@ -108,7 +108,7 @@ class RegressionConfig():
         """
         if not cfg_path:
             cfg_path = os.path.join(self.proj_dir, "category_config.json")
-        
+
         self.category_total_cases = rv_utils.load_category_total_cases(cfg_path)
         self.log.info(f"Loaded subsystem config with tags: {self.category_total_cases}")
 
@@ -200,6 +200,20 @@ class RegressionConfig():
         return all(os.path.exists(self._cache_path(filename)) for filename in DISCOVERY_CACHE_FILES)
 
     def _iter_discovery_dependency_paths(self):
+        result = subprocess.run(
+            ["git", "ls-files", "--cached", "--others", "--exclude-standard"],
+            cwd=self.proj_dir,
+            check=False,
+            capture_output=True,
+            text=True,
+        )
+        if result.returncode == 0:
+            for relative_path in result.stdout.splitlines():
+                filename = os.path.basename(relative_path)
+                if filename in ("BUILD", "BUILD.bazel") or filename.endswith(".bzl"):
+                    yield os.path.join(self.proj_dir, os.path.normpath(relative_path))
+            return
+
         for root, dirs, files in os.walk(self.proj_dir):
             dirs[:] = [
                 directory for directory in dirs

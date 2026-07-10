@@ -196,6 +196,10 @@ def load_store(project_dir):
 def save_run(project_dir, run, max_runs=MAX_RUNS):
     if not run.get("tests"):
         return
+    stored_run = dict(run)
+    if int(run.get("planned_tests") or len(run["tests"])) > 1 and len(run["tests"]) > 1:
+        representative = next((test for test in run["tests"] if test.get("status") == "FAILED"), run["tests"][0])
+        stored_run["tests"] = [representative]
     path = results_path(project_dir)
     with _store_lock(path):
         try:
@@ -205,11 +209,11 @@ def save_run(project_dir, run, max_runs=MAX_RUNS):
             os.replace(path, corrupt_path)
             print("Warning: moved invalid simmer history to {}".format(corrupt_path), file=sys.stderr)
             store = _empty_store()
-        runs = [item for item in store.get("runs", []) if item.get("run_id") != run.get("run_id")]
-        runs.append(run)
+        runs = [item for item in store.get("runs", []) if item.get("run_id") != stored_run.get("run_id")]
+        runs.append(stored_run)
         store = {
             "schema_version": SCHEMA_VERSION,
-            "last_run": run,
+            "last_run": stored_run,
             "runs": runs[-max_runs:],
         }
         temp_path = "{}.{}.{}.tmp".format(path, os.getpid(), uuid.uuid4().hex)

@@ -198,7 +198,16 @@ def get_active_job_limit(options, rcfg):
     if options.gui:
         return 1
 
-    requested_jobs = options.jobs if options.jobs is not None else (os.cpu_count() or 1)
+    if options.jobs is not None:
+        requested_jobs = options.jobs
+    else:
+        cpu_count = os.cpu_count() or 1
+        threads_per_sim = 1
+        if options.simulator == "VCS" and options.fgp is not None:
+            threads_per_sim = options.fgp
+        elif options.simulator == "XRUN" and options.mce:
+            threads_per_sim = options.mce_sim_count or cpu_count
+        requested_jobs = max(1, cpu_count // threads_per_sim)
     return max(1, min(total_tests, requested_jobs))
 
 
@@ -659,7 +668,7 @@ class TestJob(Job):
         sim_opts = self.simulator.generate_sim_options(self, seed)
 
         sockets = []
-        runtime_options = self.btcj.dynamic_args()
+        runtime_options = self.btcj.dynamic_args(self.target)
         dynamic_simulator = runtime_options['simulator']
         if dynamic_simulator != self.simulator.get_name().upper():
             raise ValueError(
@@ -1062,12 +1071,11 @@ def main(rcfg, options):
 
         tests = []
         icfgs = []
+        btcj = job_lib.BazelTestCfgJob(rcfg, test_list.keys(), vcomper)
+        btcj_jobs.append(btcj)
         for test, iterations in test_list.items():
             icfg = rv_utils.IterationCfg(iterations)
             icfgs.append(icfg)
-
-            btcj = job_lib.BazelTestCfgJob(rcfg, test, vcomper)
-            btcj_jobs.append(btcj)
 
             # Create TestJob with simulator
             t = TestJob(rcfg, test, vcomper=vcomper, icfg=icfg, btcj=btcj, simulator=simulator)
@@ -1216,11 +1224,19 @@ def main(rcfg, options):
             if '-' in report_header['tag']:
                 report_header['tag'] = ''
         rrt = regression_report.RegressionReport(rcfg, jinja2_env, webroot_path)
-        report_lock_path = os.path.join(webroot_path, "regression_report.lock")
-        with open(report_lock_path, "w") as report_lock:
+        report_root = os.path.join(webroot_path, "regression_report")
+        project_lock_path = os.path.join(report_root, ".{}.lock".format(report_header['project_name']))
+        index_lock_path = os.path.join(report_root, ".index.lock")
+        os.makedirs(report_root, exist_ok=True)
+        rrt.prepare(report_header, trd, rv_utils.get_coverage_data(rcfg, vcomp_jobs), category_stats)
+        with open(index_lock_path, "w") as report_lock:
             import fcntl
             fcntl.flock(report_lock, fcntl.LOCK_EX)
-            rrt.run(report_header, trd, rv_utils.get_coverage_data(rcfg, vcomp_jobs), category_stats)
+            rrt.render_home_page()
+            rrt.render_bench_page()
+        with open(project_lock_path, "w") as report_lock:
+            fcntl.flock(report_lock, fcntl.LOCK_EX)
+            rrt.render_regression_page()
 
     rv_utils.print_simmer_profile(rcfg, jm)
 
@@ -1231,7 +1247,6 @@ def main(rcfg, options):
         #num_failed = sum(1 for j in test_jobs_list if j.jobstatus and not j.jobstatus.successful)
         #failures[bench] = num_failed
         if options.report:
-            rrt.change_permissions_recursively(os.path.join(webroot_path, "regression_report", report_header['project_name'], bench.split(":")[1]))
             log.info("Report at: http://dv-sh.rd.lgt.ai/regression_report/{0}/{1}".format(report_header['project_name'], bench.split(":")[1]))
 
     for message in getattr(rcfg, "deferred_messages", []):

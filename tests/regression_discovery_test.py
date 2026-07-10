@@ -4,6 +4,7 @@ import tempfile
 import unittest
 from pathlib import Path
 from types import SimpleNamespace
+from unittest import mock
 
 from lib.regression import RegressionConfig
 
@@ -83,6 +84,18 @@ class RegressionDiscoveryTest(unittest.TestCase):
         newer_time = cache_time + 10
         os.utime(build_file, (newer_time, newer_time))
         self.assertFalse(config._discovery_cache_is_fresh())
+
+    @mock.patch("lib.regression.os.walk", side_effect=AssertionError("walk should not run"))
+    @mock.patch("lib.regression.subprocess.run")
+    def test_cache_uses_git_file_index_when_available(self, run, _walk):
+        proj_dir = Path(tempfile.mkdtemp())
+        run.return_value = SimpleNamespace(returncode=0, stdout="pkg/BUILD\npkg/file.py\nrules/tool.bzl\n")
+        config = self._config(proj_dir)
+
+        self.assertEqual(
+            [str(proj_dir / "pkg/BUILD"), str(proj_dir / "rules/tool.bzl")],
+            list(config._iter_discovery_dependency_paths()),
+        )
 
     def test_requested_bench_query_is_scoped(self):
         config = self._config(Path(tempfile.mkdtemp()))
