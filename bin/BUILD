@@ -40,6 +40,7 @@ py_binary(
         "//lib:regression",
         "//lib:rv_utils",
         "//lib:runtime_options",
+        "//lib:simmer_results",
         "//lib/simulators:simulators",
         "//lib:regression_report",
     ],

@@ -33,6 +33,7 @@ from lib import cmn_logging
 from lib import job_lib
 from lib import regression
 from lib import rv_utils
+from lib import simmer_results
 from lib.runtime_options import (
     format_sim_opts_dict,
     merge_test_runtime_sim_opts,
@@ -458,6 +459,7 @@ class VCompJob(Job):
         # --- Final Logging ---
         # log_level is determined by initial return code and potential warning failures
         log_level("%s vcomp %s in %s", self.name, self.jobstatus, self.job_dir)
+        simmer_results.record_compile_job(getattr(self.rcfg, "simmer_results_run", None), self)
 
         # Base class post_run might handle completion, but setting explicitly ensures it
         # Note: '_completed' isn't standard, jobstatus.completed is the way to check
@@ -633,6 +635,7 @@ class TestJob(Job):
                 ) from exc
         elif seed is None:
             seed = random.randint(0, (1 << 31) - 1) # xrun treats the seed as a signed integer
+        self.seed = seed
 
         # Using the timestamp as the name uniquifier is causing issues when trying to spawn many jobs at once
         # strdate = time.strftime("%Y_%m_%d_%H_%M_%S", time.localtime(time.time()))
@@ -858,8 +861,10 @@ class TestJob(Job):
         self.main_cmdline = '/usr/bin/env bash %s' % (testscript_path)
 
     def post_run(self):
-        super(TestJob, self).post_run()
         options = self.rcfg.options
+        run_wave_script_path = None
+        abs_wave_path = None
+        super(TestJob, self).post_run()
 
         # Parse file for duration
         net_time_str, cps_str = self._get_stats_from_log_file()
@@ -954,6 +959,12 @@ class TestJob(Job):
             log.info(f"Run wave: {run_wave_script_path}")
 
         sys.stdout.flush()
+        simmer_results.record_test_job(
+            getattr(self.rcfg, "simmer_results_run", None),
+            self,
+            waves_script=run_wave_script_path,
+            waves_path=abs_wave_path,
+        )
 
         if self.rcfg.tidy and self.jobstatus.successful:
             log.debug("tidy=%s removing %s", self.rcfg.tidy, self.job_dir)
@@ -1090,6 +1101,13 @@ def main(rcfg, options):
             sys.exit(1)
         if options.seed is not None:
             rcfg.log.critical("--seed can only be used if a single test is run")
+    rcfg.simmer_results_run = None
+    if not options.no_run:
+        rcfg.simmer_results_run = simmer_results.create_run(
+            getattr(options, "simmer_argv", sys.argv),
+            rcfg,
+            total_tests,
+        )
 
     try:
         jm_opts = {
@@ -1167,7 +1185,17 @@ def main(rcfg, options):
             vso_finalize_merge_failed = True
             log.error("%s", exc)
 
-    rv_utils.print_summary(rcfg, vcomp_jobs, jm, trd)
+    regression_log_path = rv_utils.print_summary(rcfg, vcomp_jobs, jm, trd)
+    if getattr(rcfg, "simmer_results_run", None) is not None:
+        simmer_results.finalize_run(
+            rcfg.simmer_results_run,
+            regression_log_path=regression_log_path,
+            vso_finalize_merge_failed=vso_finalize_merge_failed,
+        )
+        try:
+            simmer_results.save_run(rcfg.proj_dir, rcfg.simmer_results_run)
+        except OSError as exc:
+            log.error("Failed to write simmer results: %s", exc)
     # add category_stats for soc
     category_stats = None
     if options.category_cfg is not None:
@@ -1182,7 +1210,7 @@ def main(rcfg, options):
                 "merge simulator coverage databases",
                 lambda: simulator.run_report_coverage_merge(vcomp_jobs),
             )
-        
+
         report_header = rv_utils.get_report_header(rcfg)
         if report_header is not None and 'tag' in report_header:
             if '-' in report_header['tag']:
@@ -1227,6 +1255,11 @@ def main(rcfg, options):
 
 if __name__ == '__main__':
     options = parse_args(sys.argv[1:])
+    if options.history is not None:
+        history_use_color = True if options.use_color else None
+        simmer_results.print_history(options.proj_dir, options.history, use_color=history_use_color)
+        sys.exit(0)
+    options.simmer_argv = sys.argv[:]
     verbosity = cmn_logging.DEBUG if options.tool_debug else cmn_logging.INFO
     log = cmn_logging.build_logger("sim", level=verbosity, use_color=options.use_color, filehandler="simmer.log")
     rcfg = regression.RegressionConfig(options, log)

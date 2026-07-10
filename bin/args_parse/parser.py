@@ -62,6 +62,8 @@ def parse_args(argv):
     options = parser.parse_args(argv)
     if options.jobs is not None and options.jobs < 1:
         parser.error("--jobs must be a positive integer.")
+    if options.history is not None and options.history < 1:
+        parser.error("--history must be a positive integer.")
     options.simulator_was_explicit = simulator_explicitly_requested(argv)
     options.xprop_was_explicit = argument_explicitly_requested(argv, '--xprop')
     options.timeout_was_explicit = argument_explicitly_requested(argv, '--timeout')

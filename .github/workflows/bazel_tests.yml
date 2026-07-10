@@ -1,12 +1,38 @@
 name: Run Bazel Tests
-on: [push]
+
+on:
+  pull_request:
+    paths:
+      - ".bazelrc"
+      - ".github/workflows/**"
+      - "BUILD"
+      - "WORKSPACE"
+      - "**/*.bzl"
+      - "**/BUILD"
+      - "bin/**"
+      - "deps/**"
+      - "lib/**"
+      - "simulators/**"
+      - "tests/**"
+      - "vendors/**"
+      - "verilog/**"
+
 jobs:
   bazel-tests:
     name: Bazel Tests
     runs-on: ubuntu-latest
+    env:
+      USE_BAZEL_VERSION: "6.5.0"
     steps:
       - name: checkout
-        uses: actions/checkout@main
+        uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.x"
+
+      - name: install-python-dependencies
+        run: python -m pip install beautifulsoup4 jinja2
       
       - name: install-bazelisk
         uses: vsco/bazelisk-action@master
@@ -15,5 +41,5 @@ jobs:
           bazel-install-path: './.local/bin'
           os: 'linux'
 
-      - name: run-buildifier-diff
-        run: bazel run //tests:buildifier_format_diff
+      - name: run-bazel-checks
+        run: bazel test --test_output=errors //:buildifier_test //tests:all //tests/vcs_filelist_validation:all

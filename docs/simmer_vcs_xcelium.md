@@ -140,3 +140,47 @@ is going to Bazel setup, VCS compile, runtime simulation, or log checking.
 
 For quiet normal runs, avoid `--tool-debug`; it prints scheduler polling noise.
 
+## Simulation history
+
+Completed simulation runs are recorded in `.simmer_results.json` at the project
+root. The file is local run state and is intended for quick lookup of recent
+simulation outputs.
+
+Print the most recent 10 runs:
+
+```bash
+simmer --history
+simmer --his
+```
+
+Print a custom number of runs:
+
+```bash
+simmer --history 20
+simmer --his 20
+```
+
+Each entry includes the original `simmer` command, compile log, and result log.
+For a single test with wave dumping enabled, the history also shows the
+generated `run_waves.sh` path. For multi-test regressions, the result path is
+the regression log rather than every individual case log.
+
+Example:
+
+```text
+[1] 2026-07-09 15:03:04  FAILED  87/100 pass, 13 fail
+cmd:     simmer -t sys_tb:*@10
+compile: /sim/sys_tb/cmp.log
+result:  /sim/regression.log
+```
+
+Status words and pass/fail labels are colorized when output goes to a terminal.
+Use `--use-color` to force color output:
+
+```bash
+simmer --use-color --history
+```
+
+Runs that only discover tests, compile without running simulation, or fail
+before any simulation job starts are not recorded.
+
