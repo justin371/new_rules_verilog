@@ -193,9 +193,15 @@ class JobRunner():
 
 class SubprocessJobRunner(JobRunner):
 
+    TERM_GRACE_SECONDS = 10
+
     def __init__(self, job, manager):
         super(SubprocessJobRunner, self).__init__(job, manager)
         kwargs = {'shell': True, 'preexec_fn': os.setsid}
+        self._timed_out = False
+        self._term_deadline = None
+        self._kill_sent = False
+        self.log = job.log
 
         if self.job.suppress_output or self.job.rcfg.options.no_stdout:
             self.stdout_log_path = self._get_stdout_capture_path()
@@ -205,8 +211,13 @@ class SubprocessJobRunner(JobRunner):
             kwargs['stdout'] = self.stdout_fp
             kwargs['stderr'] = self.stderr_fp
         self._start_time = datetime.datetime.now()
-        self._p = subprocess.Popen(self.job.main_cmdline, **kwargs)
-        self.log = job.log
+        try:
+            self._p = subprocess.Popen(self.job.main_cmdline, **kwargs)
+        except Exception:
+            for stream in (getattr(self, "stdout_fp", None), getattr(self, "stderr_fp", None)):
+                if stream:
+                    stream.close()
+            raise
 
     def _get_stdout_capture_path(self):
         """Avoid clobbering simulator-owned stdout.log files.
@@ -240,21 +251,40 @@ class SubprocessJobRunner(JobRunner):
                 self.stdout_fp.close()
                 self.stderr_fp.close()
             return True
-        delta = datetime.datetime.now() - self._start_time
+
+        now = datetime.datetime.now()
+        if self._timed_out:
+            if not self._kill_sent and now >= self._term_deadline:
+                self.log.error("%s did not exit after SIGTERM; sending SIGKILL", self.job)
+                try:
+                    os.killpg(os.getpgid(self._p.pid), signal.SIGKILL)
+                except ProcessLookupError:
+                    pass
+                self._kill_sent = True
+            return False
+
+        delta = now - self._start_time
         if self.job.timeout > 0 and delta > datetime.timedelta(hours=self.job.timeout):
-            self.log.error("%s  exceeded timeout value of %s (job will be killed)", self.job, self.job.timeout)
-            os.killpg(os.getpgid(self._p.pid), signal.SIGTERM)
+            self.log.error("%s exceeded timeout value of %s; sending SIGTERM", self.job, self.job.timeout)
+            self._timed_out = True
+            self._term_deadline = now + datetime.timedelta(seconds=self.TERM_GRACE_SECONDS)
+            try:
+                os.killpg(os.getpgid(self._p.pid), signal.SIGTERM)
+            except ProcessLookupError:
+                pass
             stderr_log_path = getattr(self, "stderr_log_path", os.path.join(self.job.job_dir, "stderr.log"))
             stdout_log_path = getattr(self, "stdout_log_path", os.path.join(self.job.job_dir, "stdout.log"))
             with open(stderr_log_path, 'a') as filep:
-                filep.write("%%E- %s exceeded timeout value of %s (job will be killed)" % (self.job, self.job.timeout))
+                filep.write("%%E- %s exceeded timeout value of %s (SIGTERM sent)" % (self.job, self.job.timeout))
             with open(stdout_log_path, 'a') as filep:
-                filep.write("%%E- %s exceeded timeout value of %s (job will be killed)" % (self.job, self.job.timeout))
-            return True
+                filep.write("%%E- %s exceeded timeout value of %s (SIGTERM sent)" % (self.job, self.job.timeout))
+            return False
         return False
 
     @property
     def returncode(self):
+        if self._timed_out and self._p.returncode in (None, 0):
+            return -signal.SIGTERM
         return self._p.returncode
 
     def kill(self):
@@ -328,8 +358,10 @@ class JobManager():
                         self.log.debug("%s body done", job)
                         try:
                             job.post_run()
-                        except Exception as exc:
+                        except (Exception, SystemExit) as exc:
                             self.log.error("%s  post_run_failed()\n:%s", job, exc)
+                            job.job_stop_time = datetime.datetime.now()
+                            job.jobstatus = JobStatus.FAILED
                         if not job.jobstatus.successful:
                             self._error_count += 1
                             if self._error_count >= self._quit_count:
@@ -417,9 +449,23 @@ class JobManager():
                 if not can_launch(job):
                     continue
 
-                job.pre_run()
-                self.log.debug("%s priority: %d", job, job.priority)
-                self.job_lib_type(job, self)
+                try:
+                    job.pre_run()
+                    self.log.debug("%s priority: %d", job, job.priority)
+                    self.job_lib_type(job, self)
+                except (Exception, SystemExit) as exc:
+                    self.log.error("%s launch_failed(): %s", job, exc)
+                    job.job_stop_time = datetime.datetime.now()
+                    job.jobstatus = JobStatus.FAILED
+                    self._error_count += 1
+                    self._move_children_to_skipped(job)
+                    if self._error_count >= self._quit_count:
+                        self._graceful_exit()
+                    jobs_that_advanced_state.append(i)
+                    self._done.append(job)
+                    self._last_done_or_idle_print = datetime.datetime.now()
+                    made_progress = True
+                    continue
                 jobs_that_advanced_state.append(i)
                 self._active.append(job)
                 made_progress = True
@@ -431,7 +477,8 @@ class JobManager():
                     break
 
         for i in reversed(jobs_that_advanced_state):
-            self._ready.pop(i)
+            if i < len(self._ready):
+                self._ready.pop(i)
 
     def _graceful_exit(self):
         if self._done_grace_exit:
@@ -499,7 +546,6 @@ class BazelTBJob(Job):
     def __repr__(self):
         return 'Bazel("{}")'.format(self.bazel_target)
 
-
 class BazelTestCfgJob(Job):
     """Bazel build for a testcfg only needs to be run once per test cfg, not per iteration. So split it out into its own job"""
 
@@ -536,34 +582,3 @@ class BazelTestCfgJob(Job):
 
     def __repr__(self):
         return 'Bazel("{}")'.format(self.bazel_target)
-
-
-class BazelShutdownJob(Job):
-    """When all vcomps are done, shutdown bazel server to limit memory consumption.
-
-    Once sockets were added, where 'bazel run' may be invoked, there is concern that this may cause
-    intermittent failures due to race conditions. Leaving this class and instantiation for posterity,
-    but changing the execution to not actually do a shutdown.
-    """
-
-    def __init__(self, rcfg):
-        super(BazelShutdownJob, self).__init__(rcfg, "bazel shutdown")
-
-        self.job_dir = rcfg.proj_dir
-        # self.main_cmdline = "bazel shutdown"
-        self.main_cmdline = "echo \"Skipping bazel shutdown\""
-
-        self.suppress_output = True
-        if self.rcfg.options.tool_debug:
-            self.suppress_output = False
-
-    def post_run(self):
-        super(BazelShutdownJob, self).post_run()
-        if self.job_lib.returncode == 0:
-            self.jobstatus = JobStatus.PASSED
-        else:
-            self.jobstatus = JobStatus.FAILED
-            self.log.error("%s failed. Log in %s", self, os.path.join(self.job_dir, "stderr.log"))
-
-    def __repr__(self):
-        return 'Bazel Shutdown'
