@@ -381,17 +381,17 @@ def _verilog_rtl_unit_test_impl(ctx):
 
     pre_fa = ["    \\"]
     for key, value in gather_shell_defines(ctx.attr.shells).items():
-        pre_fa.append("  -define {}{} \\".format(key, value))
+        if simulator == "VCS":
+            pre_fa.append("  +define+{}{} \\".format(key, value))
+        else:
+            pre_fa.append("  -define {}{} \\".format(key, value))
 
     if len(ctx.attr.pre_flist_args):
         pre_fa.extend(["{} \\".format(pfa) for pfa in ctx.attr.pre_flist_args])
 
     pre_fa.append("   \\")
 
-    if len(ctx.attr.post_flist_args):
-        post_fa = "\n".join(["{} \\".format(pfa) for pfa in ctx.attr.post_flist_args]) + "\n"
-    else:
-        post_fa = " \\"
+    post_fa = " ".join(ctx.attr.post_flist_args)
 
     ut_sim_template = ctx.file.ut_sim_template
     ut_sim_waves_template = ctx.file.ut_sim_waves_template

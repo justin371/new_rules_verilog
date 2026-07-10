@@ -1,7 +1,20 @@
-#!/usr/bin/bash
+#!/usr/bin/env bash
 # This is a template for the bazel verilog_dv_unit_test rule
 # It is not intended to be run stand-alone
-set -e
+set -Eeuo pipefail
+
+_unit_test_error=0
+trap 'rc=$?; _unit_test_error=1; printf "ERROR: line %s exited %s: %s\n" "$LINENO" "$rc" "$BASH_COMMAND" >&2' ERR
+_unit_test_on_exit() {
+    local rc=$?
+    if (( rc != 0 )); then
+        (( _unit_test_error )) || printf "ERROR: unit-test script exited %s\n" "$rc" >&2
+        if [[ "${SIMMER_KEEP_TERMINAL:-0}" == 1 && -t 0 ]]; then
+            read -r -p "Press Enter to close this terminal..." || true
+        fi
+    fi
+}
+trap _unit_test_on_exit EXIT
 
 {SIMULATOR_COMMAND} \
     -libext .sv \
@@ -17,4 +30,4 @@ set -e
     {DEFAULT_SIM_OPTS} \
     {FLISTS} \
     {SIM_ARGS} \
-    $@
+    "$@"

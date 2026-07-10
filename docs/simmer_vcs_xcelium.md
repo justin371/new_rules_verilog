@@ -169,9 +169,19 @@ Use `--simmer-profile` to print phase and job timings after the summary:
 simmer -t <bench>:<test> --simulator VCS --simmer-profile
 ```
 
-The profile includes discovery, Bazel TB setup, VCS compile, test config builds,
-simulation jobs, job directories, and commands. Use it to identify whether time
-is going to Bazel setup, VCS compile, runtime simulation, or log checking.
+The profile includes discovery, each Bazel command, Bazel external-repository
+events, TB setup, VCS compile, test config builds, simulation jobs, job
+directories, and commands. Repository rows are shown as `external_repo: NAME`
+at the finest granularity Bazel records. A cached repository has no fetch or
+repository-rule event, so it does not appear in that invocation.
+
+Generated unit-test scripts print the failed command, line and exit code before
+they close. For a script launched in a temporary terminal, keep the window open
+after failure with:
+
+```bash
+SIMMER_KEEP_TERMINAL=1 ./rtl_unit_test
+```
 
 For quiet normal runs, avoid `--tool-debug`; it prints scheduler polling noise.
 

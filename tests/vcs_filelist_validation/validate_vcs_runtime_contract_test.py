@@ -130,6 +130,9 @@ class VcsRuntimeContractTest(unittest.TestCase):
             parse_args(["-t", "unit:test", "--simulator", "VCS", "--probe-packed", "64"])
         with self.assertRaises(SystemExit):
             parse_args(["-t", "unit:test", "--simulator", "XRUN", "--gui"])
+        with mock.patch("args_parse.parser.SIM_PLATFORM", "VCS"):
+            with self.assertRaises(SystemExit):
+                parse_args(["-t", "unit:test", "--probe-packed", "64"])
 
         common = self._read_repo_file("bin/args_parse/common.py")
         vcs = self._read_repo_file("bin/args_parse/vcs.py")
@@ -248,6 +251,7 @@ class VcsRuntimeContractTest(unittest.TestCase):
         self.assertIn("_ut_sim_template_vcs_default", dv_bzl)
         self.assertIn('filelist_flag = "-file"', rtl_bzl)
         self.assertIn("_ut_sim_waves_template_vcs_default", rtl_bzl)
+        self.assertIn('pre_fa.append("  +define+{}{}', rtl_bzl)
 
 
 if __name__ == "__main__":

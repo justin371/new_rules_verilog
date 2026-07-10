@@ -19,6 +19,12 @@ buildifier(
 )
 
 py_test(
+    name = "bazel_profile_test",
+    srcs = ["bazel_profile_test.py"],
+    deps = ["//lib:bazel_profile"],
+)
+
+py_test(
     name = "check_test_test",
     srcs = ["check_test_test.py"],
     deps = ["//bin:check_test_lib"],

@@ -79,13 +79,11 @@ def parse_args(argv):
     reproduce_args = [arg for arg in argv if arg not in skip_list]
     setattr(options, 'reproduce_args', reproduce_args)
 
-    if options.simulator_was_explicit:
-        options.simulator = options.simulator.upper()
-        validate_simulator_specific_options(options, parser)
-    else:
-        options.simulator = SIM_PLATFORM.upper()
+    options.simulator = (options.simulator if options.simulator_was_explicit else SIM_PLATFORM).upper()
+    validate_simulator_specific_options(options, parser)
 
-    apply_xcelium_postprocess(options)
+    if options.simulator == 'XRUN':
+        apply_xcelium_postprocess(options)
 
     options.proj_dir = PROJ_DIR
     return options

@@ -19,6 +19,9 @@ class _Log:
     def summary(self, *_args, **_kwargs):
         pass
 
+    def warning(self, *_args, **_kwargs):
+        pass
+
     def critical(self, message, *args):
         if args:
             message = message % args
@@ -152,6 +155,42 @@ class RegressionDiscoveryTest(unittest.TestCase):
         self.assertEqual(
             {"//benches/soc_tb:soc_tb": {"//benches/soc_tb/tests:dma_single_transfer": 0}},
             config.all_vcomp,
+        )
+
+    @mock.patch("lib.regression.subprocess.run")
+    def test_profiled_bazel_command_records_repositories_and_cleans_trace(self, run):
+        proj_dir = Path(tempfile.mkdtemp())
+        config = self._config(proj_dir)
+        config.options.simmer_profile = True
+        config.regression_dir = str(proj_dir)
+        config.profile_events = []
+        config._bazel_profile_index = 0
+
+        def create_profile(command, **_kwargs):
+            profile_arg = next(argument for argument in command if argument.startswith("--profile="))
+            profile_path = profile_arg.split("=", 1)[1]
+            Path(profile_path).write_text(json.dumps({
+                "traceEvents": [{
+                    "ph": "X",
+                    "cat": "repository",
+                    "name": "Repository rule @third_party_ip",
+                    "dur": 1_250_000,
+                }],
+            }), encoding="utf-8")
+            return SimpleNamespace(returncode=0, stdout="ok", stderr="")
+
+        run.side_effect = create_profile
+
+        self.assertEqual((0, "ok", ""), config._run_command(["bazel", "query", "//..."]))
+
+        command = run.call_args.args[0]
+        self.assertEqual("query", command[1])
+        self.assertTrue(command[2].startswith("--profile="))
+        self.assertFalse(Path(command[2].split("=", 1)[1]).exists())
+        self.assertTrue(any(name == "bazel_query" for _, name, _ in config.profile_events))
+        self.assertIn(
+            (1.25, "external_repo: third_party_ip", "query; 1 repository event(s)"),
+            config.profile_events,
         )
 
     def test_missing_discovery_cache_fails(self):

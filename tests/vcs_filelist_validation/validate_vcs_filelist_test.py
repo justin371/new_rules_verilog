@@ -1,6 +1,9 @@
 from pathlib import Path
+import json
 import os
 import re
+import subprocess
+import tempfile
 import unittest
 
 
@@ -8,20 +11,20 @@ FILELIST_FLAG_RE = re.compile(r"(?m)(^|\s)-file\s+\S+")
 LEGACY_FILELIST_FLAG_RE = re.compile(r"(?m)(^|\s)-f\s+\S+")
 
 
-def read_runfile(relative_path):
+def find_runfile(relative_path):
     test_workspace = os.environ.get("TEST_WORKSPACE", "__main__")
     manifest_file = os.environ.get("RUNFILES_MANIFEST_FILE")
     manifest_key = "{}/{}".format(test_workspace, relative_path.replace("\\", "/"))
     if manifest_file:
         for line in Path(manifest_file).read_text(encoding = "utf-8").splitlines():
             if line.startswith(manifest_key + " "):
-                return Path(line.split(" ", 1)[1]).read_text(encoding = "utf-8")
+                return Path(line.split(" ", 1)[1])
 
     test_srcdir = os.environ["TEST_SRCDIR"]
     runfiles_root = Path(test_srcdir) / test_workspace
     path = runfiles_root / relative_path
     if path.exists():
-        return path.read_text(encoding = "utf-8")
+        return path
 
     target_name = Path(relative_path).name
     matches = []
@@ -31,7 +34,7 @@ def read_runfile(relative_path):
             matches.append(candidate)
 
     if len(matches) == 1:
-        return matches[0].read_text(encoding = "utf-8")
+        return matches[0]
     if len(matches) > 1:
         raise AssertionError(
             "Ambiguous runfile lookup for {}: {}".format(
@@ -40,6 +43,10 @@ def read_runfile(relative_path):
             )
         )
     raise AssertionError("Missing runfile: {}".format(path))
+
+
+def read_runfile(relative_path):
+    return find_runfile(relative_path).read_text(encoding = "utf-8")
 
 
 def runfile_exists(relative_path):
@@ -114,6 +121,100 @@ class VcsFilelistValidationTest(unittest.TestCase):
             contents = read_runfile(relative_path)
             for needle in needles:
                 assert_contains(contents, needle, relative_path)
+
+    def test_generated_unit_test_scripts_execute_with_tool_stubs(self):
+        tool_stub = """#!/usr/bin/env python3
+import json
+import os
+from pathlib import Path
+import shutil
+import sys
+
+tool = Path(sys.argv[0]).name
+with open(os.environ["TOOL_LOG"], "a", encoding="utf-8") as log_file:
+    log_file.write(json.dumps({"tool": tool, "args": sys.argv[1:]}) + "\\n")
+if tool == "vcs":
+    output = sys.argv[sys.argv.index("-o") + 1]
+    shutil.copy2(os.environ["SIMV_STUB"], output)
+    Path(output).chmod(0o755)
+"""
+        simv_stub = """#!/usr/bin/env python3
+import json
+import os
+import sys
+with open(os.environ["TOOL_LOG"], "a", encoding="utf-8") as log_file:
+    log_file.write(json.dumps({"tool": "simv", "args": sys.argv[1:]}) + "\\n")
+"""
+
+        with tempfile.TemporaryDirectory() as temporary_dir:
+            temporary_path = Path(temporary_dir)
+            bin_dir = temporary_path / "bin"
+            bin_dir.mkdir()
+            simv_stub_path = bin_dir / "simv_stub"
+            simv_stub_path.write_text(simv_stub, encoding="utf-8")
+            simv_stub_path.chmod(0o755)
+            for tool in ("vcs", "runmod", "xrun", "verdi", "simvision"):
+                tool_path = bin_dir / tool
+                tool_path.write_text(tool_stub, encoding="utf-8")
+                tool_path.chmod(0o755)
+
+            log_path = temporary_path / "tools.jsonl"
+            environment = dict(os.environ)
+            environment.update({
+                "PATH": "{}{}{}".format(bin_dir, os.pathsep, environment["PATH"]),
+                "SIMV_STUB": str(simv_stub_path),
+                "TOOL_LOG": str(log_path),
+            })
+            invocations = {
+                "tests/vcs_filelist_validation/dv_unit_vcs_run.sh": [],
+                "tests/vcs_filelist_validation/dv_unit_xrun_run.sh": [],
+                "tests/vcs_filelist_validation/rtl_unit_vcs": [
+                    "--waves", "--compile-arg", "+compile_only", "--run-arg", "+run_only",
+                ],
+                "tests/vcs_filelist_validation/rtl_unit_xrun": ["--waves"],
+            }
+            for index, (relative_path, arguments) in enumerate(invocations.items()):
+                working_dir = temporary_path / "run_{}".format(index)
+                working_dir.mkdir()
+                subprocess.run(
+                    ["bash", str(find_runfile(relative_path))] + arguments,
+                    cwd=working_dir,
+                    env=environment,
+                    check=True,
+                    capture_output=True,
+                    text=True,
+                )
+
+            records = [json.loads(line) for line in log_path.read_text(encoding="utf-8").splitlines()]
+            self.assertTrue(any(record["tool"] == "runmod" for record in records))
+            self.assertTrue(any(record["tool"] == "vcs" for record in records))
+            self.assertTrue(any("+compile_only" in record["args"] for record in records if record["tool"] == "vcs"))
+            self.assertTrue(any("+run_only" in record["args"] for record in records if record["tool"] == "simv"))
+            for record in records:
+                self.assertFalse(any(not argument.strip() for argument in record["args"]), record)
+
+    def test_generated_script_reports_failed_command(self):
+        with tempfile.TemporaryDirectory() as temporary_dir:
+            bin_dir = Path(temporary_dir) / "bin"
+            bin_dir.mkdir()
+            vcs_path = bin_dir / "vcs"
+            vcs_path.write_text("#!/usr/bin/env bash\nexit 23\n", encoding="utf-8")
+            vcs_path.chmod(0o755)
+            environment = dict(os.environ)
+            environment["PATH"] = "{}{}{}".format(bin_dir, os.pathsep, environment["PATH"])
+
+            result = subprocess.run(
+                ["bash", str(find_runfile("tests/vcs_filelist_validation/dv_unit_vcs_run.sh"))],
+                cwd=temporary_dir,
+                env=environment,
+                check=False,
+                capture_output=True,
+                text=True,
+            )
+            self.assertEqual(23, result.returncode)
+            self.assertIn("ERROR: line", result.stderr)
+            self.assertIn("exited 23", result.stderr)
+            self.assertIn("vcs", result.stderr)
 
 
 if __name__ == "__main__":

@@ -13,7 +13,7 @@ import time
 
 ################################################################################
 # rules_verilog lib imports
-from lib import rv_utils
+from lib import bazel_profile, rv_utils
 
 # I'd rather create a "plain" message in the logger
 # that doesn't format, but more work than its worth
@@ -49,6 +49,7 @@ class RegressionConfig():
 
         self.invocation_dir = os.getcwd()  # Directory where regression was started
         self.profile_events = []
+        self._bazel_profile_index = 0
         self.deferred_messages = []  # Messages to be printed at completion
         self.current_time = 0        # Timestamp for regression
 
@@ -95,12 +96,12 @@ class RegressionConfig():
                 self.tidy)
 
     def _profile_step(self, name, detail, func):
-        start = time.time()
+        start = time.perf_counter()
         try:
             return func()
         finally:
             if getattr(self.options, "simmer_profile", False):
-                self.profile_events.append((time.time() - start, name, detail))
+                self.profile_events.append((time.perf_counter() - start, name, detail))
 
     def load_category_config(self, cfg_path: str = None):
         """
@@ -296,13 +297,42 @@ class RegressionConfig():
         )
 
     def _run_command(self, cmd):
-        self.log.debug(" > %s", " ".join(cmd))
-        result = subprocess.run(
-            cmd,
-            check=False,
-            capture_output=True,
-            text=True,
-        )
+        command = list(cmd)
+        profile_path = None
+        profile_enabled = getattr(self.options, "simmer_profile", False) and command[:1] == ["bazel"]
+        if profile_enabled:
+            self._bazel_profile_index += 1
+            command_name = command[1] if len(command) > 1 else "command"
+            profile_path = os.path.join(
+                self.regression_dir,
+                "bazel_profile_{:02d}_{}.json".format(self._bazel_profile_index, command_name),
+            )
+            if os.path.exists(profile_path):
+                os.remove(profile_path)
+            command.insert(2, "--profile={}".format(profile_path))
+
+        self.log.debug(" > %s", " ".join(command))
+        start = time.perf_counter()
+        try:
+            result = subprocess.run(
+                command,
+                check=False,
+                capture_output=True,
+                text=True,
+            )
+        finally:
+            duration_s = time.perf_counter() - start
+            if profile_enabled:
+                self.profile_events.append((duration_s, "bazel_{}".format(command_name), " ".join(cmd)))
+                if profile_path and os.path.exists(profile_path):
+                    try:
+                        for repo_duration, repository, event_count in bazel_profile.repository_timings(profile_path):
+                            detail = "{}; {} repository event(s)".format(command_name, event_count)
+                            self.profile_events.append((repo_duration, "external_repo: {}".format(repository), detail))
+                    except (OSError, ValueError, TypeError) as exc:
+                        self.log.warning("Could not parse Bazel profile %s: %s", profile_path, exc)
+                    finally:
+                        os.remove(profile_path)
         return result.returncode, result.stdout, result.stderr
 
     def test_discovery_all(self):

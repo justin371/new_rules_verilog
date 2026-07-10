@@ -5,6 +5,11 @@ load("@pip_deps//:requirements.bzl", "requirement")
 package(default_visibility = ["//visibility:public"])
 
 py_library(
+    name = "bazel_profile",
+    srcs = ["bazel_profile.py"],
+)
+
+py_library(
     name = "cmn_logging",
     srcs = ["cmn_logging.py"],
 )
@@ -23,7 +28,10 @@ py_library(
 py_library(
     name = "regression",
     srcs = ["regression.py"],
-    deps = ["rv_utils"],
+    deps = [
+        ":bazel_profile",
+        ":rv_utils",
+    ],
 )
 
 py_library(
