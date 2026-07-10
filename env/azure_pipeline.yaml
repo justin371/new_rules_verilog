@@ -20,9 +20,9 @@ stages:
 
       - script: |
           source activate digital
-          yapf --diff --recursive . --style env/.style.yapf
+          yapf --diff --recursive . --style .style.yapf
         # Do an automatic regen with
-        # yapf --in-place --recursive . --style env/.style.yapf
+        # yapf --in-place --recursive . --style .style.yapf
         displayName: 'yapf Check'
 
       - script: |

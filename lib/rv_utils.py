@@ -350,12 +350,10 @@ def get_coverage_data(rcfg, vcomp_jobs):
         cov[vcomp_name] = {}
         if rcfg.options.coverage:
             report_dir = os.path.join(job.cov_work_dir, "imc_report")
-            cmd = 'runmod xrun -- imc -exec {} -verbose'.format(os.path.join(job.cov_work_dir, "imc_report.tcl"))
-            p = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, shell=True)
-            p.wait()
+            cmd = ["runmod", "xrun", "--", "imc", "-exec", os.path.join(job.cov_work_dir, "imc_report.tcl"), "-verbose"]
+            p = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
             if p.returncode != 0:
-                stderr = p.stderr.read().decode('utf-8', errors='ignore')
-                rcfg.log.error("IMC report generation failed:\n%s", stderr)
+                rcfg.log.error("IMC report generation failed:\n%s", p.stderr)
                 continue
 
             result = subprocess.run(['grep', '-rl', dut_pattern, report_dir], capture_output=True, text=True)
