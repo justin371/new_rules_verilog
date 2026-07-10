@@ -177,15 +177,15 @@ class RegressionDiscoveryTest(unittest.TestCase):
         from lib import regression as regression_module
 
         original_calc = regression_module.rv_utils.calc_simresults_location
-        original_category = regression_module.rv_utils.load_category_total_cases
         regression_module.rv_utils.calc_simresults_location = lambda _proj_dir: str(results_dir)
-        regression_module.rv_utils.load_category_total_cases = lambda _cfg_path: {}
-        try:
-            config = RegressionConfig(options, _Log())
-        finally:
-            regression_module.rv_utils.calc_simresults_location = original_calc
-            regression_module.rv_utils.load_category_total_cases = original_category
+        with mock.patch.object(regression_module.rv_utils, "load_category_total_cases") as load_category:
+            try:
+                config = RegressionConfig(options, _Log())
+            finally:
+                regression_module.rv_utils.calc_simresults_location = original_calc
 
+        load_category.assert_not_called()
+        self.assertEqual({}, config.category_total_cases)
         self.assertEqual([], config.deferred_messages)
         self.assertEqual(0, config.current_time)
 

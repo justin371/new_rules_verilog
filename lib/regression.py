@@ -54,7 +54,8 @@ class RegressionConfig():
 
         # Subsystem configuration (with tag associations)
         self.category_total_cases = {}
-        self.load_category_config(options.category_cfg)
+        if options.category_cfg is not None:
+            self.load_category_config(options.category_cfg)
 
         self.use_cached_discovery = self._profile_step(
             "discovery_cache_check",
@@ -104,7 +105,7 @@ class RegressionConfig():
     def load_category_config(self, cfg_path: str = None):
         """
         Load subsystem configuration with tag associations
-        Priority: specified path > project dir > default config
+        Use the specified path, or the project default when the flag has no value.
         """
         if not cfg_path:
             cfg_path = os.path.join(self.proj_dir, "category_config.json")

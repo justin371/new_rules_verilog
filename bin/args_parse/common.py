@@ -206,6 +206,7 @@ def add_regression_arguments(parser):
     gregre.add_argument('--category-cfg',
                         type=str,
                         nargs='?',
+                        const='',
                         default=None,
                         help="Path to category configuration JSON file (default: proj_dir/category_config.json)")
 
