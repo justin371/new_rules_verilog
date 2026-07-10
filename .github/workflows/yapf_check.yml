@@ -4,6 +4,7 @@ on:
   pull_request:
     paths:
       - "**/*.py"
+      - ".style.yapf"
 
 jobs:
   formatting-check:
@@ -16,15 +17,15 @@ jobs:
 
       - uses: actions/setup-python@v5
         with:
-          python-version: "3.x"
+          python-version: "3.11"
 
       - name: Install YAPF
-        run: python -m pip install yapf
+        run: python -m pip install yapf==0.43.0
 
       - name: Run YAPF python style checks
         shell: bash
         run: |
           git diff -U0 --no-color \
             "${{ github.event.pull_request.base.sha }}...${{ github.event.pull_request.head.sha }}" -- '*.py' \
-            | yapf-diff --style env/.style.yapf > yapf.patch
+            | yapf-diff --style .style.yapf > yapf.patch
           test ! -s yapf.patch || { cat yapf.patch; exit 1; }
