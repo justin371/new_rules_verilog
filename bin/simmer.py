@@ -1210,7 +1210,7 @@ def main(rcfg, options):
                 "merge simulator coverage databases",
                 lambda: simulator.run_report_coverage_merge(vcomp_jobs),
             )
-        
+
         report_header = rv_utils.get_report_header(rcfg)
         if report_header is not None and 'tag' in report_header:
             if '-' in report_header['tag']:

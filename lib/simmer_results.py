@@ -7,7 +7,6 @@ import os
 import shlex
 import sys
 
-
 RESULTS_FILENAME = ".simmer_results.json"
 SCHEMA_VERSION = 1
 MAX_RUNS = 100

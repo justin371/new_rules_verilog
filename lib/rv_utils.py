@@ -167,7 +167,7 @@ def print_summary(rcfg, vcomp_jobs, jm, trd):
                 for j in passed:
                     table_data.append(("", "", "", "", "", "", "", j.log_path if j.log_path else ''))
                     trd.append(("", "", "", "", "", "", "", j.log_path if j.log_path else ''))
-        
+
         if i != last:
             table_data.append(separator)
 
@@ -203,7 +203,7 @@ def print_summary(rcfg, vcomp_jobs, jm, trd):
             table_data[i] = ['-' * cw for cw in column_widths]
     table_data_formatted = [formatter.format(*i) for i in table_data]
     rcfg.log.summary("Job Results\n%s", "\n".join(table_data_formatted))
-    
+
     if total_tests > 1 and not rcfg.options.no_run:
         with open(regression_log_path, 'a') as file:
             formatted_string = "Job Results\n" + "\n".join(map(str, table_data_formatted))
@@ -214,7 +214,7 @@ def print_summary(rcfg, vcomp_jobs, jm, trd):
     table_data.append(("", "", "", str(total_passed), str(total_skipped), str(total_failed), str(total), ""))
     table_data_formatted = [formatter.format(*i) for i in table_data]
     rcfg.log.summary("Simulation Summary\n%s", "\n".join(table_data_formatted))
-    
+
     if total_tests > 1 and not rcfg.options.no_run:
         with open(regression_log_path, 'a') as file:
             formatted_string = "\n" + "Simulation Summary\n" + "\n".join(map(str, table_data_formatted))
@@ -310,7 +310,7 @@ def get_report_header(rcfg):
         if match:
             header['project_name'] = match.group(1)
         else:
-            print("Error: Invalid Git URL format or .git suffix missing.")                
+            print("Error: Invalid Git URL format or .git suffix missing.")
         header["branch"] = branch
         header['tag'] = tag_info
         header["revision"] = short_revision
@@ -376,7 +376,7 @@ def get_coverage_data(rcfg, vcomp_jobs):
                                 cells = [td.get_text(strip=True).replace('\u00a0', '') for td in row.find_all('td')]
                                 if 'Cumulative' in cells:
                                     cov[vcomp_name]['cc'] =  dict(zip(header, cells))
-        
+
             result = subprocess.run(['grep', '-rl', env_pattern, report_dir], capture_output=True, text=True)
             grep_files = result.stdout.splitlines()
             env_file = [f for f in grep_files if include in f]
