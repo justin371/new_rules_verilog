@@ -477,9 +477,9 @@ class VcsSimulator(SimulatorInterface):
         if not self.options.cm or not hasattr(vcomp_job, 'cov_work_dir') or not vcomp_job.cov_work_dir:
             return
 
-        merge_sh = os.path.join(self.rcfg.regression_dir, "vcs_cov_merge.sh")
-        merged_db_path = os.path.join(self.rcfg.regression_dir, "merged_cov.vdb")
-        report_dir = os.path.join(self.rcfg.regression_dir, "vcs_cov_report")
+        merge_sh = os.path.join(self.rcfg.regression_dir, "{}_vcs_cov_merge.sh".format(vcomp_job.name))
+        merged_db_path = os.path.join(self.rcfg.regression_dir, "{}__MERGED_COV.vdb".format(vcomp_job.name))
+        report_dir = os.path.join(self.rcfg.regression_dir, "{}__vcs_cov_report".format(vcomp_job.name))
         cov_db_path = "{}.vdb".format(vcomp_job.cov_work_dir)
         merge_template = self.env.get_template('vcs_cov_merge_template.sh.j2')
 
@@ -491,14 +491,22 @@ class VcsSimulator(SimulatorInterface):
             ))
         st = os.stat(merge_sh)
         os.chmod(merge_sh, st.st_mode | stat.S_IEXEC)
+        vcomp_job.coverage_merge_script = merge_sh
         self.rcfg.deferred_messages.append("Merge/Launch VCS coverage with {}".format(merge_sh))
 
     def run_report_coverage_merge(self, vcomp_jobs):
-        pass
+        if not self.options.cm:
+            return
+        for vcomp_job in vcomp_jobs.values():
+            merge_script = getattr(vcomp_job, "coverage_merge_script", None)
+            if not merge_script:
+                continue
+            result = subprocess.run(["bash", merge_script], capture_output=True, text=True)
+            if result.returncode != 0:
+                raise RuntimeError("VCS coverage merge failed:\n{}\n{}".format(result.stdout, result.stderr))
 
     def get_log_parsing_info(self):
-        # Adjust regex if VCS warnings look different, e.g., "^Warning:"
-        return {'warning_regex': r"^(Warning|Error):.*"} # Example, adjust as needed
+        return {'warning_regex': r"^(?:Warning|Error)(?:-|\s*:).*"}
 
     def get_gui_command_options(self):
         # Enable Verdi debug features along with DVE/Verdi GUI

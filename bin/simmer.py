@@ -55,11 +55,6 @@ jinja2_env = jinja2.Environment(loader=file_loader)
 RERUN_TEMPLATE = jinja2_env.get_template('rerun_template.sh.j2')
 RUN_WAVE_TEMPLATE = jinja2_env.get_template('run_waves_template.sh.j2')
 
-# Get the path from the environment variable EMU_JINJA2_PATH
-# xrun_emu_compile_template.sh.j2 located here
-emu_template_path = os.getenv('EMU_JINJA2_PATH')
-
-
 def get_bazel_bin():
     result = subprocess.run(["bazel", "info", "bazel-bin"], capture_output=True, text=True)
     if result.returncode != 0:
@@ -409,44 +404,34 @@ class VCompJob(Job):
                     log.debug(f"Scanning compile log '{self.log_path}' for warnings...")
                     unwaived_count = 0
                     first_unwaived_warning = None
+                    warnings_found = 0
+                    warning_regex = re.compile(base_warning_pattern)
 
                     with open(self.log_path, 'r', encoding='utf-8', errors='ignore') as logp:
-                        text = logp.read()
-                        # Find all lines matching the base warning pattern
-                        warnings_found = re.findall(base_warning_pattern, text, re.MULTILINE)
-                        log.debug(f"Found {len(warnings_found)} lines matching base warning pattern.")
-
-                        for warning_line in warnings_found: # Iterate through full lines found
-                            waived = False
-                            # Strip leading/trailing whitespace for comparison
+                        for warning_line in logp:
+                            if not warning_regex.search(warning_line):
+                                continue
+                            warnings_found += 1
                             warning_line_stripped = warning_line.strip()
-                            if not warning_line_stripped: continue # Skip empty lines if captured
-
-                            # Check against each compiled waiver regex
-                            for ww_regex in warning_waivers: # ww_regex is a compiled re.Pattern object
-                                # Use re.search() to find the pattern ANYWHERE in the stripped line
-                                log.debug(
-                                    f"Checking line '{warning_line_stripped}' against pattern '{ww_regex.pattern}'"
-                                ) # DEBUG PRINT
-                                if ww_regex.search(warning_line_stripped):
-                                    waived = True
-                                    log.debug(f"  --> Waived.")
-                                    break # Found a match, stop checking waivers for this line
-
-                            if not waived:
+                            if warning_line_stripped and not any(
+                                waiver.search(warning_line_stripped) for waiver in warning_waivers
+                            ):
                                 unwaived_count += 1
                                 log.warning("%s had unwaived warning: %s", self,
-                                            warning_line_stripped) # Log as warning first
+                                            warning_line_stripped)
                                 if first_unwaived_warning is None:
                                     first_unwaived_warning = warning_line_stripped
-                                # If this is the first unwaived warning found, mark job as failed
                                 if self.jobstatus == JobStatus.PASSED:
                                     self.jobstatus = JobStatus.FAILED
-                                    log_level = log.error # Change subsequent log level
+                                    log_level = log.error
                                     log.error("%s failed due to first unwaived warning: %s", self,
                                               first_unwaived_warning)
 
-                    log.debug(f"Finished scanning log. Found {unwaived_count} unwaived warning lines.")
+                    log.debug(
+                        "Finished scanning log. Found %d warning lines, %d unwaived.",
+                        warnings_found,
+                        unwaived_count,
+                    )
 
                 except FileNotFoundError:
                     log.error(f"Compile log file disappeared unexpectedly: {self.log_path}")
@@ -578,15 +563,6 @@ class TestJob(Job):
     def execution_mode(self):
         return "parallel"
 
-    class RegexWrap():
-
-        def __init__(self):
-            self.match = None
-
-        def search(self, regex, line):
-            self.match = re.search(regex, line)
-            return self.match
-
     def __init__(self, rcfg, target, vcomper: VCompJob, icfg, btcj, simulator: SimulatorInterface): # Add simulator
         self.target = target
         name = target.split(":")[1]
@@ -629,21 +605,6 @@ class TestJob(Job):
         except AttributeError:
             return self.rcfg.format_test_name("<???>", self.name, self.iteration, sim='???')
 
-    def _flatten_test_cfg(self, path):
-        flattened = []
-        with open(path) as filep:
-            rw = self.RegexWrap()
-            for line in filep.readlines():
-                if rw.search(r'^<INCLUDE>(.*)', line):
-                    include = rw.match.group(1).strip()
-                    include = os.path.join(os.path.dirname(path), include)
-                    flattened.append("# Jumping into {}\n".format(include))
-                    flattened.extend(self._flatten_test_cfg(include))
-                    flattened.append("# Popping back from {}\n".format(include))
-                else:
-                    flattened.append(line)
-        return flattened
-
     def pre_run(self):
         log.debug("Preparing test: %s:%s (Simulator: %s)", self.vcomper.name, self.name, self.simulator.get_name())
 
@@ -671,7 +632,7 @@ class TestJob(Job):
                     "VSO.ai returned a non-integer seed {!r} for {}.".format(self.vso_seed, self.target)
                 ) from exc
         elif seed is None:
-            seed = random.randint(0, 1 << (32 - 1)) # xrun is treating the seed as a signed integer
+            seed = random.randint(0, (1 << 31) - 1) # xrun treats the seed as a signed integer
 
         # Using the timestamp as the name uniquifier is causing issues when trying to spawn many jobs at once
         # strdate = time.strftime("%Y_%m_%d_%H_%M_%S", time.localtime(time.time()))
@@ -877,20 +838,11 @@ class TestJob(Job):
 
         # Render rerun.sh
         with open(rerun_script_path, 'w') as filep:
-            tmp = locals()
-            del tmp['self']
-            tmp['job'] = self
-            cmd_line_sim_opts = ""
-            if options.sim_opts_file:
-                with open(options.sim_opts_file, 'r') as sim_opts_file:
-                    for line in sim_opts_file:
-                        cmd_line_sim_opts += ' ' + line.strip()
-            if options.sim_opts:
-                cmd_line_sim_opts += ' ' + (' '.join(options.sim_opts)).replace('\"', ' ')
-            if cmd_line_sim_opts:
-                cmd_line_sim_opts = "--sim-opts \"{}\"".format(cmd_line_sim_opts.lstrip())
-            tmp['cmd_line_sim_opts'] = cmd_line_sim_opts
-            filep.write(rerun_template.render(**tmp))
+            filep.write(rerun_template.render(
+                job=self,
+                seed=seed,
+                reproduce_args=shlex.join(options.reproduce_args),
+            ))
         os.chmod(rerun_script_path, stat.S_IRWXU | stat.S_IRGRP | stat.S_IXGRP | stat.S_IROTH | stat.S_IXOTH) # 755
         log.debug('Created %s', rerun_script_path)
 
@@ -907,6 +859,7 @@ class TestJob(Job):
 
     def post_run(self):
         super(TestJob, self).post_run()
+        options = self.rcfg.options
 
         # Parse file for duration
         net_time_str, cps_str = self._get_stats_from_log_file()
@@ -949,6 +902,10 @@ class TestJob(Job):
                                        indent=''), log_path)
             self.jobstatus = JobStatus.PASSED
             self.error_message = None
+            if not os.path.exists(self._log_path):
+                self.log.error("%s completed without simulation log %s", self, self._log_path)
+                self.jobstatus = JobStatus.FAILED
+                self.error_message = "Simulation completed without producing {}.".format(self._log_path)
 
         if self.rcfg.options.vso:
             try:
@@ -967,8 +924,10 @@ class TestJob(Job):
             abs_wave_path = self.simulator.get_wave_artifact_path(wave_path, options.wave_type)
 
             if os.path.exists(abs_wave_path):
-                #log.info("Waves available: {}".format(abs_wave_path))
-                subprocess.run(["chmod", "-R", "755", abs_wave_path], check=False)
+                try:
+                    os.chmod(abs_wave_path, 0o755)
+                except OSError as exc:
+                    log.debug("Could not chmod wave artifact %s: %s", abs_wave_path, exc)
             else:
                 log.error("Dumped waves, but waves file doesn't exist.")
 
@@ -1017,6 +976,8 @@ class TestJob(Job):
         return "{:0d}:{:02d}:{:02d}".format(hours, minutes, seconds)
 
     def _get_stats_from_log_file(self):
+        if not os.path.exists(self._log_path):
+            return '???', '???'
         stats_re = re.compile(
             r'.*Test Duration: (?P<duration>[0-9]+:[0-9]+:[0-9]+).*Average cycles/sec: (?P<cps>[0-9]+\.[0-9]+).*')
         with open(self._log_path, 'r', encoding="utf8", errors='ignore') as log_file:
@@ -1047,7 +1008,7 @@ def main(rcfg, options):
     """
     uname = os.uname()
     rcfg.log.info("Running on %s", uname[1])
-    resolved_simulator = resolve_run_simulator(rcfg, options)
+    resolve_run_simulator(rcfg, options)
 
     # --- Instantiate the selected simulator ---
     try:
@@ -1067,8 +1028,6 @@ def main(rcfg, options):
     vso_init_job = None
     vso_ask_job = None
     vso_finalize_merge_failed = False
-
-    bazel_shutdown_job = job_lib.BazelShutdownJob(rcfg)
 
     if options.vso and simulator.get_name().upper() != 'VCS':
         rcfg.log.critical("--vso is currently supported only with VCS.")
@@ -1144,19 +1103,16 @@ def main(rcfg, options):
             if options.no_compile or options.no_bazel:
                 job.jobstatus = JobStatus.TO_BE_BYPASSED
             jm.add_job(job)
-            bazel_shutdown_job.add_dependency(job)
 
         for vcomp, vcomper in vcomp_jobs.items():
             if options.no_compile:
                 vcomper.jobstatus = JobStatus.TO_BE_BYPASSED
             jm.add_job(vcomper)
-            bazel_shutdown_job.add_dependency(vcomper)
 
         if vso_init_job is not None:
             jm.add_job(vso_init_job)
         if vso_ask_job is not None:
             jm.add_job(vso_ask_job)
-        jm.add_job(bazel_shutdown_job)
 
         for btcj in btcj_jobs:
             if options.no_run:
@@ -1164,10 +1120,8 @@ def main(rcfg, options):
             elif options.no_bazel:
                 btcj.jobstatus = JobStatus.TO_BE_BYPASSED
                 jm.add_job(btcj)
-                bazel_shutdown_job.add_dependency(btcj)
             else:
                 jm.add_job(btcj)
-                bazel_shutdown_job.add_dependency(btcj)
 
         if options.python_seed:
             random.seed(options.python_seed)
@@ -1213,8 +1167,7 @@ def main(rcfg, options):
             vso_finalize_merge_failed = True
             log.error("%s", exc)
 
-    rv_utils.print_summary(rcfg, vcomp_jobs, icfgs, jm, trd)
-    rv_utils.print_simmer_profile(rcfg, jm)
+    rv_utils.print_summary(rcfg, vcomp_jobs, jm, trd)
     # add category_stats for soc
     category_stats = None
     if options.category_cfg is not None:
@@ -1223,8 +1176,12 @@ def main(rcfg, options):
 
     report_header = {}
     if options.report:
-        if options.coverage:
-            simulator.run_report_coverage_merge(vcomp_jobs)
+        if options.coverage or options.cm:
+            rcfg._profile_step(
+                "coverage_merge",
+                "merge simulator coverage databases",
+                lambda: simulator.run_report_coverage_merge(vcomp_jobs),
+            )
         
         report_header = rv_utils.get_report_header(rcfg)
         if report_header is not None and 'tag' in report_header:
@@ -1236,6 +1193,8 @@ def main(rcfg, options):
             import fcntl
             fcntl.flock(report_lock, fcntl.LOCK_EX)
             rrt.run(report_header, trd, rv_utils.get_coverage_data(rcfg, vcomp_jobs), category_stats)
+
+    rv_utils.print_simmer_profile(rcfg, jm)
 
     failures = {}
     for bench, (icfgs, test_list) in rcfg.all_vcomp.items():

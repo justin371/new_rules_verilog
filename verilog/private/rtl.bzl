@@ -564,7 +564,7 @@ def _verilog_rtl_lint_test_impl(ctx):
             top_path = dep[VerilogInfo].last_module.short_path
 
     if top_path == "":
-        fail("verilog_rtl_lint_test {} could not determine the top module from the target's dependencies".format(ctx.label()))
+        fail("verilog_rtl_lint_test {} could not determine the top module from the target's dependencies".format(ctx.label))
 
     ctx.actions.expand_template(
         template = command_template,

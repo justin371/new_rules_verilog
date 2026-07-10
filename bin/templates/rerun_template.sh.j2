@@ -1,8 +1,4 @@
 #!/usr/bin/env bash
-shopt -s expand_aliases
-
-ARGS=$@
-
 set -e
 
-simmer -t {{ job.vcomper.name }}:{{ job.name }} --seed {{ seed }} {{ cmd_line_sim_opts }} --verbosity=UVM_MEDIUM --waves --simulator {{ options.simulator }} $ARGS
+simmer -t {{ job.vcomper.name }}:{{ job.name }} --seed {{ seed }} {{ reproduce_args }} "$@"

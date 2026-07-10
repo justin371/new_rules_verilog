@@ -3,6 +3,8 @@ from pathlib import Path
 import sys
 import tempfile
 import unittest
+from types import SimpleNamespace
+from unittest import mock
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 BIN_DIR = REPO_ROOT / "bin"
@@ -11,6 +13,7 @@ if str(BIN_DIR) not in sys.path:
 
 from args_parser import parse_args
 from lib.simulators.vcs import VcsSimulator
+from lib.simulators.xcelium import XceliumSimulator
 
 
 class DummyRegressionConfig:
@@ -124,6 +127,67 @@ class VcsRuntimeContractTest(unittest.TestCase):
         self.assertIn("-Mdir={{ VCOMP_DIR }}/csrc", template)
         self.assertIn("-Mlib={{ VCOMP_DIR }}/csrc", template)
         self.assertIn("-Mupdate", self._read_repo_file("vendors/synopsys/verilog_dv_tb_compile_args.f.template"))
+
+    def test_vcs_no_compile_requires_simv(self):
+        options = parse_args(["-t", "unit:test", "--simulator", "VCS"])
+        simulator = VcsSimulator(options, DummyRegressionConfig(), None)
+        job_dir = Path(tempfile.mkdtemp())
+        vcomp = SimpleNamespace(job_dir=str(job_dir))
+
+        with self.assertRaises(FileNotFoundError):
+            simulator.validate_reusable_compile_artifacts(vcomp)
+        (job_dir / "simv").touch()
+        simulator.validate_reusable_compile_artifacts(vcomp)
+
+    def test_xcelium_batch_vwdb_and_xprop_contract(self):
+        options = parse_args(["-t", "unit:test", "--simulator", "XRUN", "--waves"])
+        self.assertEqual("vwdb", options.wave_type)
+        self.assertFalse(options.gui)
+
+        simulator = XceliumSimulator(options, DummyRegressionConfig(), None)
+        test_job = SimpleNamespace(job_dir=tempfile.mkdtemp())
+        capture = simulator.get_wave_capture_options(test_job, "/tmp/waves.tcl")
+        self.assertEqual("hdl_top", capture["default_capture"])
+        self.assertIn("-debug_opts verisium_pp", capture["sim_opts"])
+
+        vcomp = DummyVcompJob()
+        Path(vcomp.bench_dir, "fox_xprop.txt").touch()
+        self.assertIn("fox_xprop.txt", simulator.generate_compile_options(vcomp)["xprop_cmd"])
+
+    def test_vcs_warning_parser_accepts_message_ids(self):
+        options = parse_args(["-t", "unit:test", "--simulator", "VCS"])
+        pattern = VcsSimulator(options, DummyRegressionConfig(), None).get_log_parsing_info()["warning_regex"]
+
+        self.assertRegex("Warning-[INC-LDNE] Library directory does not exist", pattern)
+
+    def test_vcs_report_runs_generated_coverage_merge_script(self):
+        options = parse_args(["-t", "unit:test", "--simulator", "VCS", "--cm", "line"])
+        simulator = VcsSimulator(options, DummyRegressionConfig(), None)
+        vcomp = SimpleNamespace(coverage_merge_script="/tmp/unit_vcs_cov_merge.sh")
+
+        with mock.patch("lib.simulators.vcs.subprocess.run", return_value=SimpleNamespace(returncode=0)) as run:
+            simulator.run_report_coverage_merge({"//unit:tb": vcomp})
+
+        run.assert_called_once_with(
+            ["bash", "/tmp/unit_vcs_cov_merge.sh"],
+            capture_output=True,
+            text=True,
+        )
+
+    def test_rerun_preserves_original_options_without_forcing_waves(self):
+        template = self._read_repo_file("bin/templates/rerun_template.sh.j2")
+
+        self.assertIn("{{ reproduce_args }}", template)
+        self.assertNotIn("--waves --simulator", template)
+
+    def test_simmer_log_and_profile_performance_contracts(self):
+        source = self._read_repo_file("bin/simmer.py")
+
+        self.assertIn("for warning_line in logp", source)
+        self.assertNotIn("text = logp.read()", source)
+        self.assertNotIn('subprocess.run(["chmod", "-R"', source)
+        self.assertIn("completed without simulation log", source)
+        self.assertLess(source.index('"coverage_merge"'), source.index("print_simmer_profile(rcfg, jm)"))
 
     def test_vcs_unit_test_rules_are_blocked_in_favor_of_two_step_flow(self):
         dv_bzl = self._read_repo_file("verilog/private/dv.bzl")

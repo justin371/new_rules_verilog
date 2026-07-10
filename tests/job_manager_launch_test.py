@@ -2,11 +2,13 @@ import tempfile
 import threading
 import unittest
 import datetime
+import signal
 from pathlib import Path
 from types import SimpleNamespace
+from unittest import mock
 
 from lib import rv_utils
-from lib.job_lib import BazelTBJob, BazelTestCfgJob, Job, JobManager, JobStatus
+from lib.job_lib import BazelTBJob, BazelTestCfgJob, Job, JobManager, JobStatus, SubprocessJobRunner
 
 
 class _Logger:
@@ -46,6 +48,30 @@ class _RecordingRunner:
 
     def check_for_done(self):
         return True
+
+
+class _FailingPreRunJob(Job):
+    def pre_run(self):
+        super().pre_run()
+        raise SystemExit("missing simv")
+
+
+class _FailingRunner:
+    def __init__(self, _job, _manager):
+        raise OSError("failed to launch")
+
+
+class _FailingPostRunJob(Job):
+    def post_run(self):
+        raise RuntimeError("failed to collect results")
+
+
+class _RunningProcess:
+    pid = 123
+    returncode = None
+
+    def poll(self):
+        return None
 
 
 class JobManagerLaunchTest(unittest.TestCase):
@@ -90,6 +116,89 @@ class JobManagerLaunchTest(unittest.TestCase):
         finally:
             manager.stop()
 
+    def test_pre_run_failure_fails_job_without_killing_scheduler(self):
+        log = _Logger()
+        rcfg = SimpleNamespace(options=SimpleNamespace(timeout=1), log=log)
+        parent = _FailingPreRunJob(rcfg, "vcomp")
+        parent.job_dir = str(Path(tempfile.mkdtemp()) / "vcomp")
+        child = Job(rcfg, "sim")
+        child.job_dir = str(Path(tempfile.mkdtemp()) / "sim")
+        child.add_dependency(parent)
+        manager = JobManager({"idle_print_seconds": 60, "quit_count": 1}, log)
+
+        try:
+            manager.add_job(parent)
+            manager.add_job(child)
+            manager.wait()
+
+            self.assertEqual(JobStatus.FAILED, parent.jobstatus)
+            self.assertEqual(JobStatus.SKIPPED, child.jobstatus)
+            self.assertIn(parent, manager._done)
+            self.assertIn(child, manager._skipped)
+        finally:
+            manager.stop()
+
+    def test_runner_launch_failure_fails_job_without_killing_scheduler(self):
+        log = _Logger()
+        rcfg = SimpleNamespace(options=SimpleNamespace(timeout=1), log=log)
+        job = Job(rcfg, "vcomp")
+        job.job_dir = str(Path(tempfile.mkdtemp()) / "vcomp")
+        manager = JobManager({"idle_print_seconds": 60, "quit_count": 1}, log)
+        manager.job_lib_type = _FailingRunner
+
+        try:
+            manager.add_job(job)
+            manager.wait()
+            self.assertEqual(JobStatus.FAILED, job.jobstatus)
+            self.assertIn(job, manager._done)
+        finally:
+            manager.stop()
+
+    def test_post_run_failure_marks_job_failed(self):
+        log = _Logger()
+        rcfg = SimpleNamespace(options=SimpleNamespace(timeout=1), log=log)
+        job = _FailingPostRunJob(rcfg, "sim")
+        job.job_dir = str(Path(tempfile.mkdtemp()) / "sim")
+        manager = JobManager({"idle_print_seconds": 60, "quit_count": 1}, log)
+        manager.job_lib_type = _RecordingRunner
+
+        try:
+            manager.add_job(job)
+            manager.wait()
+            self.assertEqual(JobStatus.FAILED, job.jobstatus)
+        finally:
+            manager.stop()
+
+    def test_timeout_escalates_from_sigterm_to_sigkill(self):
+        job_dir = Path(tempfile.mkdtemp())
+        job = SimpleNamespace(
+            timeout=0.001,
+            suppress_output=False,
+            job_dir=str(job_dir),
+            rcfg=SimpleNamespace(options=SimpleNamespace(no_stdout=False)),
+        )
+        runner = SubprocessJobRunner.__new__(SubprocessJobRunner)
+        runner.job = job
+        runner.log = _Logger()
+        runner._p = _RunningProcess()
+        runner._start_time = datetime.datetime.now() - datetime.timedelta(hours=1)
+        runner._timed_out = False
+        runner._term_deadline = None
+        runner._kill_sent = False
+
+        with mock.patch("lib.job_lib.os.getpgid", return_value=456, create=True), mock.patch(
+            "lib.job_lib.os.killpg", create=True
+        ) as killpg, mock.patch("lib.job_lib.signal.SIGKILL", 9, create=True):
+            self.assertFalse(runner._check_for_done())
+            runner._term_deadline = datetime.datetime.now() - datetime.timedelta(seconds=1)
+            self.assertFalse(runner._check_for_done())
+
+        self.assertEqual(
+            [mock.call(456, signal.SIGTERM), mock.call(456, 9)],
+            killpg.call_args_list,
+        )
+        self.assertEqual(-signal.SIGTERM, runner.returncode)
+
     def test_simmer_profile_prints_phase_and_job_details(self):
         log = _SummaryLogger()
         job = Job(SimpleNamespace(options=SimpleNamespace(timeout=1), log=log), "profiled_job")
@@ -129,7 +238,7 @@ class JobManagerLaunchTest(unittest.TestCase):
         manager = SimpleNamespace(exited_prematurely=False)
         trd = []
 
-        rv_utils.print_summary(rcfg, {"//pkg:sys_tb": vcomp}, [icfg], manager, trd)
+        rv_utils.print_summary(rcfg, {"//pkg:sys_tb": vcomp}, manager, trd)
 
         self.assertIn(("", "skipped_test", "", "", "1", "", "1", "", ""), trd)
 

@@ -99,13 +99,13 @@ class RegressionDiscoveryTest(unittest.TestCase):
 
         commands = []
 
-        def fake_run_command(cmd, shell=False):
-            commands.append((cmd, shell))
-            if isinstance(cmd, str) and cmd.startswith("bazel query "):
+        def fake_run_command(cmd):
+            commands.append(cmd)
+            if cmd[:2] == ["bazel", "query"]:
                 return 0, "//benches/soc_tb:soc_tb\n", ""
-            if isinstance(cmd, str) and cmd.startswith("bazel cquery "):
+            if cmd[:2] == ["bazel", "cquery"]:
                 return 0, "//benches/soc_tb/tests:dma_single_transfer (abc1234)\n", ""
-            if isinstance(cmd, list) and cmd[:2] == ["bazel", "build"]:
+            if cmd[:2] == ["bazel", "build"]:
                 return 0, "", (
                     "verilog_dv_test_cfg_info(@//benches/soc_tb/tests:dma_single_transfer, "
                     "@//benches/soc_tb:soc_tb, ['smoke'], VCS)\n"
@@ -125,9 +125,9 @@ class RegressionDiscoveryTest(unittest.TestCase):
             regression_module.rv_utils.DatetimePrinter = original_timer
 
         self.assertEqual(3, len(commands))
-        self.assertTrue(commands[0][1])
-        self.assertTrue(commands[1][1])
-        self.assertFalse(commands[2][1])
+        self.assertEqual(["bazel", "query"], commands[0][:2])
+        self.assertEqual(["bazel", "cquery"], commands[1][:2])
+        self.assertEqual(["bazel", "build"], commands[2][:2])
         self.assertEqual(
             {"//benches/soc_tb/tests:dma_single_transfer": ["smoke"]},
             config.tests_to_tags,
@@ -140,6 +140,13 @@ class RegressionDiscoveryTest(unittest.TestCase):
             {"//benches/soc_tb:soc_tb": {"//benches/soc_tb/tests:dma_single_transfer": 0}},
             config.all_vcomp,
         )
+
+    def test_missing_discovery_cache_fails(self):
+        config = self._config(Path(tempfile.mkdtemp()))
+        config.log.critical = lambda *_args, **_kwargs: None
+
+        with self.assertRaises(FileNotFoundError):
+            config.json_to_dict("all_vcomp.json")
 
     def test_init_creates_deferred_messages_with_cached_discovery(self):
         proj_dir = Path(tempfile.mkdtemp())
