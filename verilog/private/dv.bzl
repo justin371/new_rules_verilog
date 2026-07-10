@@ -92,7 +92,7 @@ def _select_simulator_args(ctx, base_attr, legacy_attr, simulator):
         return legacy_args
     return base_args
 
-def _verilog_dv_test_base_cfg_impl(ctx):
+def _verilog_dv_test_cfg_impl(ctx):
     parent_uvm_testnames = [dep[DVTestInfo].uvm_testname for dep in reversed(ctx.attr.inherits) if hasattr(dep[DVTestInfo], "uvm_testname")]
     parent_tbs = [dep[DVTestInfo].tb for dep in reversed(ctx.attr.inherits) if hasattr(dep[DVTestInfo], "tb")]
     parent_simulators = [dep[DVTestInfo].simulator for dep in reversed(ctx.attr.inherits) if hasattr(dep[DVTestInfo], "simulator")]
@@ -191,7 +191,7 @@ def _verilog_dv_test_base_cfg_impl(ctx):
     )
     return [DVTestInfo(**provider_args)]
 
-verilog_dv_test_base_cfg = rule(
+_verilog_dv_test_cfg_rule = rule(
     doc = """A DV test configuration.
 
     This is not a executable target. It generates multiple files which may then
@@ -200,7 +200,7 @@ verilog_dv_test_base_cfg = rule(
     The resolved simulator for the test configuration must match the simulator
     selected by the associated verilog_dv_tb.
     """,
-    implementation = _verilog_dv_test_base_cfg_impl,
+    implementation = _verilog_dv_test_cfg_impl,
     attrs = {
         "abstract": attr.bool(
             default = False,
@@ -317,7 +317,7 @@ def verilog_dv_test_cfg(name = None, tags = None, abstract = None, inherits = No
                 temp_tags.append(tag)
     #replace temp_tags without "gatesim" with params['tags']
     params['tags'] = temp_tags
-    verilog_dv_test_base_cfg(**params)
+    _verilog_dv_test_cfg_rule(**params)
 
     #bazel case for post_sim
     if tags != None and "gatesim" in tags:
@@ -346,7 +346,7 @@ def verilog_dv_test_cfg(name = None, tags = None, abstract = None, inherits = No
                 params['tb'] = tb + "_" + corner
             if uvm_testname != None:
                 params['uvm_testname'] = uvm_testname
-            verilog_dv_test_base_cfg(**params)
+            _verilog_dv_test_cfg_rule(**params)
 
 def _is_dpi_shared_lib(path):
     return path.endswith(".so") or path.endswith(".dll") or path.endswith(".dylib")

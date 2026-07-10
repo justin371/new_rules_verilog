@@ -286,15 +286,13 @@ class RegressionConfig():
     def _build_test_cfg_query(self, vcomp):
         vcomp_path, _ = vcomp.split(':')
         test_wildcard = os.path.join(vcomp_path, "tests", "...")
-        if self.options.allow_no_run:
-            return 'attr(abstract, 0, kind(dv_test_base_cfg, {test_wildcard} intersect allpaths({test_wildcard}, {vcomp})))'.format(
-                test_wildcard=test_wildcard,
-                vcomp=vcomp,
-            )
-        return 'attr(no_run, 0, attr(abstract, 0, kind(dv_test_base_cfg, {test_wildcard} intersect allpaths({test_wildcard}, {vcomp}))))'.format(
+        generated_test_cfgs = 'attr(generator_function, verilog_dv_test_cfg, {test_wildcard} intersect allpaths({test_wildcard}, {vcomp}))'.format(
             test_wildcard=test_wildcard,
             vcomp=vcomp,
         )
+        if self.options.allow_no_run:
+            return 'attr(abstract, 0, {})'.format(generated_test_cfgs)
+        return 'attr(no_run, 0, attr(abstract, 0, {}))'.format(generated_test_cfgs)
 
     def _run_command(self, cmd):
         command = list(cmd)

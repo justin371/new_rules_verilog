@@ -1,10 +1,11 @@
-from pathlib import Path
+import ast
 import json
 import os
 import re
 import subprocess
 import tempfile
 import unittest
+from pathlib import Path
 
 
 FILELIST_FLAG_RE = re.compile(r"(?m)(^|\s)-file\s+\S+")
@@ -73,6 +74,14 @@ def assert_lacks_legacy_filelist_flag(contents, relative_path):
 
 
 class VcsFilelistValidationTest(unittest.TestCase):
+    def test_dv_test_cfg_keeps_its_public_runtime_contract(self):
+        dynamic_args = ast.literal_eval(read_runfile(
+            "tests/vcs_filelist_validation/dv_cfg_vcs_dynamic_args.py",
+        ))
+
+        self.assertEqual("VCS", dynamic_args["simulator"])
+        self.assertEqual("dv_cfg_vcs", dynamic_args["uvm_testname"])
+
     def test_vcs_outputs_use_dash_file(self):
         filelist_checks = {
             "tests/vcs_filelist_validation/rtl_lint_vcs": [

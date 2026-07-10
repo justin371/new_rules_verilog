@@ -3,6 +3,7 @@ load("@rules_python//python:defs.bzl", "py_test")
 load(
     "@rules_verilog//verilog:defs.bzl",
     "verilog_dv_tb",
+    "verilog_dv_test_cfg",
     "verilog_dv_unit_test",
     "verilog_rtl_library",
     "verilog_rtl_lint_test",
@@ -34,6 +35,13 @@ verilog_dv_tb(
         "+UNIFIED_VCS_RUNTIME_ARG",
     ],
     simulator = "VCS",
+)
+
+verilog_dv_test_cfg(
+    name = "dv_cfg_vcs",
+    simulator = "VCS",
+    tags = ["manual"],
+    tb = ":dv_tb_vcs",
 )
 
 verilog_dv_unit_test(
@@ -69,6 +77,7 @@ py_test(
     main = "validate_vcs_filelist_test.py",
     srcs = ["validate_vcs_filelist_test.py"],
     data = [
+        ":dv_cfg_vcs",
         ":dv_unit_vcs",
         ":dv_unit_xrun",
         ":dv_tb_vcs",

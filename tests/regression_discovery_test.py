@@ -107,6 +107,15 @@ class RegressionDiscoveryTest(unittest.TestCase):
 
         self.assertIn('filter(":soc_tb$", kind(dv_tb, //benches/...))', query)
 
+    def test_test_cfg_query_uses_the_public_macro_identity(self):
+        config = self._config(Path(tempfile.mkdtemp()))
+
+        query = config._build_test_cfg_query("//benches/soc_tb:soc_tb")
+
+        self.assertIn("attr(generator_function, verilog_dv_test_cfg,", query)
+        self.assertNotIn("dv_test_cfg_rule", query)
+        self.assertNotIn("base_cfg", query)
+
     def test_discovery_batches_cquery_and_build(self):
         proj_dir = Path(tempfile.mkdtemp())
         config = self._config(proj_dir)
