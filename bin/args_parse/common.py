@@ -6,6 +6,7 @@ PROJ_DIR = os.environ.get('PROJ_DIR', os.getcwd())
 SIM_PLATFORM = os.environ.get('SIM_PLATFORM', 'XRUN')
 _COVFILE = os.environ.get('COVFILE', "coverage.ccf")
 COVFILE = _COVFILE if os.path.isabs(_COVFILE) else os.path.join(PROJ_DIR, _COVFILE)
+REPORT_DIR = os.environ.get('SIMMER_REPORT_DIR', '/nfs/regression/webroot')
 
 
 def add_debug_arguments(parser):
@@ -212,7 +213,8 @@ def add_flow_control_arguments(parser):
                         default=False,
                         action='store_true',
                         help='skip bazel build, can not use if any BUILD changes')
-    gflowc.add_argument('--report', default=False, action='store_true', help='report regression result, default is No')
+    gflowc.add_argument('--report', default=False, action='store_true', help='Generate a static regression dashboard.')
+    gflowc.add_argument('--report-dir', default=REPORT_DIR, help='Dashboard output root (or SIMMER_REPORT_DIR).')
 
 
 def add_basic_arguments(parser):

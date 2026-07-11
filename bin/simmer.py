@@ -1024,7 +1024,7 @@ def main(rcfg, options):
     btcj_jobs = []
     btbj_jobs = []
     trd = []
-    webroot_path = "/nfs/regression/webroot/"
+    webroot_path = options.report_dir
     vso_init_job = None
     vso_ask_job = None
     vso_finalize_merge_failed = False
@@ -1197,23 +1197,21 @@ def main(rcfg, options):
             )
 
         report_header = rv_utils.get_report_header(rcfg)
-        if report_header is not None and 'tag' in report_header:
-            if '-' in report_header['tag']:
-                report_header['tag'] = ''
         rrt = regression_report.RegressionReport(rcfg, report_jinja2_env, webroot_path)
         report_root = os.path.join(webroot_path, "regression_report")
-        project_lock_path = os.path.join(report_root, ".{}.lock".format(report_header['project_name']))
+        project_lock_name = re.sub(r"[^A-Za-z0-9_.-]+", "_", report_header['project_name'])
+        project_lock_path = os.path.join(report_root, ".{}.lock".format(project_lock_name))
         index_lock_path = os.path.join(report_root, ".index.lock")
         os.makedirs(report_root, exist_ok=True)
         rrt.prepare(report_header, trd, rv_utils.get_coverage_data(rcfg, vcomp_jobs), category_stats)
-        with open(index_lock_path, "w") as report_lock:
+        with open(project_lock_path, "w") as report_lock:
             import fcntl
             fcntl.flock(report_lock, fcntl.LOCK_EX)
-            rrt.render_home_page()
-            rrt.render_bench_page()
-        with open(project_lock_path, "w") as report_lock:
-            fcntl.flock(report_lock, fcntl.LOCK_EX)
             rrt.render_regression_page()
+        with open(index_lock_path, "w") as report_lock:
+            fcntl.flock(report_lock, fcntl.LOCK_EX)
+            rrt.render_bench_page()
+            rrt.render_home_page()
 
     rv_utils.print_simmer_profile(rcfg, jm)
 
@@ -1224,9 +1222,13 @@ def main(rcfg, options):
         #num_failed = sum(1 for j in test_jobs_list if j.jobstatus and not j.jobstatus.successful)
         #failures[bench] = num_failed
         if options.report:
-            log.info("Report at: http://dv-sh.rd.lgt.ai/regression_report/{0}/{1}".format(
-                report_header['project_name'],
-                bench.split(":")[1]))
+            report_path = os.path.join(report_root, report_header['project_name'], bench.split(":")[1], "index.html")
+            report_url = os.environ.get("SIMMER_REPORT_URL")
+            if report_url:
+                log.info("Report at: %s/%s/%s", report_url.rstrip("/"), report_header['project_name'],
+                         bench.split(":")[1])
+            else:
+                log.info("Report at: %s", report_path)
 
     for message in getattr(rcfg, "deferred_messages", []):
         log.info(message)

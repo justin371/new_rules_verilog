@@ -9,6 +9,7 @@ import json
 import shutil
 import subprocess
 from typing import Dict, Optional
+from urllib.parse import urlparse
 from bs4 import BeautifulSoup
 
 LOGGER_INDENT = 8
@@ -64,7 +65,7 @@ def create_regression_log_file(rcfg):
         os.makedirs(target_folder)
         print(f"Folder created at: {target_folder}")
 
-    current_time = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+    current_time = datetime.datetime.now().strftime("%Y%m%d_%H%M%S_%f")
     rcfg.current_time = current_time
 
     if len(rcfg.all_vcomp) > 1:
@@ -98,10 +99,10 @@ def print_summary(rcfg, vcomp_jobs, jm, trd):
             regression_log_path = create_regression_log_file(rcfg)
     else:
         if rcfg.options.report:
-            current_time = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+            current_time = datetime.datetime.now().strftime("%Y%m%d_%H%M%S_%f")
             rcfg.current_time = current_time
 
-    table_data = [("bench", "test", "max_job_time", "passed", "skipped", "failed", "total", "logs")]
+    table_data = [("bench", "test", "max_job_time", "passed", "skipped", "failed", "total", "logs", "category")]
     separator = [""] * len(table_data[0])
     table_data.append(separator)
 
@@ -116,7 +117,7 @@ def print_summary(rcfg, vcomp_jobs, jm, trd):
         tb_set = (vcomp.name, "vcomp", '', '1' if vcomp.jobstatus.successful else '',
                   '1' if vcomp.jobstatus == vcomp.jobstatus.SKIPPED else '',
                   '1' if not vcomp.jobstatus.successful else '', '1',
-                  '' if vcomp.jobstatus.successful else str(vcomp.log_path))
+                  '' if vcomp.jobstatus.successful else str(vcomp.log_path), '')
         table_data.append(tb_set)
         trd.append(tb_set)
         total += 1
@@ -153,44 +154,24 @@ def print_summary(rcfg, vcomp_jobs, jm, trd):
                 if not jm.exited_prematurely:
                     raise exc
 
+            test_target = getattr(icfg.jobs[0], "target", "")
+            test_category = "Q1" if any(tag.lower() == "q1" for tag in rcfg.tests_to_tags.get(test_target, [])) else ""
             test_set = ("", icfg.jobs[0].name,
                         str(max_job_time), str(len(passed)) if passed else "", str(len(skipped)) if skipped else "",
-                        str(len(failed)) if failed else "", str(len(icfg.jobs)), "")
+                        str(len(failed)) if failed else "", str(len(icfg.jobs)), "", test_category)
             table_data.append(test_set)
             trd.append(test_set)
 
             for j in failed:
-                table_data.append(("", "", "", "", "", "", "", j.log_path if j.log_path else ''))
-                trd.append(("", "", "", "", "", "", "", j.log_path if j.log_path else ''))
+                table_data.append(("", "", "", "", "", "", "", j.log_path if j.log_path else '', ""))
+                trd.append(("", "", "", "", "", "", "", j.log_path if j.log_path else '', ""))
             if rcfg.options.nt:
                 for j in passed:
-                    table_data.append(("", "", "", "", "", "", "", j.log_path if j.log_path else ''))
-                    trd.append(("", "", "", "", "", "", "", j.log_path if j.log_path else ''))
+                    table_data.append(("", "", "", "", "", "", "", j.log_path if j.log_path else '', ""))
+                    trd.append(("", "", "", "", "", "", "", j.log_path if j.log_path else '', ""))
 
         if i != last:
             table_data.append(separator)
-
-    trdl = [list(entry) for entry in trd]
-    for i, entry in enumerate(trdl):
-        if i != 0:
-            current_test = entry[1]
-            matched = False
-            for key in rcfg.tests_to_tags:
-                if ":" in key:
-                    test_name = key.split(":", 1)[1]
-                    if test_name == current_test:
-                        if any(tag.lower() == "q1" for tag in rcfg.tests_to_tags[key]):
-                            entry.append("Q1")
-                        else:
-                            entry.append("")
-                        matched = True
-                        break
-            if not matched:
-                entry.append("")
-        else:
-            entry.append("")
-    trd.clear()
-    trd.extend([tuple(entry) for entry in trdl])
 
     assert all(len(i) == len(table_data[0]) for i in table_data)
     columns = list(zip(*table_data))
@@ -208,9 +189,9 @@ def print_summary(rcfg, vcomp_jobs, jm, trd):
             formatted_string = "Job Results\n" + "\n".join(map(str, table_data_formatted))
             file.write(formatted_string)
 
-    table_data = [("", "", "", "passed", "skipped", "failed", "total", "")]
+    table_data = [("", "", "", "passed", "skipped", "failed", "total", "", "")]
     table_data.append(['-' * len(i) for i in table_data[0]])
-    table_data.append(("", "", "", str(total_passed), str(total_skipped), str(total_failed), str(total), ""))
+    table_data.append(("", "", "", str(total_passed), str(total_skipped), str(total_failed), str(total), "", ""))
     table_data_formatted = [formatter.format(*i) for i in table_data]
     rcfg.log.summary("Simulation Summary\n%s", "\n".join(table_data_formatted))
 
@@ -288,37 +269,47 @@ def calc_simresults_location(checkout_path):
     return regression_directory
 
 
+def _git_output(cwd, *args):
+    result = subprocess.run(["git", *args], cwd=cwd, capture_output=True, text=True, check=False)
+    return result.stdout.strip() if result.returncode == 0 else ""
+
+
+def normalize_git_remote(remote):
+    """Convert common SSH remotes to an HTTPS URL and remove one .git suffix."""
+    if remote.startswith("git@") and ":" in remote:
+        host, path = remote.split(":", 1)
+        remote = "https://{}/{}".format(host.split("@", 1)[1], path)
+    elif remote.startswith("ssh://"):
+        parsed = urlparse(remote)
+        remote = "https://{}{}".format(parsed.hostname, parsed.path)
+    if remote.endswith(".git"):
+        remote = remote[:-4]
+    return remote.rstrip("/")
+
+
 def get_report_header(rcfg):
     """
     Get header information for regression report
     :param rcfg: Regression configuration object
     :return: Dictionary containing report header information
     """
-    header = {}
+    project_dir = rcfg.proj_dir
+    commit_id = _git_output(project_dir, "rev-parse", "HEAD")
+    repo_url = normalize_git_remote(_git_output(project_dir, "remote", "get-url", "origin"))
+    project_name = os.path.basename(urlparse(repo_url).path) if repo_url else ""
+    if not project_name:
+        project_name = os.path.basename(os.path.abspath(project_dir)) or "rules_verilog"
 
-    header['username'] = getpass.getuser()
-    header['simulator'] = getattr(rcfg, 'simulator', rcfg.options.simulator)
-    header['time'] = rcfg.current_time
-    try:
-        branch = subprocess.check_output(['git', 'rev-parse', '--abbrev-ref', 'HEAD'], text=True).strip()
-        tag_info = subprocess.check_output(['git', 'describe', '--tags'], text=True).strip()
-        commit_id = subprocess.check_output(['git', 'rev-parse', 'HEAD'], text=True).strip()
-        short_revision = subprocess.check_output(['git', 'rev-parse', '--short', 'HEAD'], text=True).strip()
-        repo_url = subprocess.check_output(['git', 'remote', 'get-url', 'origin'],
-                                           text=True).strip().replace(":", "/").replace("git@", "https://")
-        match = re.search(r"/([^/]+)\.git$", repo_url)
-        if match:
-            header['project_name'] = match.group(1)
-        else:
-            print("Error: Invalid Git URL format or .git suffix missing.")
-        header["branch"] = branch
-        header['tag'] = tag_info
-        header["revision"] = short_revision
-        header["commit"] = repo_url.rstrip(".git") + "/commit/" + commit_id
-    except subprocess.CalledProcessError:
-        print("Error: Not a Git repository or Git command failed.")
-        return None
-    return header
+    return {
+        "username": getpass.getuser(),
+        "simulator": getattr(rcfg, "simulator", getattr(rcfg.options, "simulator", "unknown")),
+        "time": rcfg.current_time or datetime.datetime.now().strftime("%Y%m%d_%H%M%S_%f"),
+        "project_name": project_name,
+        "branch": _git_output(project_dir, "rev-parse", "--abbrev-ref", "HEAD") or "unknown",
+        "tag": _git_output(project_dir, "describe", "--tags", "--exact-match"),
+        "revision": _git_output(project_dir, "rev-parse", "--short", "HEAD") or "unknown",
+        "commit": "{}/commit/{}".format(repo_url, commit_id) if repo_url and commit_id else "",
+    }
 
 
 def process_value(value):
@@ -327,6 +318,7 @@ def process_value(value):
     :param value: Coverage value string
     :return: Processed value string
     """
+    value = str(value)
     if '%' in value:
         return value.split('%')[0] + '%'
     return value
@@ -347,8 +339,11 @@ def get_coverage_data(rcfg, vcomp_jobs):
 
     for vcomp, job in vcomp_jobs.items():
         vcomp_name = vcomp.split(":")[-1]
-        cov[vcomp_name] = {}
+        cov[vcomp_name] = {'cc': {}, 'cf': {}}
         if rcfg.options.coverage:
+            if not job.cov_work_dir:
+                rcfg.log.warning("Coverage work directory is unavailable for %s", vcomp_name)
+                continue
             report_dir = os.path.join(job.cov_work_dir, "imc_report")
             cmd = ["runmod", "xrun", "--", "imc", "-exec", os.path.join(job.cov_work_dir, "imc_report.tcl"), "-verbose"]
             p = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
@@ -467,60 +462,25 @@ def calc_category_stats(rcfg) -> Dict[str, Dict[str, int]]:
             del stats["test_records"]
         return category_stats
 
-    # Process all test iterations and aggregate results
+    # Process all test iterations and aggregate results by full Bazel target.
     for _, (icfgs, _) in rcfg.all_vcomp.items():
         for icfg in icfgs:
-            # Map: test base name → {tags, all_iteration_statuses}
-            test_aggregator = {}
+            if not icfg.jobs:
+                continue
+            test_target = getattr(icfg.jobs[0], "target", "")
+            test_tags = set(rcfg.tests_to_tags.get(test_target, []))
+            if not test_tags:
+                continue
+            all_iterations = [job.jobstatus.successful for job in icfg.jobs]
 
-            # Step 1: Collect all iterations for each test
-            for job in icfg.jobs:
-                # Extract base test name (remove iteration suffix like "_1", "_2")
-                test_full_name = job.name
-                test_base_name = re.sub(r'_\d+$', '', test_full_name)
-
-                # Get tags associated with this test —— FIXED: EXACT MATCH
-                test_tags = set()
-                for test_key, tags in rcfg.tests_to_tags.items():
-                    if ':' in test_key:
-                        key_test_name = test_key.split(':', 1)[1] # Only split on first ':'
-                        if key_test_name == test_base_name:
-                            test_tags = set(tags)
-                            break # Exact match found
-
-                if not test_tags:
-                    continue # Skip tests with no tags
-
-                # Initialize entry if not exists
-                if test_base_name not in test_aggregator:
-                    test_aggregator[test_base_name] = {
-                        "tags": test_tags,
-                        "iterations_successful": [] # Track success status of each iteration
-                    }
-
-                # Record success status of current iteration
-                is_successful = job.jobstatus.successful if job.jobstatus else False
-                test_aggregator[test_base_name]["iterations_successful"].append(is_successful)
-
-            # Step 2: Deduplicate and calculate stats (strict mode)
-            for test_name, test_data in test_aggregator.items():
-                test_tags = test_data["tags"]
-                all_iterations = test_data["iterations_successful"]
-
-                # Check each category for tag matches
-                for category, stats in category_stats.items():
-                    category_tags = set(rcfg.category_total_cases[category]["tags"])
-                    if not (test_tags & category_tags):
-                        continue # No tag overlap, skip
-
-                    # Count as executed only once per unique test
-                    if test_name not in stats["test_records"]:
-                        stats["test_records"].add(test_name)
-                        stats["executed"] += 1 # 1 execution regardless of iteration count
-
-                        # Strict mode: Passed only if ALL iterations are successful
-                        if all(all_iterations):
-                            stats["passed"] += 1
+            for category, stats in category_stats.items():
+                category_tags = set(rcfg.category_total_cases[category]["tags"])
+                if not (test_tags & category_tags) or test_target in stats["test_records"]:
+                    continue
+                stats["test_records"].add(test_target)
+                stats["executed"] += 1
+                if all(all_iterations):
+                    stats["passed"] += 1
 
     # Clean up internal tracking field
     for stats in category_stats.values():

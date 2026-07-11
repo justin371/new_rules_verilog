@@ -1,15 +1,62 @@
-#!/usr/bin/env python
-"""Report regression result in HTML."""
+#!/usr/bin/env python3
+"""Generate and retain static HTML regression reports."""
 
-# standard lib imports
-import os
-import shutil
-from datetime import datetime
-
-# Bigger libraries
 import json
+import os
+from pathlib import Path
+import re
+import shutil
+import tempfile
 
 import jinja2
+
+MAX_HISTORY = 30
+
+
+def _safe_int(value):
+    try:
+        return int(value or 0)
+    except (TypeError, ValueError):
+        return 0
+
+
+def _coverage_metric(coverage, section, metric="Overall"):
+    value = coverage.get(section, {}).get(metric, 0)
+    try:
+        return float(str(value).rstrip("%"))
+    except (TypeError, ValueError):
+        return 0.0
+
+
+def _slug(value):
+    return re.sub(r"[^A-Za-z0-9_.-]+", "_", str(value)).strip("._") or "item"
+
+
+def _write_text_atomic(path, contents):
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    descriptor, temporary_path = tempfile.mkstemp(prefix=".report-", dir=os.path.dirname(path), text=True)
+    try:
+        with os.fdopen(descriptor, "w", encoding="utf-8") as filep:
+            filep.write(contents)
+        os.chmod(temporary_path, 0o644)
+        os.replace(temporary_path, path)
+    finally:
+        if os.path.exists(temporary_path):
+            os.remove(temporary_path)
+
+
+def _write_json_atomic(path, value):
+    _write_text_atomic(path, json.dumps(value, ensure_ascii=False, indent=2) + "\n")
+
+
+def _load_json(path, default):
+    if not os.path.exists(path):
+        return default
+    with open(path, "r", encoding="utf-8") as filep:
+        value = json.load(filep)
+    if not isinstance(value, type(default)):
+        raise ValueError("Unexpected JSON structure in {}".format(path))
+    return value
 
 
 def create_template_environment(template_dir):
@@ -18,7 +65,7 @@ def create_template_environment(template_dir):
         autoescape=jinja2.select_autoescape(enabled_extensions=("html", "xml", "html.j2", "xml.j2")),
         loader=jinja2.FileSystemLoader(searchpath=template_dir),
     )
-    environment.filters['zip'] = zip
+    environment.filters["zip"] = zip
     return environment
 
 
@@ -26,304 +73,278 @@ def regression_history_series(regressions, timestamps):
     """Return pass, code-coverage, and functional-coverage chart series."""
     entries = [regressions[timestamp] for timestamp in timestamps if timestamp in regressions]
     return (
-        [entry['passrate'] for entry in entries],
-        [entry['cov_code'] for entry in entries],
-        [entry['cov_func'] for entry in entries],
+        [entry.get("passrate", 0) for entry in entries],
+        [entry.get("cov_code", 0) for entry in entries],
+        [entry.get("cov_func", 0) for entry in entries],
     )
 
 
-class RegressionReport():
-    """
-    All html update&create here
-    """
+class RegressionReport:
+    """Own static report rendering and retention."""
 
     def __init__(self, rcfg, template_env, webroot_dir):
         self.rcfg = rcfg
-        self.env = template_env # template loader
+        self.env = template_env
         self.webroot_dir = webroot_dir
-
-        # common path
         self.output_path = os.path.join(self.webroot_dir, "regression_report")
-        self.project_info_path = self.output_path + '/' + 'project_info.json'
+        self.project_info_path = os.path.join(self.output_path, "project_info.json")
 
-        # template filep load
         self.HOME_TEMPLATE = self.env.get_template("regression_report_templates/home_template.html.j2")
         self.BENCHS_TEMPLATE = self.env.get_template("regression_report_templates/benchs_template.html.j2")
         self.REGRESSION_REPORT_TEMPLATE = self.env.get_template(
-            'regression_report_templates/regression_report_template.html.j2')
-        self.LOGS_TEMPLATE = self.env.get_template('regression_report_templates/logs_template.html.j2')
+            "regression_report_templates/regression_report_template.html.j2")
+        self.LOGS_TEMPLATE = self.env.get_template("regression_report_templates/logs_template.html.j2")
 
-        # result info
         self.header = {}
         self.trd = {}
         self.cov = {}
         self.proj_name = ""
         self.project_info = {}
-
-        # category info
+        self.bench_list = []
         self.category_stats = {}
         self.processed_category_stats = []
 
+    def _refresh_project_info(self):
+        try:
+            project_info = _load_json(self.project_info_path, {})
+        except (json.JSONDecodeError, ValueError) as exc:
+            self.rcfg.log.warning("Ignoring invalid report project index %s: %s", self.project_info_path, exc)
+            project_info = {}
+        benches = set(project_info.get(self.proj_name, []))
+        benches.update(self.bench_list)
+        project_info[self.proj_name] = sorted(benches)
+        self.project_info = project_info
+
     def process_trd(self, trd):
-        """
-        Process test result data
-        """
-        # Tuple2List : for process data
-        trdl = [list(item) for item in trd]
-        # 1.1 logs match test, delete log entry
-        # 1.2 calc pass rate
-        last_job_index = 0
-        for i, entry in enumerate(trdl):
-            if entry[3] and entry[6]: # calc pass rate
-                entry.insert(-2, f"{int(entry[3]) / int(entry[6]) * 100:.2f}")
-            else:
-                entry.insert(-2, "0.00")
-            if entry[1]: # record last job
-                last_job_index = i
-            if entry[-2]:
-                trdl[last_job_index][-2] += entry[-2] + '|'
-        trdl = [list(item) for item in trdl if item[1]]
-        # 1.3 list2dict
-        # 1.4 dict.keys()
-        current_value = []
-        current_key = None
-        for entry in trdl:
-            entry[-2] = entry[-2].rstrip('|')
-            if entry[0] != "":
-                if current_value:
-                    self.trd[current_key] = current_value
-                current_key = entry[0]
-                current_value = []
-            current_value.append(entry)
-        if current_value:
-            self.trd[current_key] = current_value
-        self.bench_list = list(self.trd.keys())
-        # 1.5 add total summary
-        for b, t in self.trd.items():
-            passed = sum([int(entry[3]) for entry in t if entry[3] != ""])
-            skipped = sum([int(entry[4]) for entry in t if entry[4] != ""])
-            failed = sum([int(entry[5]) for entry in t if entry[5] != ""])
-            passed -= 1 # skip compile
+        """Normalize print_summary rows and group them by bench."""
+        self.trd = {}
+        current_bench = None
+        last_job = None
+
+        for raw_entry in trd:
+            entry = list(raw_entry)
+            entry.extend([""] * max(0, 9 - len(entry)))
+            if entry[0]:
+                current_bench = entry[0]
+            if entry[1] and current_bench:
+                total = _safe_int(entry[6])
+                pass_rate = (_safe_int(entry[3]) / total * 100) if total else 0
+                normalized = entry[:7] + ["{:.2f}".format(pass_rate), entry[7], entry[8]]
+                self.trd.setdefault(current_bench, []).append(normalized)
+                last_job = normalized
+            elif entry[7] and last_job is not None:
+                last_job[8] = "|".join(part for part in [last_job[8], entry[7]] if part)
+
+        for bench, rows in self.trd.items():
+            test_rows = rows[1:] if rows and rows[0][1] == "vcomp" else rows
+            passed = sum(_safe_int(row[3]) for row in test_rows)
+            skipped = sum(_safe_int(row[4]) for row in test_rows)
+            failed = sum(_safe_int(row[5]) for row in test_rows)
             total = passed + skipped + failed
-            self.trd[b].append([
-                "Total", "", "", "" if passed == 0 else str(passed), "" if skipped == 0 else str(skipped),
-                "" if failed == 0 else str(failed), "" if total == 0 else str(total),
-                f"{passed / total * 100:.2f}" if total else "0.00", "", ""
+            rows.append([
+                "Total",
+                "",
+                "",
+                str(passed) if passed else "",
+                str(skipped) if skipped else "",
+                str(failed) if failed else "",
+                str(total) if total else "",
+                "{:.2f}".format(passed / total * 100) if total else "0.00",
+                "",
+                "",
             ])
 
-    def process_category_stats(self):
-        """
-        Process category statistics (strict mode) into template-friendly format
-        Convert {category: {total, executed, passed}} to list of [category, total, executed, completion, passed, pass_rate]
-        """
-        if not self.category_stats:
-            self.processed_category_stats = []
-            return
+        self.bench_list = list(self.trd)
 
-        for category, stats in self.category_stats.items():
+    def process_category_stats(self):
+        """Convert category statistics into template-friendly rows."""
+        self.processed_category_stats = []
+        for category, stats in (self.category_stats or {}).items():
             total = stats["total"]
             executed = stats["executed"]
             passed = stats["passed"]
-
-            # Calculate completion rate (executed / total)
-            completion_rate = f"{(executed / total) * 100:.2f}%" if total > 0 else "N/A"
-            # Calculate pass rate (passed / executed, strict mode: only if all iterations passed)
-            pass_rate = f"{(passed / executed) * 100:.2f}%" if executed > 0 else "N/A"
-
-            # Append processed data (match table columns in template)
+            completion_rate = "{:.2f}%".format(executed / total * 100) if total else "N/A"
+            pass_rate = "{:.2f}%".format(passed / executed * 100) if executed else "N/A"
             self.processed_category_stats.append([
-                category, # name（like module_func_reset、soc_path_ddr）
-                str(total), # total case number
-                str(executed), # finished case number
-                completion_rate, # rate of completion
-                str(passed), # pass rate
-                pass_rate
+                category,
+                str(total),
+                str(executed),
+                completion_rate,
+                str(passed),
+                pass_rate,
             ])
 
     def run(self, header, trd, cov, category_stats):
-        """
-        API for simmer to create report page
-        """
+        """Prepare and render a complete report."""
         self.prepare(header, trd, cov, category_stats)
+        self.render_regression_page()
         self.render_home_page()
         self.render_bench_page()
-        self.render_regression_page()
 
     def prepare(self, header, trd, cov, category_stats):
         self.header = header
-        self.cov = cov
-        self.category_stats = category_stats
+        self.cov = cov or {}
+        self.category_stats = category_stats or {}
         self.process_trd(trd)
         self.process_category_stats()
         self.proj_name = self.header["project_name"]
+        os.makedirs(self.output_path, exist_ok=True)
+        self._refresh_project_info()
+
+    def dashboard_data(self):
+        """Return latest per-bench summaries for every known project."""
+        dashboard = {}
+        for project_name, benches in self.project_info.items():
+            project_rows = []
+            for bench in benches:
+                regressions_path = os.path.join(self.output_path, project_name, bench, "regressions.json")
+                try:
+                    regressions = _load_json(regressions_path, {})
+                except (json.JSONDecodeError, ValueError):
+                    regressions = {}
+                timestamp = max(regressions, default="")
+                summary = dict(regressions.get(timestamp, {}))
+                summary.update({"bench": bench, "timestamp": timestamp})
+                project_rows.append(summary)
+            dashboard[project_name] = project_rows
+        return dashboard
 
     def render_home_page(self):
-        """
-        Render home.html
-        param : project
-        """
-        html_file_path = self.output_path + '/' + 'index.html'
-
-        # Makesure project exist
-        # Update project info to json
-        os.makedirs(self.output_path, exist_ok=True)
-        if not os.path.exists(self.project_info_path):
-            self.project_info[self.proj_name] = []
-        else:
-            with open(self.project_info_path, 'r', encoding='utf-8') as f:
-                self.project_info = json.load(f)
-            if self.proj_name not in self.project_info.keys():
-                self.project_info[self.proj_name] = []
-        #with open(self.project_info_path, 'w', encoding='utf-8') as f:
-        #    json.dump(self.project_info, f, ensure_ascii=False, indent=4)
-
-        # Render
-        rendered_html = self.HOME_TEMPLATE.render(project=self.project_info, )
-
-        # Write html
-        with open(html_file_path, 'w', encoding='utf-8') as f:
-            f.write(rendered_html)
+        self._refresh_project_info()
+        rendered_html = self.HOME_TEMPLATE.render(
+            project=self.project_info,
+            dashboard=self.dashboard_data(),
+        )
+        _write_text_atomic(os.path.join(self.output_path, "index.html"), rendered_html)
 
     def render_bench_page(self):
-        """
-        Render bench_name.html
-        param : project_name
-        param : benchs
-        """
+        self._refresh_project_info()
         project_path = os.path.join(self.output_path, self.proj_name)
-        html_file_path = project_path + '/' + 'index.html'
-
-        # Makesure benchs exist
-        # Update benchs info
         os.makedirs(project_path, exist_ok=True)
-        for b in self.bench_list:
-            os.makedirs(project_path + '/' + b, exist_ok=True)
-            if b not in self.project_info[self.proj_name]:
-                self.project_info[self.proj_name].append(b)
-        with open(self.project_info_path, 'w', encoding='utf-8') as f:
-            json.dump(self.project_info, f, ensure_ascii=False, indent=4)
-
-        # Render
+        for bench in self.bench_list:
+            os.makedirs(os.path.join(project_path, bench), exist_ok=True)
+        _write_json_atomic(self.project_info_path, self.project_info)
         rendered_html = self.BENCHS_TEMPLATE.render(
-            project_name=self.header["project_name"],
+            project_name=self.proj_name,
             project=self.project_info,
+            bench_summaries=self.dashboard_data().get(self.proj_name, []),
         )
+        _write_text_atomic(os.path.join(project_path, "index.html"), rendered_html)
 
-        # Write html
-        with open(html_file_path, 'w', encoding='utf-8') as f:
-            f.write(rendered_html)
+    def _copy_logs(self, bench_path, details):
+        timestamp = self.header["time"]
+        run_logs_path = os.path.join(bench_path, "logs", timestamp)
+        logs_list = []
+
+        for row_index, row in enumerate(details[1:-1], start=1):
+            copied_logs = []
+            for log_index, log_path in enumerate(filter(None, row[8].split("|")), start=1):
+                source = Path(log_path)
+                if not source.is_file():
+                    self.rcfg.log.warning("Regression log does not exist: %s", source)
+                    continue
+                os.makedirs(run_logs_path, exist_ok=True)
+                destination_name = "{}_{:02d}_{}.log".format(_slug(row[1]), log_index, _slug(source.parent.name))
+                destination_path = os.path.join(run_logs_path, destination_name)
+                shutil.copy2(source, destination_path)
+                os.chmod(destination_path, 0o644)
+                copied_logs.append(destination_name)
+
+            if not copied_logs:
+                continue
+            logs_page = "{:03d}_{}.html".format(row_index, _slug(row[1]))
+            rendered_logs = self.LOGS_TEMPLATE.render(
+                project_name=self.proj_name,
+                bench_name=os.path.basename(bench_path),
+                logs=copied_logs,
+            )
+            _write_text_atomic(os.path.join(run_logs_path, logs_page), rendered_logs)
+            row[-1] = "{}/{}".format(timestamp, logs_page)
+            logs_list.append(["logs/{}/{}".format(timestamp, name) for name in copied_logs])
+
+        return logs_list
+
+    def _remove_history_artifacts(self, bench_path, timestamp, summary):
+        shutil.rmtree(os.path.join(bench_path, "logs", timestamp), ignore_errors=True)
+        history_page = os.path.join(bench_path, "{}.html".format(timestamp))
+        if os.path.isfile(history_page):
+            os.remove(history_page)
+
+        bench_root = Path(bench_path).resolve()
+        for group in summary.get("logs", []):
+            paths = [group] if isinstance(group, str) else group
+            for log_path in paths:
+                candidate = Path(log_path)
+                if not candidate.is_absolute():
+                    candidate = bench_root / candidate
+                try:
+                    resolved = candidate.resolve()
+                except OSError:
+                    continue
+                if resolved.is_relative_to(bench_root) and resolved.is_file():
+                    resolved.unlink()
+
+    def _prune_history(self, bench_path, regressions):
+        timestamps = sorted(regressions)
+        for timestamp in timestamps[:-MAX_HISTORY]:
+            self._remove_history_artifacts(bench_path, timestamp, regressions[timestamp])
+            del regressions[timestamp]
+        return sorted(regressions)
 
     def render_regression_page(self):
-        """
-        Render regression result page
-        param : header
-        param : bench_name
-        param : regression_details
-        """
-        # Split multi benchs
-        for (b, t), (_, c) in zip(self.trd.items(), self.cov.items()):
-            bench_path = os.path.join(self.output_path, self.header["project_name"], b)
-            html_file_path = bench_path + '/' + 'index.html'
-            json_file_path = bench_path + '/' + 'regressions.json'
-            logs_path = bench_path + '/logs'
-            regressions = {}
-            regression_summary = {}
-            logs_list = []
-            passed = 0
-            total = 0
+        for bench, source_details in self.trd.items():
+            coverage = self.cov.get(bench, {})
+            cc_info = coverage.get("cc", {})
+            cf_info = coverage.get("cf", {})
+            bench_path = os.path.join(self.output_path, self.proj_name, bench)
+            os.makedirs(bench_path, exist_ok=True)
+            details = [row[:] + [""] for row in source_details]
+            logs_list = self._copy_logs(bench_path, details)
 
-            # Makesure logs dir exist
-            os.makedirs(logs_path, exist_ok=True)
+            test_rows = source_details[1:-1]
+            passed = sum(_safe_int(row[3]) for row in test_rows)
+            skipped = sum(_safe_int(row[4]) for row in test_rows)
+            failed = sum(_safe_int(row[5]) for row in test_rows)
+            total = sum(_safe_int(row[6]) for row in test_rows)
+            regression_summary = {
+                "passed": passed,
+                "skipped": skipped,
+                "failed": failed,
+                "total": total,
+                "passrate": round(passed / total * 100, 2) if total else 0.0,
+                "cov_code": _coverage_metric(coverage, "cc"),
+                "cov_func": _coverage_metric(coverage, "cf"),
+                "logs": logs_list,
+            }
 
-            # Bakeup failed logs
-            for l in t[1:-1]: # skip compile info
-                if l[3] == '':
-                    passed += 0
-                else:
-                    passed += int(l[3])
-                total += int(l[6])
-                logs = l[-2].split('|')
-                if any(item for item in logs if item.strip()): # logs html
-                    rendered_html = self.LOGS_TEMPLATE.render(
-                        project_name=self.header['project_name'],
-                        bench_name=b,
-                        logs=[f"{os.path.basename(os.path.dirname(log))}.log" for log in logs if log],
-                    )
-                    logs_html = '{}_{}'.format(l[1], self.header['time'])
-                    with open(logs_path + '/' + logs_html, 'w', encoding='utf-8') as f:
-                        f.write(rendered_html)
-                    l.append(logs_html)
-                else:
-                    l.append("")
-                for log in logs:
-                    if log:
-                        shutil.copy2(log, f"{logs_path}/{os.path.basename(os.path.dirname(log))}.log")
-                logs = [f"{logs_path}/{os.path.basename(os.path.dirname(log))}.log" for log in logs if log]
-                if logs != None:
-                    logs_list.append(logs)
-            t[0].append("")
-            t[-1].append("")
-            #self.rcfg.log.info(t)
-            regression_summary['logs'] = logs_list
-            regression_summary['passrate'] = round((passed / total) * 100, 2)
-            if c != {}:
-                regression_summary['cov_code'] = c['cc']['Overall']
-                regression_summary['cov_func'] = c['cf']['Overall']
-            else:
-                regression_summary['cov_code'] = 0
-                regression_summary['cov_func'] = 0
-
-            # Record and update regressions info
-            if not os.path.exists(json_file_path):
-                regressions[self.header['time']] = regression_summary
-            else:
-                with open(json_file_path, 'r', encoding='utf-8') as f:
-                    regressions = json.load(f)
-                if self.header['time'] not in regressions.keys():
-                    regressions[self.header['time']] = regression_summary
-
-            # Only remain 30days regression info
-            regression_list = regressions.keys()
-            sorted_list = sorted(regression_list, key=lambda ts: datetime.strptime(ts.split("_")[0], "%Y%m%d"))
-            remain_list = []
-            if len(sorted_list) > 30:
-                remain_list = sorted_list[-30:]
-                removed_list = [ts for ts in regression_list if ts not in remain_list]
-                for removed_key in removed_list:
-                    if removed_key in regressions:
-                        log_files = regressions[removed_key]['logs']
-                        for log_file in log_files:
-                            for log in log_file:
-                                if os.path.exists(log): # files exist
-                                    os.remove(log) # delete files
-                        # Update regressions
-                        del regressions[removed_key]
-            else:
-                remain_list = sorted_list
-
-            # Process regressions summary for chart
+            json_file_path = os.path.join(bench_path, "regressions.json")
+            try:
+                regressions = _load_json(json_file_path, {})
+            except (json.JSONDecodeError, ValueError) as exc:
+                self.rcfg.log.warning("Ignoring invalid regression history %s: %s", json_file_path, exc)
+                regressions = {}
+            regressions[self.header["time"]] = regression_summary
+            remain_list = self._prune_history(bench_path, regressions)
             passrate_list, cov_code_list, cov_func_list = regression_history_series(regressions, remain_list)
+            history = [dict(regressions[timestamp], timestamp=timestamp) for timestamp in reversed(remain_list)]
 
-            # Render
             rendered_html = self.REGRESSION_REPORT_TEMPLATE.render(
                 header=self.header,
-                bench_name=b,
-                regression_details=t,
+                bench_name=bench,
+                regression_details=details,
                 regressions=remain_list,
+                history=history,
+                latest_summary=regression_summary,
                 passrate_list=passrate_list,
                 cov_code_list=cov_code_list,
                 cov_func_list=cov_func_list,
                 project=self.project_info,
-                cc_info=c['cc'] if c != {} else {},
-                cf_info=c['cf'] if c != {} else {},
-                processed_category_stats=self.processed_category_stats)
+                cc_info=cc_info,
+                cf_info=cf_info,
+                processed_category_stats=self.processed_category_stats,
+            )
 
-            # Write html
-            with open(html_file_path, 'w', encoding='utf-8') as f:
-                f.write(rendered_html)
-            # Bakeup html
-            shutil.copy2(html_file_path, bench_path + '/' + '{}.html'.format(self.header["time"]))
-
-            # Update regressions json
-            with open(json_file_path, 'w', encoding='utf-8') as f:
-                json.dump(regressions, f, ensure_ascii=False, indent=4)
+            index_path = os.path.join(bench_path, "index.html")
+            _write_text_atomic(index_path, rendered_html)
+            _write_text_atomic(os.path.join(bench_path, "{}.html".format(self.header["time"])), rendered_html)
+            _write_json_atomic(json_file_path, regressions)

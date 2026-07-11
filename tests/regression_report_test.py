@@ -1,9 +1,17 @@
+import json
 import os
 import tempfile
 import unittest
 from pathlib import Path
+from types import SimpleNamespace
 
-from lib.regression_report import create_template_environment, regression_history_series
+from lib.regression_report import RegressionReport, create_template_environment, regression_history_series
+
+
+class _Log:
+
+    def warning(self, *_args, **_kwargs):
+        pass
 
 
 class RegressionReportTest(unittest.TestCase):
@@ -80,6 +88,77 @@ class RegressionReportTest(unittest.TestCase):
             ([90.0, 95.0], [81.0, 84.0], [72.0, 76.0]),
             regression_history_series(regressions, list(regressions)),
         )
+
+    def test_report_handles_zero_tests_partial_coverage_and_untagged_header(self):
+        with tempfile.TemporaryDirectory() as temporary_dir:
+            report = RegressionReport(SimpleNamespace(log=_Log()), self._report_environment(), temporary_dir)
+            header = {
+                "branch": "main",
+                "commit": "",
+                "project_name": "project",
+                "revision": "abc",
+                "simulator": "VCS",
+                "tag": "",
+                "time": "20260711_120000_000001",
+                "username": "user",
+            }
+            trd = [
+                ("bench", "vcomp", "", "1", "", "", "1", "", ""),
+                ("", "empty_test", "", "", "", "", "0", "", ""),
+            ]
+
+            report.run(header, trd, {"bench": {"cc": {"Overall": "75%"}}}, {})
+
+            bench_path = Path(temporary_dir) / "regression_report" / "project" / "bench"
+            regressions = json.loads((bench_path / "regressions.json").read_text(encoding="utf-8"))
+            summary = regressions[header["time"]]
+            self.assertEqual(0.0, summary["passrate"])
+            self.assertEqual(75.0, summary["cov_code"])
+            self.assertEqual(0.0, summary["cov_func"])
+            self.assertTrue((bench_path / "index.html").is_file())
+
+    def test_report_retention_removes_snapshot_and_timestamp_logs(self):
+        with tempfile.TemporaryDirectory() as temporary_dir:
+            report = RegressionReport(SimpleNamespace(log=_Log()), self._report_environment(), temporary_dir)
+            header = {
+                "branch": "main",
+                "commit": "",
+                "project_name": "project",
+                "revision": "abc",
+                "simulator": "XRUN",
+                "tag": "",
+                "time": "20260711_120000_000001",
+                "username": "user",
+            }
+            trd = [
+                ("bench", "vcomp", "", "1", "", "", "1", "", ""),
+                ("", "test", "0:00:01", "1", "", "", "1", "", ""),
+            ]
+            bench_path = Path(temporary_dir) / "regression_report" / "project" / "bench"
+            bench_path.mkdir(parents=True)
+            regressions = {}
+            for index in range(30):
+                timestamp = "20260101_{:06d}".format(index)
+                regressions[timestamp] = {
+                    "passrate": 100,
+                    "cov_code": 0,
+                    "cov_func": 0,
+                    "logs": [],
+                }
+            oldest = min(regressions)
+            (bench_path / "regressions.json").write_text(json.dumps(regressions), encoding="utf-8")
+            (bench_path / "{}.html".format(oldest)).write_text("old", encoding="utf-8")
+            old_logs = bench_path / "logs" / oldest
+            old_logs.mkdir(parents=True)
+            (old_logs / "old.log").write_text("old", encoding="utf-8")
+
+            report.run(header, trd, {}, {})
+
+            retained = json.loads((bench_path / "regressions.json").read_text(encoding="utf-8"))
+            self.assertEqual(30, len(retained))
+            self.assertNotIn(oldest, retained)
+            self.assertFalse((bench_path / "{}.html".format(oldest)).exists())
+            self.assertFalse(old_logs.exists())
 
 
 if __name__ == "__main__":

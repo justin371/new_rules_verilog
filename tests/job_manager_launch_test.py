@@ -14,11 +14,13 @@ from lib.job_lib import BazelTBJob, BazelTestCfgJob, Job, JobManager, JobStatus,
 
 
 class _Logger:
+
     def __getattr__(self, _):
         return lambda *args, **kwargs: None
 
 
 class _SummaryLogger(_Logger):
+
     def __init__(self):
         self.messages = []
 
@@ -29,6 +31,7 @@ class _SummaryLogger(_Logger):
 
 
 class _FakeTimedJob:
+
     def __init__(self, name, status, seconds=0):
         self.name = name
         self.jobstatus = status
@@ -53,17 +56,20 @@ class _RecordingRunner:
 
 
 class _FailingPreRunJob(Job):
+
     def pre_run(self):
         super().pre_run()
         raise SystemExit("missing simv")
 
 
 class _FailingRunner:
+
     def __init__(self, _job, _manager):
         raise OSError("failed to launch")
 
 
 class _FailingPostRunJob(Job):
+
     def post_run(self):
         raise RuntimeError("failed to collect results")
 
@@ -77,6 +83,7 @@ class _RunningProcess:
 
 
 class JobManagerLaunchTest(unittest.TestCase):
+
     def test_bazel_tb_job_builds_runfiles_without_running_dummy_executable(self):
         log = _Logger()
         rcfg = SimpleNamespace(options=SimpleNamespace(timeout=1, no_compile=False, no_bazel=False), log=log)
@@ -205,9 +212,11 @@ class JobManagerLaunchTest(unittest.TestCase):
         runner._term_deadline = None
         runner._kill_sent = False
 
-        with mock.patch("lib.job_lib.os.getpgid", return_value=456, create=True), mock.patch(
-            "lib.job_lib.os.killpg", create=True
-        ) as killpg, mock.patch("lib.job_lib.signal.SIGKILL", 9, create=True):
+        with mock.patch("lib.job_lib.os.getpgid", return_value=456,
+                        create=True), mock.patch("lib.job_lib.os.killpg",
+                                                 create=True) as killpg, mock.patch("lib.job_lib.signal.SIGKILL",
+                                                                                    9,
+                                                                                    create=True):
             self.assertFalse(runner._check_for_done())
             runner._term_deadline = datetime.datetime.now() - datetime.timedelta(seconds=1)
             self.assertFalse(runner._check_for_done())
@@ -277,6 +286,53 @@ class JobManagerLaunchTest(unittest.TestCase):
         rv_utils.print_summary(rcfg, {"//pkg:sys_tb": vcomp}, manager, trd)
 
         self.assertIn(("", "skipped_test", "", "", "1", "", "1", "", ""), trd)
+
+    def test_category_stats_use_full_target_and_preserve_numeric_test_names(self):
+        matching = _FakeTimedJob("reset_1", JobStatus.PASSED)
+        matching.target = "//block_a/tests:reset_1"
+        other = _FakeTimedJob("reset_1", JobStatus.FAILED)
+        other.target = "//block_b/tests:reset_1"
+        rcfg = SimpleNamespace(
+            all_vcomp={
+                "//block_a:tb": ([SimpleNamespace(jobs=[matching])], [matching]),
+                "//block_b:tb": ([SimpleNamespace(jobs=[other])], [other]),
+            },
+            category_total_cases={"smoke": {
+                "total": 1,
+                "tags": ["smoke"]
+            }},
+            options=SimpleNamespace(no_run=False),
+            tests_to_tags={
+                matching.target: ["smoke"],
+                other.target: ["nightly"],
+            },
+        )
+
+        self.assertEqual({"smoke": {"total": 1, "executed": 1, "passed": 1}}, rv_utils.calc_category_stats(rcfg))
+
+    def test_report_header_tolerates_missing_tags_and_normalizes_git_suffix(self):
+        rcfg = SimpleNamespace(
+            current_time="20260711_120000_000001",
+            options=SimpleNamespace(simulator="VCS"),
+            proj_dir="/tmp/fallback_project",
+        )
+
+        def git_output(_cwd, *args):
+            values = {
+                ("rev-parse", "HEAD"): "deadbeef",
+                ("remote", "get-url", "origin"): "git@github.com:example/digit.git",
+                ("rev-parse", "--abbrev-ref", "HEAD"): "main",
+                ("describe", "--tags", "--exact-match"): "",
+                ("rev-parse", "--short", "HEAD"): "deadbee",
+            }
+            return values.get(args, "")
+
+        with mock.patch("lib.rv_utils._git_output", side_effect=git_output):
+            header = rv_utils.get_report_header(rcfg)
+
+        self.assertEqual("digit", header["project_name"])
+        self.assertEqual("", header["tag"])
+        self.assertEqual("https://github.com/example/digit/commit/deadbeef", header["commit"])
 
 
 if __name__ == "__main__":
