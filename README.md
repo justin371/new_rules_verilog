@@ -100,6 +100,77 @@ to be available on `PATH`.
 VCS RTL unit tests accept `--waves`, `--launch`, `--compile-arg <arg>`, and
 `--run-arg <arg>` after Bazel's `--` separator.
 
+### Regression dashboard
+
+The static HTML dashboard is generated at the end of a `simmer` regression.
+Always quote test globs so the shell does not expand them. Generate a VCS or
+Xcelium report with:
+
+```bash
+simmer -t 'sys_tb:*@1' --simulator VCS \
+  --report --report-dir "$PWD/report-output"
+
+simmer -t 'sys_tb:*@1' --simulator XRUN \
+  --report --report-dir "$PWD/report-output"
+```
+
+Add simulator-specific coverage when coverage results should appear in the
+dashboard:
+
+```bash
+simmer -t 'sys_tb:*@10' --simulator VCS --cm A \
+  --report --report-dir "$PWD/report-output"
+
+simmer -t 'sys_tb:*@10' --simulator XRUN --coverage A \
+  --report --report-dir "$PWD/report-output"
+```
+
+The dashboard entry point and drill-down pages are written under:
+
+```text
+<report-dir>/regression_report/index.html
+<report-dir>/regression_report/<project>/index.html
+<report-dir>/regression_report/<project>/<bench>/index.html
+```
+
+Open a local report on a Red Hat workstation with:
+
+```bash
+xdg-open "$PWD/report-output/regression_report/index.html"
+```
+
+For a remote workstation, serve the static files on its loopback interface:
+
+```bash
+python3.12 -m http.server 8000 \
+  --bind 127.0.0.1 \
+  --directory "$PWD/report-output/regression_report"
+```
+
+Forward that port from the local machine, then open `http://localhost:8000/`:
+
+```bash
+ssh -N -L 8000:127.0.0.1:8000 user@redhat-host
+```
+
+The default report root is `/nfs/regression/webroot`. Override it per command
+with `--report-dir`, or configure a shared report location and its public URL:
+
+```bash
+export SIMMER_REPORT_DIR=/nfs/regression/webroot
+export SIMMER_REPORT_URL=https://regression.example.com/regression_report
+simmer -t 'sys_tb:*' --simulator VCS --report
+```
+
+`SIMMER_REPORT_URL` only changes the report link printed by `simmer`; a web
+server must expose `<SIMMER_REPORT_DIR>/regression_report` at that URL. Run
+`simmer --help` for the complete CLI. From this repository, the same help is
+available without installing a wrapper:
+
+```bash
+bazel run //bin:simmer -- --help
+```
+
 ### Python Dependencies
 rules_verilog is also dependent on several python libraries. These are defined in requirements.txt and may be installed in the package manager of your choice. The recommended flow is to install them via the `pip_parse` rule in your `WORKSPACE` file:
 
