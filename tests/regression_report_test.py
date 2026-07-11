@@ -47,7 +47,7 @@ class RegressionReportTest(unittest.TestCase):
 
         report_html = environment.get_template(
             "regression_report_templates/regression_report_template.html.j2", ).render(
-                bench_name="bench",
+                bench_name="<bench>",
                 cc_info={},
                 cf_info={},
                 header={
@@ -65,10 +65,18 @@ class RegressionReportTest(unittest.TestCase):
                 project={"project": ["bench"]},
                 regression_details=[],
                 regressions=["</script>"],
+                history=[{
+                    "timestamp": "</script>"
+                }],
             )
-        self.assertIn(r"\u003c/script\u003e", report_html)
-        self.assertNotIn("</botton>", report_html)
-        self.assertNotIn("openLocalFolderOrFile", report_html)
+        self.assertIn("&lt;bench&gt;", report_html)
+        self.assertIn("%3C/script%3E.html", report_html)
+        self.assertNotIn("</script>", report_html)
+        self.assertIn("Regression Dashboard", report_html)
+        self.assertIn("Code Coverage", report_html)
+        self.assertIn("heat-good", report_html)
+        self.assertNotIn("_static", report_html)
+        self.assertNotIn("Chart.js", report_html)
 
     def test_history_keeps_code_and_functional_coverage_separate(self):
         regressions = {

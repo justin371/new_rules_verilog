@@ -1,0 +1,447 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{% block title %}Regression Dashboard{% endblock %}</title>
+  <style>
+    :root {
+      color-scheme: light;
+      --ink: #1f252c;
+      --muted: #66717d;
+      --line: #d8dee5;
+      --line-strong: #aeb8c2;
+      --surface: #ffffff;
+      --surface-soft: #f5f7f8;
+      --header: #252b31;
+      --accent: #0b6e69;
+      --accent-hover: #085a56;
+      --good: #d9f0df;
+      --good-ink: #175c2d;
+      --warn: #fff0bd;
+      --warn-ink: #725200;
+      --bad: #f8d8d7;
+      --bad-ink: #852923;
+      --neutral: #e9edf1;
+      --neutral-ink: #4d5965;
+    }
+
+    * {
+      box-sizing: border-box;
+      letter-spacing: 0;
+    }
+
+    html {
+      background: var(--surface-soft);
+      color: var(--ink);
+      font-family: Inter, ui-sans-serif, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      font-size: 16px;
+    }
+
+    body {
+      margin: 0;
+      min-width: 320px;
+    }
+
+    a {
+      color: var(--accent);
+      text-decoration-thickness: 1px;
+      text-underline-offset: 2px;
+    }
+
+    a:hover {
+      color: var(--accent-hover);
+    }
+
+    code {
+      font-family: "SFMono-Regular", Consolas, "Liberation Mono", monospace;
+      font-size: 0.875rem;
+      overflow-wrap: anywhere;
+    }
+
+    .site-header {
+      background: var(--header);
+      border-bottom: 4px solid var(--accent);
+      color: #ffffff;
+    }
+
+    .header-inner {
+      align-items: center;
+      display: flex;
+      gap: 24px;
+      justify-content: space-between;
+      margin: 0 auto;
+      max-width: 1480px;
+      min-height: 64px;
+      padding: 10px 24px;
+    }
+
+    .brand {
+      color: #ffffff;
+      font-size: 1rem;
+      font-weight: 700;
+      text-decoration: none;
+      white-space: nowrap;
+    }
+
+    .breadcrumbs {
+      align-items: center;
+      color: #cbd2d9;
+      display: flex;
+      flex-wrap: wrap;
+      font-size: 0.8125rem;
+      gap: 8px;
+      justify-content: flex-end;
+      min-width: 0;
+    }
+
+    .breadcrumbs a {
+      color: #e5f5f3;
+    }
+
+    .breadcrumbs span {
+      overflow-wrap: anywhere;
+    }
+
+    main {
+      margin: 0 auto;
+      max-width: 1480px;
+      min-height: calc(100vh - 116px);
+      padding: 28px 24px 48px;
+    }
+
+    .page-heading {
+      align-items: flex-end;
+      display: flex;
+      flex-wrap: wrap;
+      gap: 12px 24px;
+      justify-content: space-between;
+      margin-bottom: 22px;
+    }
+
+    h1,
+    h2,
+    h3 {
+      color: var(--ink);
+      line-height: 1.25;
+      margin: 0;
+      overflow-wrap: anywhere;
+    }
+
+    h1 {
+      font-size: 1.75rem;
+    }
+
+    h2 {
+      font-size: 1.125rem;
+    }
+
+    h3 {
+      font-size: 0.9375rem;
+    }
+
+    .subtitle,
+    .section-note {
+      color: var(--muted);
+      font-size: 0.875rem;
+      margin: 5px 0 0;
+    }
+
+    .section {
+      margin-top: 30px;
+    }
+
+    .section-heading {
+      align-items: baseline;
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px 16px;
+      justify-content: space-between;
+      margin-bottom: 10px;
+    }
+
+    .table-wrap {
+      background: var(--surface);
+      border: 1px solid var(--line);
+      border-radius: 6px;
+      overflow-x: auto;
+    }
+
+    table {
+      border-collapse: collapse;
+      min-width: 760px;
+      width: 100%;
+    }
+
+    table.table-compact {
+      min-width: 0;
+    }
+
+    .table-spaced {
+      margin-top: 8px;
+    }
+
+    caption {
+      height: 1px;
+      overflow: hidden;
+      position: absolute;
+      width: 1px;
+      clip: rect(1px, 1px, 1px, 1px);
+    }
+
+    th,
+    td {
+      border-bottom: 1px solid var(--line);
+      font-size: 0.8125rem;
+      padding: 10px 12px;
+      text-align: right;
+      vertical-align: middle;
+      white-space: nowrap;
+    }
+
+    th {
+      background: #edf1f3;
+      color: #3b4650;
+      font-size: 0.75rem;
+      font-weight: 700;
+      position: sticky;
+      text-transform: uppercase;
+      top: 0;
+      z-index: 1;
+    }
+
+    tr:last-child td {
+      border-bottom: 0;
+    }
+
+    tbody tr:hover td:not(.heat-good):not(.heat-warn):not(.heat-bad):not(.heat-neutral) {
+      background: #f7faf9;
+    }
+
+    th:first-child,
+    td:first-child,
+    .align-left {
+      text-align: left;
+    }
+
+    .cell-primary {
+      font-weight: 650;
+      max-width: 320px;
+      white-space: normal;
+    }
+
+    .cell-muted {
+      color: var(--muted);
+    }
+
+    .heat-good {
+      background: var(--good);
+      color: var(--good-ink);
+      font-weight: 700;
+    }
+
+    .heat-warn {
+      background: var(--warn);
+      color: var(--warn-ink);
+      font-weight: 700;
+    }
+
+    .heat-bad {
+      background: var(--bad);
+      color: var(--bad-ink);
+      font-weight: 700;
+    }
+
+    .heat-neutral {
+      background: var(--neutral);
+      color: var(--neutral-ink);
+      font-weight: 650;
+    }
+
+    .metric-strip {
+      background: var(--surface);
+      border: 1px solid var(--line);
+      border-radius: 6px;
+      display: grid;
+      grid-template-columns: repeat(7, minmax(110px, 1fr));
+      overflow: hidden;
+    }
+
+    .metric {
+      border-right: 1px solid var(--line);
+      min-height: 86px;
+      padding: 14px;
+    }
+
+    .metric:last-child {
+      border-right: 0;
+    }
+
+    .metric-label {
+      color: var(--muted);
+      display: block;
+      font-size: 0.6875rem;
+      font-weight: 700;
+      margin-bottom: 7px;
+      text-transform: uppercase;
+    }
+
+    .metric-value {
+      display: block;
+      font-size: 1.375rem;
+      font-weight: 750;
+      line-height: 1.2;
+      overflow-wrap: anywhere;
+    }
+
+    .metadata {
+      border-bottom: 1px solid var(--line);
+      border-top: 1px solid var(--line);
+      display: grid;
+      grid-template-columns: repeat(6, minmax(120px, 1fr));
+      margin-top: 22px;
+    }
+
+    .metadata-item {
+      min-width: 0;
+      padding: 12px 14px;
+    }
+
+    .metadata-label {
+      color: var(--muted);
+      display: block;
+      font-size: 0.6875rem;
+      font-weight: 700;
+      margin-bottom: 4px;
+      text-transform: uppercase;
+    }
+
+    .metadata-value {
+      display: block;
+      font-size: 0.8125rem;
+      overflow-wrap: anywhere;
+    }
+
+    .coverage-grid {
+      display: grid;
+      gap: 24px;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+
+    .coverage-grid > * {
+      min-width: 0;
+    }
+
+    .empty-state {
+      background: var(--surface);
+      border: 1px solid var(--line);
+      border-radius: 6px;
+      color: var(--muted);
+      font-size: 0.875rem;
+      padding: 20px;
+    }
+
+    .status-text {
+      font-size: 0.75rem;
+      font-weight: 700;
+      text-transform: uppercase;
+    }
+
+    .status-passed {
+      color: var(--good-ink);
+    }
+
+    .status-failed {
+      color: var(--bad-ink);
+    }
+
+    .status-skipped {
+      color: var(--warn-ink);
+    }
+
+    footer {
+      border-top: 1px solid var(--line);
+      color: var(--muted);
+      font-size: 0.75rem;
+      margin: 0 auto;
+      max-width: 1480px;
+      padding: 16px 24px 24px;
+    }
+
+    @media (max-width: 980px) {
+      .metric-strip {
+        grid-template-columns: repeat(4, minmax(120px, 1fr));
+      }
+
+      .metric {
+        border-bottom: 1px solid var(--line);
+      }
+
+      .metric:last-child {
+        grid-column: span 2;
+      }
+
+      .metadata {
+        grid-template-columns: repeat(3, minmax(120px, 1fr));
+      }
+
+      .coverage-grid {
+        grid-template-columns: 1fr;
+      }
+    }
+
+    @media (max-width: 640px) {
+      .header-inner {
+        align-items: flex-start;
+        flex-direction: column;
+        gap: 6px;
+        padding: 12px 16px;
+      }
+
+      .breadcrumbs {
+        justify-content: flex-start;
+      }
+
+      main {
+        padding: 22px 14px 36px;
+      }
+
+      h1 {
+        font-size: 1.5rem;
+      }
+
+      .metric-strip {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+      }
+
+      .metric {
+        min-height: 78px;
+      }
+
+      .metadata {
+        grid-template-columns: 1fr 1fr;
+      }
+
+      footer {
+        padding-left: 14px;
+        padding-right: 14px;
+      }
+    }
+  </style>
+  {% block head %}{% endblock %}
+</head>
+<body>
+  <header class="site-header">
+    <div class="header-inner">
+      <a class="brand" href="{{ dashboard_home_href|default('index.html') }}">Regression Dashboard</a>
+      <nav class="breadcrumbs" aria-label="Breadcrumb">
+        {% block breadcrumbs %}<span>Projects</span>{% endblock %}
+      </nav>
+    </div>
+  </header>
+  <main>
+    {% block content %}{% endblock %}
+  </main>
+  <footer>Regression Dashboard</footer>
+</body>
+</html>

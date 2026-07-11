@@ -1,15 +1,35 @@
-<!DOCTYPE html>
-<html>
-  <head>
-    <title>Logs for {{project_name}}/{{bench_name}}</title>
-  </head>
-  <body>
-    <h1>Logs for {{project_name}}/{{bench_name}}</h1>
-    <br>
-    <ul>
+{% extends "regression_report_templates/base_template.html.j2" %}
+{% set dashboard_home_href = "../../../../index.html" %}
+
+{% block title %}Logs | {{ bench_name }}{% endblock %}
+
+{% block breadcrumbs %}
+<a href="../../../../index.html">Projects</a><span>/</span>
+<a href="../../../index.html">{{ project_name }}</a><span>/</span>
+<a href="../../index.html">{{ bench_name }}</a><span>/</span><span>Logs</span>
+{% endblock %}
+
+{% block content %}
+<div class="page-heading">
+  <div>
+    <h1>Logs</h1>
+    <p class="subtitle">{{ project_name }} / {{ bench_name }}</p>
+  </div>
+</div>
+
+{% if logs %}
+<div class="table-wrap">
+  <table class="table-compact">
+    <caption>Regression log files</caption>
+    <thead><tr><th scope="col">File</th></tr></thead>
+    <tbody>
       {% for log in logs %}
-      <li class="toctree-l1"><a class="reference internal" href="{{log|urlencode}}">{{log}}</a></li>
+      <tr><td class="cell-primary"><a href="{{ log|urlencode }}">{{ log }}</a></td></tr>
       {% endfor %}
-    </ul>
-  </body>
-</html>
+    </tbody>
+  </table>
+</div>
+{% else %}
+<div class="empty-state">No log file is available.</div>
+{% endif %}
+{% endblock %}

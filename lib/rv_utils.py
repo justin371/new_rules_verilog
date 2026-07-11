@@ -299,6 +299,9 @@ def get_report_header(rcfg):
     project_name = os.path.basename(urlparse(repo_url).path) if repo_url else ""
     if not project_name:
         project_name = os.path.basename(os.path.abspath(project_dir)) or "rules_verilog"
+    commit_url = ""
+    if repo_url.startswith(("https://", "http://")) and commit_id:
+        commit_url = "{}/commit/{}".format(repo_url, commit_id)
 
     return {
         "username": getpass.getuser(),
@@ -308,7 +311,7 @@ def get_report_header(rcfg):
         "branch": _git_output(project_dir, "rev-parse", "--abbrev-ref", "HEAD") or "unknown",
         "tag": _git_output(project_dir, "describe", "--tags", "--exact-match"),
         "revision": _git_output(project_dir, "rev-parse", "--short", "HEAD") or "unknown",
-        "commit": "{}/commit/{}".format(repo_url, commit_id) if repo_url and commit_id else "",
+        "commit": commit_url,
     }
 
 
