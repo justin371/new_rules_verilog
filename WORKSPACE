@@ -29,3 +29,8 @@ bazel_skylib_workspace()
 
 load("@buildifier_prebuilt//:defs.bzl", "buildifier_prebuilt_register_toolchains")
 buildifier_prebuilt_register_toolchains()
+
+local_repository(
+    name = "filelist_external_fixture",
+    path = "tests/external_fixture",
+)

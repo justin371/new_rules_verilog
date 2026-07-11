@@ -365,7 +365,7 @@ def _is_dpi_shared_lib(path):
 def _verilog_dv_library_impl(ctx):
     if ctx.attr.incdir:
         # Using dirname may result in bazel-out included in path
-        directories = depset([f.short_path[:-len(f.basename) - 1] for f in ctx.files.srcs]).to_list()
+        directories = depset([runfiles_relative_short_path(f)[:-len(f.basename) - 1] for f in ctx.files.srcs]).to_list()
     else:
         directories = []
 
@@ -388,7 +388,7 @@ def _verilog_dv_library_impl(ctx):
             d = "."
         content.append("+incdir+{}".format(d))
     for f in in_flist:
-        content.append(f.short_path)
+        content.append(runfiles_relative_short_path(f))
 
     # if using makelib, terminate here
     if ctx.attr.makelib:
@@ -822,9 +822,9 @@ def _verilog_dv_unit_test_impl(ctx):
         output = ctx.outputs.out,
         substitutions = {
             "{SIMULATOR_COMMAND}": simulator_command,
-            "{DEFAULT_SIM_OPTS}": "{} {}".format(filelist_flag, default_sim_opts.short_path),
+            "{DEFAULT_SIM_OPTS}": "{} {}".format(filelist_flag, runfiles_relative_short_path(default_sim_opts)),
             "{DPI_LIBS}": flists_to_arguments(ctx.attr.deps, VerilogInfo, "transitive_dpi", "-sv_lib", "", dpi_tool),
-            "{FLISTS}": " ".join(["{} {}".format(filelist_flag, f.short_path) for f in flists_list]),
+            "{FLISTS}": " ".join(["{} {}".format(filelist_flag, runfiles_relative_short_path(f)) for f in flists_list]),
             "{SIM_ARGS}": " ".join(ctx.attr.sim_args),
             "{COMPILE_ARGS}": " ".join(compile_args),
             "{RUN_ARGS}": " ".join(run_args),

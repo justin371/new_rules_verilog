@@ -14,7 +14,10 @@ LEGACY_FILELIST_FLAG_RE = re.compile(r"(?m)(^|\s)-f\s+\S+")
 def find_runfile(relative_path):
     test_workspace = os.environ.get("TEST_WORKSPACE", "__main__")
     manifest_file = os.environ.get("RUNFILES_MANIFEST_FILE")
-    manifest_key = "{}/{}".format(test_workspace, relative_path.replace("\\", "/"))
+    normalized_path = relative_path.replace("\\", "/")
+    manifest_key = "{}/{}".format(test_workspace, normalized_path)
+    if normalized_path.startswith("external/"):
+        manifest_key = normalized_path[len("external/"):]
     if manifest_file:
         for line in Path(manifest_file).read_text(encoding="utf-8").splitlines():
             if line.startswith(manifest_key + " "):
@@ -22,6 +25,10 @@ def find_runfile(relative_path):
 
     test_srcdir = os.environ["TEST_SRCDIR"]
     runfiles_root = Path(test_srcdir) / test_workspace
+    if normalized_path.startswith("external/"):
+        external_path = Path(test_srcdir) / normalized_path[len("external/"):]
+        if external_path.exists():
+            return external_path
     path = runfiles_root / relative_path
     if path.exists():
         return path
@@ -103,6 +110,7 @@ class VcsFilelistValidationTest(unittest.TestCase):
                 "-file vendors/synopsys/verilog_rtl_lint_default_opts.f",
             ],
             "tests/vcs_filelist_validation/dv_tb_vcs_compile_args.f": [
+                "-file external/filelist_external_fixture/external_rtl.f",
                 "-file tests/vcs_filelist_validation/unit_test_top.f",
                 "+define+UNIFIED_VCS_COMPILE_ARG",
             ],
@@ -127,6 +135,10 @@ class VcsFilelistValidationTest(unittest.TestCase):
 
         self.assertFalse(runfile_exists("tests/vcs_filelist_validation/dv_tb_vcs_compile_args_pldm_ice.f"))
         self.assertFalse(runfile_exists("tests/vcs_filelist_validation/dv_tb_vcs_compile_args_pldm_sa.f"))
+
+        external_flist = read_runfile("external/filelist_external_fixture/external_rtl.f")
+        self.assertIn("external/filelist_external_fixture/external_ip.sv", external_flist)
+        self.assertNotIn("../", external_flist)
 
     def test_xcelium_tb_coverage_file_is_in_compile_args(self):
         compile_args = read_runfile("tests/vcs_filelist_validation/dv_tb_xrun_ccf_compile_args.f")

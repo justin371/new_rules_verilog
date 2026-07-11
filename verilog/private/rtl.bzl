@@ -1,7 +1,7 @@
 # vim: set ft=bzl :
 """Rules to gather and compile RTL."""
 
-load(":verilog.bzl", "CUSTOM_SHELL", "ShellInfo", "ToolEncapsulationInfo", "VerilogInfo", "gather_shell_defines", "get_transitive_srcs")
+load(":verilog.bzl", "CUSTOM_SHELL", "ShellInfo", "ToolEncapsulationInfo", "VerilogInfo", "gather_shell_defines", "get_transitive_srcs", "runfiles_relative_short_path")
 
 _SHELLS_DOC = """List of verilog_rtl_shell Labels.
 For each Label, a gumi define will be placed on the command line to use this shell instead of the original module.
@@ -60,12 +60,12 @@ def create_flist_content(ctx, gumi_path, allow_library_discovery, makelib = ""):
         flist_content.append(makelib)
 
     # Using dirname may result in bazel-out included in path
-    incdir = depset([f.short_path[:-len(f.basename) - 1] for f in ctx.files.headers]).to_list()
+    incdir = depset([runfiles_relative_short_path(f)[:-len(f.basename) - 1] for f in ctx.files.headers]).to_list()
     for d in incdir:
         flist_content.append("+incdir+{}".format(d))
 
     # Using dirname may result in bazel-out included in path
-    libdir = depset([f.short_path[:-len(f.basename) - 1] for f in ctx.files.modules]).to_list()
+    libdir = depset([runfiles_relative_short_path(f)[:-len(f.basename) - 1] for f in ctx.files.modules]).to_list()
 
     flist_content.append(gumi_path)
 
@@ -75,16 +75,16 @@ def create_flist_content(ctx, gumi_path, allow_library_discovery, makelib = ""):
                 d = "."
             flist_content.append("-y {}".format(d))
     else:
-        flist_content += [f.short_path for f in ctx.files.modules]
+        flist_content += [runfiles_relative_short_path(f) for f in ctx.files.modules]
 
     for f in ctx.files.lib_files:
         if allow_library_discovery:
-            flist_content.append("-v {}".format(f.short_path))
+            flist_content.append("-v {}".format(runfiles_relative_short_path(f)))
         else:
-            flist_content.append(f.short_path)
+            flist_content.append(runfiles_relative_short_path(f))
 
     for f in ctx.files.direct:
-        flist_content.append(f.short_path)
+        flist_content.append(runfiles_relative_short_path(f))
 
     # if using makelib, terminate here
     if len(makelib):
@@ -159,9 +159,9 @@ def _verilog_rtl_library_impl(ctx):
         )
 
         srcs = [gumi] + srcs
-        gumi_path = gumi.short_path
+        gumi_path = runfiles_relative_short_path(gumi)
     elif not (ctx.attr.gumi_file_override == None):
-        gumi_path = ctx.file.gumi_file_override.short_path
+        gumi_path = runfiles_relative_short_path(ctx.file.gumi_file_override)
 
     flist_content = create_flist_content(ctx, gumi_path = gumi_path, allow_library_discovery = False, makelib = ctx.attr.makelib)
 
@@ -369,7 +369,7 @@ def _verilog_rtl_unit_test_impl(ctx):
     top = ""
     for dep in ctx.attr.deps:
         if VerilogInfo in dep and dep[VerilogInfo].last_module:
-            top = dep[VerilogInfo].last_module.short_path
+            top = runfiles_relative_short_path(dep[VerilogInfo].last_module)
             top_base_name = dep[VerilogInfo].last_module.basename.split(".")[0]
 
     if top == "":
@@ -428,11 +428,11 @@ def _verilog_rtl_unit_test_impl(ctx):
         substitutions = {
             "{SIMULATOR_COMMAND}": simulator_command,
             "{WAVE_VIEWER_COMMAND}": wave_viewer_command,
-            "{FLISTS}": " ".join(["{} {}".format(filelist_flag, f.short_path) for f in flists_list]),
+            "{FLISTS}": " ".join(["{} {}".format(filelist_flag, runfiles_relative_short_path(f)) for f in flists_list]),
             "{TOP}": top,
             "{PRE_FLIST_ARGS}": "\n".join(pre_fa),
             "{POST_FLIST_ARGS}": post_fa,
-            "{WAVES_RENDER_CMD_PATH}": waves_cmd.short_path,
+            "{WAVES_RENDER_CMD_PATH}": runfiles_relative_short_path(waves_cmd),
         },
     )
 
@@ -599,7 +599,7 @@ def _verilog_rtl_lint_test_impl(ctx):
     top_path = ""
     for dep in ctx.attr.deps:
         if VerilogInfo in dep and dep[VerilogInfo].last_module:
-            top_path = dep[VerilogInfo].last_module.short_path
+            top_path = runfiles_relative_short_path(dep[VerilogInfo].last_module)
 
     if top_path == "":
         fail("verilog_rtl_lint_test {} could not determine the top module from the target's dependencies".format(ctx.label))
@@ -608,12 +608,12 @@ def _verilog_rtl_lint_test_impl(ctx):
         template = command_template,
         output = ctx.outputs.command_script,
         substitutions = {
-            "{RULEFILE}": rulefile.short_path,
+            "{RULEFILE}": runfiles_relative_short_path(rulefile),
             "{DEFINES}": " ".join(defines),
-            "{FLISTS}": " ".join(["{} {}".format("-file" if simulator == "VCS" else "-f", f.short_path) for f in trans_flists.to_list()]),
+            "{FLISTS}": " ".join(["{} {}".format("-file" if simulator == "VCS" else "-f", runfiles_relative_short_path(f)) for f in trans_flists.to_list()]),
             "{TOP_PATH}": top_path,
             "{INST_TOP}": ctx.attr.top,
-            "{LINT_PARSER}": lint_parser.short_path,
+            "{LINT_PARSER}": runfiles_relative_short_path(lint_parser),
         },
     )
 
@@ -626,15 +626,15 @@ def _verilog_rtl_lint_test_impl(ctx):
         output = ctx.outputs.executable,
         substitutions = {
             "{SIMULATOR_COMMAND}": simulator_command,
-            "{COMMAND_SCRIPT}": ctx.outputs.command_script.short_path,
+            "{COMMAND_SCRIPT}": runfiles_relative_short_path(ctx.outputs.command_script),
             "{DEFINES}": " ".join(defines),
-            "{FLISTS}": " ".join(["{} {}".format("-file" if simulator == "VCS" else "-f", f.short_path) for f in trans_flists.to_list()]),
+            "{FLISTS}": " ".join(["{} {}".format("-file" if simulator == "VCS" else "-f", runfiles_relative_short_path(f)) for f in trans_flists.to_list()]),
             "{TOP_PATH}": top_path,
-            "{DESIGN_INFO}": " ".join(["{}".format(design_info.short_path) for design_info in ctx.files.design_info]),
-            "{RULEFILE}": rulefile.short_path,
+            "{DESIGN_INFO}": " ".join([runfiles_relative_short_path(design_info) for design_info in ctx.files.design_info]),
+            "{RULEFILE}": runfiles_relative_short_path(rulefile),
             "{INST_TOP}": ctx.attr.top,
-            "{LINT_PARSER}": lint_parser.short_path,
-            "{LINT_PARSER_LIB}": ctx.files._lint_parser_lib[0].dirname,
+            "{LINT_PARSER}": runfiles_relative_short_path(lint_parser),
+            "{LINT_PARSER_LIB}": runfiles_relative_short_path(ctx.files._lint_parser_lib[0])[:-len(ctx.files._lint_parser_lib[0].basename) - 1],
             "{WAIVER_DIRECT}": ctx.attr.waiver_direct,
         },
     )
@@ -794,9 +794,9 @@ def _verilog_rtl_cdc_test_impl(ctx):
         output = ctx.outputs.executable,
         substitutions = {
             "{CDC_COMMAND}": ctx.attr._command_override[ToolEncapsulationInfo].command,
-            "{PREAMBLE_CMDS}": ctx.outputs.preamble_cmds.short_path,
-            "{CMD_FILES}": " ".join([cmd_file.short_path for cmd_file in ctx.files.cmd_files]),
-            "{EPILOGUE_CMDS}": ctx.outputs.epilogue_cmds.short_path,
+            "{PREAMBLE_CMDS}": runfiles_relative_short_path(ctx.outputs.preamble_cmds),
+            "{CMD_FILES}": " ".join([runfiles_relative_short_path(cmd_file) for cmd_file in ctx.files.cmd_files]),
+            "{EPILOGUE_CMDS}": runfiles_relative_short_path(ctx.outputs.epilogue_cmds),
         },
     )
 
@@ -809,7 +809,7 @@ def _verilog_rtl_cdc_test_impl(ctx):
     top_path = ""
     for dep in ctx.attr.deps:
         if VerilogInfo in dep and dep[VerilogInfo].last_module:
-            top_path = "  {}".format(dep[VerilogInfo].last_module.short_path)
+            top_path = "  {}".format(runfiles_relative_short_path(dep[VerilogInfo].last_module))
     if top_path == "":
         fail("verilog_rtl_cdc_test {} could not determine the top module from the target's dependencies".format(ctx.label))
 
@@ -828,7 +828,7 @@ def _verilog_rtl_cdc_test_impl(ctx):
         output = ctx.outputs.preamble_cmds,
         substitutions = {
             "{DEFINES}": " ".join(defines),
-            "{FLISTS}": " ".join(["-f {}".format(f.short_path) for f in trans_flists.to_list()]),
+            "{FLISTS}": " ".join(["-f {}".format(runfiles_relative_short_path(f)) for f in trans_flists.to_list()]),
             "{TOP_PATH}": top_path,
             "{INST_TOP}": ctx.attr.top,
             "{BBOX_MODULES_CMD}": bbox_modules_cmd,

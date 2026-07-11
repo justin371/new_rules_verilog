@@ -14,6 +14,7 @@ package(default_visibility = ["//visibility:public"])
 
 verilog_rtl_library(
     name = "unit_test_top",
+    deps = ["@filelist_external_fixture//:external_rtl"],
     modules = ["unit_test_top.sv"],
 )
 
@@ -118,6 +119,7 @@ py_test(
         ":rtl_lint_vcs_cmds.tcl",
         ":rtl_unit_vcs",
         ":rtl_unit_xrun",
+        "@filelist_external_fixture//:external_rtl",
     ],
 )
 
