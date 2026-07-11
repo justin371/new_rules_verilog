@@ -1,5 +1,5 @@
 # vim: set ft=bzl :
-load("@com_github_bazelbuild_buildtools//buildifier:def.bzl", "buildifier")
+load("@buildifier_prebuilt//:rules.bzl", "buildifier")
 load("@rules_python//python:defs.bzl", "py_test")
 
 buildifier(
@@ -37,12 +37,31 @@ py_test(
 )
 
 py_test(
+    name = "docs_test",
+    srcs = ["docs_test.py"],
+    data = [
+        "//:README.md",
+        "//docs:defs.md",
+        "//docs:eda_workflow_review.md",
+        "//docs:simmer_vcs_xcelium.md",
+        "//docs:simulator_migration_checklist.md",
+        "//verilog:defs.bzl",
+    ],
+)
+
+py_test(
     name = "job_manager_launch_test",
     srcs = ["job_manager_launch_test.py"],
     deps = [
         "//lib:job_lib",
         "//lib:rv_utils",
     ],
+)
+
+py_test(
+    name = "normalize_runfiles_flist_test",
+    srcs = ["normalize_runfiles_flist_test.py"],
+    deps = ["//bin:normalize_runfiles_flist_lib"],
 )
 
 py_test(

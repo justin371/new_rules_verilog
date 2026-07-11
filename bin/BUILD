@@ -97,3 +97,8 @@ py_binary(
     name = "normalize_runfiles_flist",
     srcs = ["normalize_runfiles_flist.py"],
 )
+
+py_library(
+    name = "normalize_runfiles_flist_lib",
+    srcs = ["normalize_runfiles_flist.py"],
+)

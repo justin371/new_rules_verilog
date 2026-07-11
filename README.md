@@ -10,19 +10,23 @@ Add the following to your `WORKSPACE` file:
 
 ```skylark
 load("@bazel_tools//tools/build_defs/repo:http.bzl", "http_archive")
-http_archive(                                                                                                                                                                            
+
+RULES_VERILOG_COMMIT = "<40-character commit SHA>"
+
+http_archive(
     name = "rules_verilog",
-    urls = ["https://github.com/Lightelligence/rules_verilog/archive/v0.0.0.tar.gz"],
-    sha256 = "ab64a872410d22accb383c7ffc6d42e90f4de40a7cd92f43f4c26471c4f14908",
-    strip_prefix = "rules_verilog-0.0.0",
+    urls = ["https://github.com/justin371/new_rules_verilog/archive/{}.tar.gz".format(RULES_VERILOG_COMMIT)],
+    sha256 = "<sha256 of the archive>",
+    strip_prefix = "new_rules_verilog-{}".format(RULES_VERILOG_COMMIT),
 )
+
 load("@rules_verilog//:deps.bzl", "verilog_dependencies")
 verilog_dependencies()
 ```
-**Note**: Update commit and sha256 as needed.
+Pin a reviewed commit and its archive SHA rather than tracking `main` directly.
 
 
-Cadence Xcelium needs both HOME and LM_LICENESE_FILE environment variables, add them to your `.bazelrc` file:
+Cadence Xcelium needs both `HOME` and `LM_LICENSE_FILE`; add them to your `.bazelrc` file:
 
 ```
 test --action_env=HOME
@@ -90,6 +94,9 @@ bazel test --config=xrun //path/to:counter_test_xrun
 bazel test --config=vcs //path/to:counter_test_vcs
 ```
 
+`runmod` is a site-provided command from a separate repository and is assumed
+to be available on `PATH`.
+
 VCS RTL unit tests accept `--waves`, `--launch`, `--compile-arg <arg>`, and
 `--run-arg <arg>` after Bazel's `--` separator.
 
@@ -107,6 +114,20 @@ pip_parse(
 load("@pip_deps//:requirements.bzl", "install_deps")
 install_deps()
 ```
+
+### Red Hat validation
+
+The workstation must expose Python 3.12 as `python3.12` and Bazel 7.7.1 as
+`bazel`. Run the no-license portability checks before licensed VCS/Xcelium
+tests:
+
+```bash
+./tests/redhat_smoke.sh
+```
+
+The script prints the failing line and command before it exits. Licensed unit
+tests still need to be run separately with both `--config=xrun` and
+`--config=vcs` on the configured Red Hat EDA host.
 
 ## Rules
 

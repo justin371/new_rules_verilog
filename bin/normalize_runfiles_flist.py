@@ -30,7 +30,6 @@ import argparse
 from pathlib import Path
 import sys
 
-
 PATH_PREFIXES = (
     "+incdir+",
     "-f ",
@@ -44,10 +43,10 @@ def to_posix(path: Path) -> str:
 
 
 def find_runfiles_root(flist_path: Path) -> Path:
-    current = flist_path.resolve()
+    current = flist_path.absolute()
     for parent in [current.parent] + list(current.parents):
         if parent.name == "bazel_runfiles_main":
-            return parent
+            return parent.resolve()
     raise ValueError("Could not find enclosing bazel_runfiles_main for '{}'".format(flist_path))
 
 
@@ -84,7 +83,7 @@ def normalize_line(line: str, flist_dir: Path, runfiles_root: Path) -> str:
             rewritten = rewrite_path_token(token, flist_dir, runfiles_root)
             return "{}{}{}".format(prefix, rewritten, line_ending)
 
-    leading = content[: len(content) - len(content.lstrip(" "))]
+    leading = content[:len(content) - len(content.lstrip(" "))]
     token = content.strip()
     rewritten = rewrite_path_token(token, flist_dir, runfiles_root)
     if rewritten == token:
