@@ -2,10 +2,13 @@
 import os
 import stat
 import glob
+import hashlib
+import json
 import shutil
 import logging
 import shlex
 import subprocess
+import tempfile
 
 import jinja2
 
@@ -14,6 +17,32 @@ from lib.coverage_data import aggregate_coverage_metrics, parse_coverage_summary
 from .base import SimulatorInterface
 
 log = logging.getLogger(__name__)
+
+MSIE_MANIFEST = ".msie_primary_manifest.json"
+
+
+def _sha256_file(path):
+    digest = hashlib.sha256()
+    try:
+        with open(path, "rb") as filep:
+            for chunk in iter(lambda: filep.read(1024 * 1024), b""):
+                digest.update(chunk)
+    except OSError:
+        return None
+    return digest.hexdigest()
+
+
+def _write_json_atomic(path, value):
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    descriptor, temporary_path = tempfile.mkstemp(prefix=".msie-manifest-", dir=os.path.dirname(path), text=True)
+    try:
+        with os.fdopen(descriptor, "w", encoding="utf-8") as filep:
+            json.dump(value, filep, indent=2, sort_keys=True)
+            filep.write("\n")
+        os.replace(temporary_path, path)
+    finally:
+        if os.path.exists(temporary_path):
+            os.remove(temporary_path)
 
 
 class XceliumSimulator(SimulatorInterface):
@@ -55,9 +84,9 @@ class XceliumSimulator(SimulatorInterface):
 
     def get_bazel_compile_args_file(self, bazel_runfiles_main, relpath, bazel_target):
         if self.options.msie_prim:
-            return os.path.join(self.options.proj_dir, relpath, "msie/{}_prim.f".format(bazel_target))
+            return os.path.join(bazel_runfiles_main, relpath, "{}_msie_primary_compile_args.f".format(bazel_target))
         if self.options.msie_incr:
-            return os.path.join(self.options.proj_dir, relpath, "msie/{}_incr.f".format(bazel_target))
+            return os.path.join(bazel_runfiles_main, relpath, "{}_msie_incremental_compile_args.f".format(bazel_target))
         # Handle EMU exception first
         if self.options.emulator == 'pldm_sa':
             return os.path.join(bazel_runfiles_main, relpath, "{}_compile_args".format(bazel_target))
@@ -65,9 +94,165 @@ class XceliumSimulator(SimulatorInterface):
         return os.path.join(bazel_runfiles_main, relpath, "{}_compile_args.f".format(bazel_target))
 
     def get_vcomp_job_dir(self, default_job_dir):
+        if self.options.msie_href:
+            return default_job_dir + "_HREF"
         if self.options.msie_prim:
             return default_job_dir + "_PRIM"
         return default_job_dir
+
+    def _msie_primary_inputs_file(self, vcomp_job):
+        relative_path = vcomp_job.tb_options.get("msie_primary_inputs")
+        return os.path.join(vcomp_job.bazel_runfiles_main, relative_path) if relative_path else ""
+
+    def _msie_input_digest(self, vcomp_job):
+        inputs_path = self._msie_primary_inputs_file(vcomp_job)
+        if not os.path.isfile(inputs_path):
+            raise RuntimeError("MSIE primary input inventory is missing: {}. Configure both msie_primary_deps and "
+                               "msie_incremental_deps on {} and rebuild with Bazel.".format(
+                                   inputs_path, vcomp_job.bazel_vcomp_target))
+
+        digest = hashlib.sha256()
+        count = 0
+        with open(inputs_path, "r", encoding="utf-8") as filep:
+            for line in filep:
+                kind, _, relative_path = line.rstrip("\n").partition("\t")
+                if not relative_path:
+                    continue
+                path = relative_path if os.path.isabs(relative_path) else os.path.join(
+                    vcomp_job.bazel_runfiles_main, relative_path)
+                if not os.path.isfile(path):
+                    raise RuntimeError("MSIE primary input is missing: {}".format(path))
+                digest.update(kind.encode("utf-8"))
+                digest.update(b"\0")
+                digest.update(relative_path.encode("utf-8"))
+                digest.update(b"\0")
+                if kind == "source":
+                    file_stat = os.stat(path)
+                    digest.update(str(file_stat.st_size).encode("ascii"))
+                    digest.update(b"\0")
+                    digest.update(str(file_stat.st_mtime_ns).encode("ascii"))
+                else:
+                    digest.update((_sha256_file(path) or "missing").encode("ascii"))
+                digest.update(b"\0")
+                count += 1
+        return digest.hexdigest(), count
+
+    def _effective_covfile(self, vcomp_job):
+        if not self.options.coverage:
+            return None
+        covfile = self.options.covfile if self.options.covfile_was_explicit else vcomp_job.tb_options.get(
+            "xcelium_covfile")
+        if not covfile and os.path.isfile(self.options.covfile):
+            covfile = self.options.covfile
+        if covfile and not os.path.isabs(covfile):
+            return os.path.join(vcomp_job.bazel_runfiles_main, covfile)
+        return covfile
+
+    def _msie_identity(self, vcomp_job):
+        inputs_sha256, input_count = self._msie_input_digest(vcomp_job)
+        covfile = self._effective_covfile(vcomp_job)
+        return {
+            "schema_version": 1,
+            "bazel_target": vcomp_job.bazel_vcomp_target,
+            "primary_top": vcomp_job.msie_primary_top,
+            "primary_name": vcomp_job.msie_primary_name,
+            "primary_key": self.options.msie_primary_key,
+            "primary_compile_args_sha256": _sha256_file(vcomp_job.msie_primary_compile_args),
+            "primary_inputs_sha256": inputs_sha256,
+            "primary_input_count": input_count,
+            "href_sha256": _sha256_file(vcomp_job.msie_href_file),
+            "externs": {
+                os.path.basename(path): _sha256_file(path)
+                for path in vcomp_job.msie_extern_files
+            },
+            "coverage": self.options.coverage or "",
+            "covfile_sha256": _sha256_file(covfile) if covfile else None,
+            "rtl_defines": sorted(self.options.rtl_defines or []),
+            "debug": self.options.waves is not None,
+            "tool_environment": {
+                key: os.environ.get(key, "")
+                for key in ("XCELIUMHOME", "SIM_PLATFORM", "LOADEDMODULES")
+            },
+        }
+
+    def _validate_msie_manifest(self, vcomp_job):
+        path = os.path.join(vcomp_job.msie_primary_dir, MSIE_MANIFEST)
+        if not os.path.isfile(path):
+            raise RuntimeError(
+                "MSIE primary manifest is missing: {}. Run --msie-href and --msie-prim for this target first.".format(
+                    path))
+        with open(path, "r", encoding="utf-8") as filep:
+            actual = json.load(filep)
+        expected = self._msie_identity(vcomp_job)
+        if actual != expected:
+            changed = sorted(key for key in set(actual) | set(expected) if actual.get(key) != expected.get(key))
+            raise RuntimeError("MSIE primary is incompatible with this incremental build; changed identity fields: {}. "
+                               "Rebuild href and primary with matching options.".format(", ".join(changed)))
+
+    def prepare_compile_job(self, vcomp_job):
+        options = self.options
+        if not any(value is not None
+                   for value in (options.msie, options.msie_href, options.msie_prim, options.msie_incr)):
+            return
+
+        vcomp_job.msie_primary_dir = vcomp_job.base_job_dir + "_PRIM"
+        vcomp_job.msie_artifact_dir = vcomp_job.base_job_dir + "_MSIE"
+        vcomp_job.msie_href_file = os.path.join(vcomp_job.msie_artifact_dir, "href.txt")
+        primary_compile_args = vcomp_job.tb_options.get("msie_primary_compile_args")
+        vcomp_job.msie_primary_compile_args = os.path.join(vcomp_job.bazel_runfiles_main,
+                                                           primary_compile_args) if primary_compile_args else ""
+        selected_compile_args = (
+            vcomp_job.tb_options.get("msie_primary_compile_args") if options.msie_prim is not None else
+            vcomp_job.tb_options.get("msie_incremental_compile_args") if options.msie_incr is not None else None)
+        if selected_compile_args:
+            vcomp_job.bazel_compile_args = os.path.join(vcomp_job.bazel_runfiles_main, selected_compile_args)
+        os.makedirs(vcomp_job.msie_artifact_dir, exist_ok=True)
+
+        if options.msie_href is not None:
+            vcomp_job.msie_primary_top = options.msie_href
+            vcomp_job.msie_primary_name = options.msie_href
+            if options.no_compile:
+                raise RuntimeError("--msie-href cannot be combined with --no-compile")
+            for path in [vcomp_job.msie_href_file] + glob.glob(os.path.join(vcomp_job.msie_artifact_dir,
+                                                                            "*_externs.v")):
+                try:
+                    os.remove(path)
+                except FileNotFoundError:
+                    pass
+        elif options.msie_prim is not None:
+            vcomp_job.msie_primary_top = options.msie_prim
+            vcomp_job.msie_primary_name = options.msie_primary_name or options.msie_prim
+        elif options.msie_incr is not None:
+            vcomp_job.msie_primary_top = options.msie_primary_top or vcomp_job.tb_options["dut_top"]
+            vcomp_job.msie_primary_name = options.msie_incr
+        else:
+            vcomp_job.msie_primary_top = options.msie
+            vcomp_job.msie_primary_name = options.msie
+
+        vcomp_job.msie_extern_files = sorted(glob.glob(os.path.join(vcomp_job.msie_artifact_dir, "*_externs.v")))
+
+        if options.msie_prim is not None or options.msie_incr is not None:
+            if not os.path.isfile(vcomp_job.bazel_compile_args):
+                dependency_attr = "msie_primary_deps" if options.msie_prim is not None else "msie_incremental_deps"
+                raise RuntimeError(
+                    "MSIE compile filelist is missing: {}. Configure {} on {} and rebuild with Bazel.".format(
+                        vcomp_job.bazel_compile_args, dependency_attr, vcomp_job.bazel_vcomp_target))
+            if not os.path.isfile(vcomp_job.msie_href_file):
+                raise RuntimeError("MSIE href is missing: {}. Run --msie-href first.".format(vcomp_job.msie_href_file))
+            vcomp_job.msie_manifest_identity = self._msie_identity(vcomp_job)
+
+        if options.msie_prim is not None and options.no_compile:
+            self._validate_msie_manifest(vcomp_job)
+        if options.msie_incr is not None:
+            self._validate_msie_manifest(vcomp_job)
+
+    def record_compile_artifacts(self, vcomp_job):
+        if self.options.msie_href is not None:
+            if not os.path.isfile(vcomp_job.msie_href_file):
+                raise RuntimeError("XRUN completed without generating {}".format(vcomp_job.msie_href_file))
+        elif self.options.msie_prim is not None:
+            _write_json_atomic(os.path.join(vcomp_job.msie_primary_dir, MSIE_MANIFEST),
+                               vcomp_job.msie_manifest_identity)
 
     def get_bazel_runtime_args_file(self, bazel_runfiles_main, relpath, bazel_target):
         return os.path.join(bazel_runfiles_main, relpath, "{}_runtime_args.f".format(bazel_target))
@@ -117,10 +302,7 @@ class XceliumSimulator(SimulatorInterface):
             dut_top = getattr(vcomp_job, "tb_options", {}).get("dut_top")
             if dut_top:
                 cov_args.extend(["-covdut", dut_top])
-            covfile = self.options.covfile if self.options.covfile_was_explicit else getattr(
-                vcomp_job, "tb_options", {}).get("xcelium_covfile")
-            if not covfile and os.path.isfile(self.options.covfile):
-                covfile = self.options.covfile
+            covfile = self._effective_covfile(vcomp_job)
             if covfile:
                 cov_args.extend(["-covfile", covfile])
             opts['cov_opts'] = shlex.join(cov_args)

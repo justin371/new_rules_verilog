@@ -87,6 +87,18 @@ def _validate_runtime_args(runtime_args, simulator):
                             .format(simulator, arg),
                     )
 
+def _msie_input_inventory(deps, extra_files):
+    entries = []
+    sources = get_transitive_srcs([], deps, VerilogInfo, "transitive_sources", allow_other_outputs = True)
+    flists = get_transitive_srcs([], deps, VerilogInfo, "transitive_flists", allow_other_outputs = False)
+    for source in sources.to_list():
+        entries.append("source\t{}".format(runfiles_relative_short_path(source)))
+    for flist in flists.to_list():
+        entries.append("filelist\t{}".format(runfiles_relative_short_path(flist)))
+    for extra_file in extra_files:
+        entries.append("runfile\t{}".format(runfiles_relative_short_path(extra_file)))
+    return "\n".join(sorted(depset(entries).to_list())) + "\n"
+
 def _verilog_dv_test_cfg_impl(ctx):
     parent_uvm_testnames = [dep[DVTestInfo].uvm_testname for dep in reversed(ctx.attr.inherits) if hasattr(dep[DVTestInfo], "uvm_testname")]
     parent_tbs = [dep[DVTestInfo].tb for dep in reversed(ctx.attr.inherits) if hasattr(dep[DVTestInfo], "tb")]
@@ -501,6 +513,20 @@ def _verilog_dv_tb_impl(ctx):
         fail("verilog_dv_tb {} xcelium_covfile cannot be used with VCS".format(ctx.label))
     if simulator == "XRUN" and ctx.file.vcs_cm_hier:
         fail("verilog_dv_tb {} vcs_cm_hier cannot be used with Xcelium".format(ctx.label))
+    has_msie_primary = len(ctx.attr.msie_primary_deps) > 0
+    has_msie_incremental = len(ctx.attr.msie_incremental_deps) > 0
+    if has_msie_primary != has_msie_incremental:
+        fail("verilog_dv_tb {} must configure both msie_primary_deps and msie_incremental_deps".format(ctx.label))
+    has_msie_extras = (
+        ctx.attr.msie_primary_extra_compile_args or
+        ctx.attr.msie_incremental_extra_compile_args or
+        ctx.attr.msie_primary_extra_runfiles or
+        ctx.attr.msie_incremental_extra_runfiles
+    )
+    if not has_msie_primary and has_msie_extras:
+        fail("verilog_dv_tb {} MSIE extra compile arguments require MSIE dependencies".format(ctx.label))
+    if simulator != "XRUN" and (has_msie_primary or has_msie_extras):
+        fail("verilog_dv_tb {} MSIE attributes are Xcelium-only".format(ctx.label))
 
     xcelium_covfile = ctx.file.xcelium_covfile
     if not xcelium_covfile and ctx.files.ccf:
@@ -554,6 +580,49 @@ def _verilog_dv_tb_impl(ctx):
             "{FLISTS}": compile_flists,
         },
     )
+    msie_outputs = []
+    msie_primary_compile_args = None
+    msie_incremental_compile_args = None
+    msie_primary_inputs = None
+    if has_msie_primary:
+        msie_primary_compile_args = ctx.actions.declare_file(ctx.label.name + "_msie_primary_compile_args.f")
+        msie_incremental_compile_args = ctx.actions.declare_file(ctx.label.name + "_msie_incremental_compile_args.f")
+        msie_primary_inputs = ctx.actions.declare_file(ctx.label.name + "_msie_primary_inputs.txt")
+        common_xrun_args = ctx.expand_location("\n".join(compile_args), targets = ctx.attr.extra_runfiles)
+        primary_xrun_args = ctx.expand_location(
+            "\n".join(ctx.attr.msie_primary_extra_compile_args),
+            targets = ctx.attr.extra_runfiles + ctx.attr.msie_primary_extra_runfiles,
+        )
+        incremental_xrun_args = ctx.expand_location(
+            "\n".join(ctx.attr.msie_incremental_extra_compile_args),
+            targets = ctx.attr.extra_runfiles + ctx.attr.msie_incremental_extra_runfiles,
+        )
+        ctx.actions.expand_template(
+            template = ctx.file._compile_args_template_xrun,
+            output = msie_primary_compile_args,
+            substitutions = {
+                "{COMPILE_ARGS}": "\n".join([arg for arg in [common_xrun_args, primary_xrun_args] if arg]),
+                "{DEFINES}": compile_defines,
+                "{FLISTS}": flists_to_arguments(ctx.attr.msie_primary_deps, VerilogInfo, "transitive_flists", "\n-f"),
+            },
+        )
+        ctx.actions.expand_template(
+            template = ctx.file._compile_args_template_xrun,
+            output = msie_incremental_compile_args,
+            substitutions = {
+                "{COMPILE_ARGS}": "\n".join([arg for arg in [common_xrun_args, incremental_xrun_args] if arg]),
+                "{DEFINES}": compile_defines,
+                "{FLISTS}": flists_to_arguments(ctx.attr.msie_incremental_deps, VerilogInfo, "transitive_flists", "\n-f"),
+            },
+        )
+        ctx.actions.write(
+            output = msie_primary_inputs,
+            content = _msie_input_inventory(
+                ctx.attr.msie_primary_deps,
+                ctx.files.extra_runfiles + ctx.files.msie_primary_extra_runfiles,
+            ),
+        )
+        msie_outputs = [msie_primary_compile_args, msie_incremental_compile_args, msie_primary_inputs]
     ctx.actions.expand_template(
         template = ctx.file._compile_args_template_pldm_ice,
         output = ctx.outputs.compile_args_pldm_ice,
@@ -618,6 +687,9 @@ def _verilog_dv_tb_impl(ctx):
             "dut_top": ctx.attr.dut_top,
             "vcs_cm_hier": runfiles_relative_short_path(ctx.file.vcs_cm_hier) if ctx.file.vcs_cm_hier else "",
             "xcelium_covfile": runfiles_relative_short_path(xcelium_covfile) if xcelium_covfile else "",
+            "msie_primary_compile_args": runfiles_relative_short_path(msie_primary_compile_args) if msie_primary_compile_args else "",
+            "msie_incremental_compile_args": runfiles_relative_short_path(msie_incremental_compile_args) if msie_incremental_compile_args else "",
+            "msie_primary_inputs": runfiles_relative_short_path(msie_primary_inputs) if msie_primary_inputs else "",
         }),
     )
 
@@ -627,8 +699,9 @@ def _verilog_dv_tb_impl(ctx):
         outputs = [ctx.outputs.executable],
     )
 
-    trans_srcs = get_transitive_srcs([], ctx.attr.deps + ctx.attr.shells, VerilogInfo, "transitive_sources", allow_other_outputs = True)
-    trans_flists = get_transitive_srcs([], ctx.attr.deps + ctx.attr.shells, VerilogInfo, "transitive_flists", allow_other_outputs = False)
+    all_deps = ctx.attr.deps + ctx.attr.shells + ctx.attr.msie_primary_deps + ctx.attr.msie_incremental_deps
+    trans_srcs = get_transitive_srcs([], all_deps, VerilogInfo, "transitive_sources", allow_other_outputs = True)
+    trans_flists = get_transitive_srcs([], all_deps, VerilogInfo, "transitive_flists", allow_other_outputs = False)
     generated_outputs = [
         ctx.outputs.compile_args,
         ctx.outputs.runtime_args,
@@ -640,7 +713,7 @@ def _verilog_dv_tb_impl(ctx):
         generated_outputs.extend([
             ctx.outputs.compile_args_pldm_ice,
             ctx.outputs.compile_args_pldm_sa,
-        ])
+        ] + msie_outputs)
     out_deps = depset(generated_outputs)
     all_files = depset([], transitive = [trans_srcs, trans_flists, out_deps])
 
@@ -648,7 +721,7 @@ def _verilog_dv_tb_impl(ctx):
         DefaultInfo(
             files = all_files,
             runfiles = ctx.runfiles(
-                files = ctx.files.ccf + ctx.files.extra_runfiles + ([ctx.file.xcelium_covfile] if ctx.file.xcelium_covfile else []) + ([ctx.file.vcs_cm_hier] if ctx.file.vcs_cm_hier else []) + [runtime_template],
+                files = ctx.files.ccf + ctx.files.extra_runfiles + ctx.files.msie_primary_extra_runfiles + ctx.files.msie_incremental_extra_runfiles + ([ctx.file.xcelium_covfile] if ctx.file.xcelium_covfile else []) + ([ctx.file.vcs_cm_hier] if ctx.file.vcs_cm_hier else []) + [runtime_template],
                 transitive_files = all_files,
             ),
         ),
@@ -685,6 +758,26 @@ verilog_dv_tb = rule(
             mandatory = True,
             doc = "A list of verilog_dv_library or verilog_rtl_library labels that the testbench is dependent on.\n" +
                   "Dependency ordering within this label list is not necessary if dependencies are consistently declared in all other rules.",
+        ),
+        "msie_primary_deps": attr.label_list(
+            doc = "Xcelium MSIE dependencies for the stable primary DUT/netlist partition. Configure together with msie_incremental_deps.",
+        ),
+        "msie_incremental_deps": attr.label_list(
+            doc = "Xcelium MSIE dependencies for the changing testbench/test partition. Configure together with msie_primary_deps.",
+        ),
+        "msie_primary_extra_compile_args": attr.string_list(
+            doc = "Xcelium compile/elaboration flags used only while building the MSIE primary snapshot.",
+        ),
+        "msie_incremental_extra_compile_args": attr.string_list(
+            doc = "Xcelium compile/elaboration flags used only while building the MSIE incremental snapshot.",
+        ),
+        "msie_primary_extra_runfiles": attr.label_list(
+            allow_files = True,
+            doc = "Files referenced only by msie_primary_extra_compile_args, such as primary SDF command files.",
+        ),
+        "msie_incremental_extra_runfiles": attr.label_list(
+            allow_files = True,
+            doc = "Files referenced only by msie_incremental_extra_compile_args.",
         ),
         "defines": attr.string_dict(
             doc = "Additional preprocessor defines to throw for this testbench compile.\n" +

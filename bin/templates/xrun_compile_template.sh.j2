@@ -27,20 +27,22 @@ runmod -t xrun -- \
   {% endif -%}
 
   {% if options.msie_href -%}
-    -primtop {{ options.msie_href }} -genhref {{ options.proj_dir }}/{{ relpath }}/msie/{{ tb_name }}_href.txt \
+    -primtop {{ msie_primary_top }} -genhref {{ msie_href_file }} \
   {% endif -%}
   {% if options.msie_prim -%}
-    -mkprimsnap -top {{ options.msie_prim }} -name {{ options.msie_prim }} -snapshot {{ options.msie_prim }} \
-    -href {{ options.proj_dir }}/{{ relpath }}/msie/{{ tb_name }}_href.txt \
+    -mkprimsnap -top {{ msie_primary_top }} -snapshot {{ msie_primary_name }} \
+    -href {{ msie_href_file }} \
     -xmlibdirname {{ VCOMP_DIR }} \
+    {% for extern_file in msie_extern_files -%}
+    {{ extern_file }} \
+    {% endfor -%}
   {% endif -%}
   {% if options.msie_incr -%}
-    -primname {{ options.msie_incr }} \
-      -primlibdir {{ VCOMP_DIR }}_PRIM \
+    -primname {{ msie_primary_name }} \
+    -primlibdir {{ msie_primary_dir }} \
   {% endif -%}    
   {% if options.msie -%}
-    -primtop {{ options.msie }} \
-    -top incr_pkg \
+    -primtop {{ msie_primary_top }} \
   {% endif -%}
 
   {% if options.compile_args_file -%}

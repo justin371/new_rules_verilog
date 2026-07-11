@@ -51,6 +51,14 @@ verilog_dv_tb(
 verilog_dv_tb(
     name = "dv_tb_xrun_ccf",
     ccf = ["coverage.ccf"],
+    msie_incremental_deps = ["@filelist_external_fixture//:external_rtl"],
+    msie_incremental_extra_compile_args = ["-define MSIE_INCREMENTAL"],
+    msie_primary_deps = [":unit_test_top"],
+    msie_primary_extra_compile_args = [
+        "-define MSIE_PRIMARY",
+        "-covfile $(location :coverage.ccf)",
+    ],
+    msie_primary_extra_runfiles = [":coverage.ccf"],
     simulator = "XRUN",
     deps = [":unit_test_top"],
 )
@@ -117,6 +125,7 @@ py_test(
         ":dv_tb_vcs_compile_args.f",
         ":dv_tb_vcs_runtime_args.f",
         ":dv_tb_vcs_tb_options.py",
+        ":dv_tb_xrun_ccf",
         ":dv_tb_xrun_ccf_compile_args.f",
         ":dv_tb_xrun_ccf_tb_options.py",
         ":dv_unit_vcs",
@@ -141,6 +150,7 @@ py_test(
         "//bin:templates/sim_template.sh.j2",
         "//bin:templates/vcs_compile_template.sh.j2",
         "//bin:templates/vcs_cov_merge_template.sh.j2",
+        "//bin:templates/xrun_compile_template.sh.j2",
         "//bin:templates/xrun_wave_cmd_template.tcl.j2",
         "//vendors/cadence:verilog_rtl_cdc_test.sh.template",
         "//vendors/cadence:verilog_rtl_lint_test.sh.template",

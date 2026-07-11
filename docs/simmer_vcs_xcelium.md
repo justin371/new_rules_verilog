@@ -268,6 +268,79 @@ Xcelium batch defaults are:
 - xprop is opt-in; `--xprop F` uses a bench `fox_xprop.txt` when present and
   otherwise uses Xcelium's direct FOX mode
 
+### Xcelium MSIE gatesim
+
+Use multi-step MSIE when a stable gate netlist dominates elaboration time and
+the testbench/tests change frequently. The complete model remains in `deps` for
+the href stage; the two partitions are declared independently:
+
+```python
+verilog_dv_tb(
+    name = "gate_tb_sdf_wc",
+    simulator = "XRUN",
+    deps = gate_netlist_deps + testbench_deps,
+    dut_top = "dut",
+    msie_primary_deps = gate_netlist_deps,
+    msie_incremental_deps = testbench_deps,
+    msie_primary_extra_compile_args = [
+        "-sdf_cmd_file $(location :sdf_wc_cmd)",
+    ],
+    msie_primary_extra_runfiles = [":sdf_wc_cmd"],
+)
+```
+
+Keep SDF/corner arguments in the partition where annotation occurs. Put only
+truly common Xcelium compile arguments in `extra_compile_args`; use
+`msie_primary_extra_compile_args` and `msie_incremental_extra_compile_args` for
+partition-specific flags. The matching `*_extra_runfiles` attributes make
+`$(location ...)` inputs available without coupling the two partitions.
+
+Use one immutable key per Xcelium release, netlist release and gatesim corner.
+All three commands must select the same Bazel target, `SIMRESULTS` root and
+`--dir-suffix`:
+
+```bash
+export SIMRESULTS=/nfs/regression
+MSIE_KEY='XCELIUM-25.03:netlist-r42:sdf_wc'
+COMMON="-t gate_tb_sdf_wc:smoke_test@1 --simulator XRUN --dir-suffix _sdf_wc"
+
+simmer $COMMON --msie-href dut
+simmer $COMMON --msie-prim dut \
+  --msie-primary-name dut_sdf_wc --msie-primary-key "$MSIE_KEY"
+simmer $COMMON --msie-incr dut_sdf_wc --msie-primary-key "$MSIE_KEY"
+```
+
+`--msie-href` uses the complete Bazel filelist and writes generated artifacts
+outside the source tree. `--msie-prim` uses only `msie_primary_deps` and stops
+after creating the primary snapshot. `--msie-incr` uses only
+`msie_incremental_deps`, validates the primary manifest, elaborates the final
+snapshot and runs the selected tests.
+
+The directories are intentionally isolated:
+
+```text
+<tb>__XRUN_VCOMP_HREF/       href analysis library
+<tb>__XRUN_VCOMP_MSIE/       href.txt and generated *_externs.v
+<tb>__XRUN_VCOMP_PRIM/       primary snapshot and compatibility manifest
+<tb>__XRUN_VCOMP/            incremental/final snapshot
+```
+
+The manifest covers the Bazel target, primary top/name, explicit key, generated
+primary filelist, primary source inventory, href/externs, coverage/covfile,
+CLI defines, debug mode and Xcelium environment. A mismatch stops before XRUN
+and names the changed fields. For netlists outside the checkout, encode their
+immutable release in `--msie-primary-key`.
+
+Coverage and compile-time debug settings must match on the primary and
+incremental commands. In particular, functional coverage cannot be added only
+at the incremental stage. If the netlist, SDF, href permissions, coverage or
+tool release changes, rerun href and rebuild the primary; add `--recompile` to
+the primary command when a clean library is required.
+
+For single-step automatic partitioning, configure the complete model in `deps`
+and run `simmer ... --simulator XRUN --msie dut`. Single-step mode does not use
+the multi-step deps or a hardcoded `incr_pkg` top.
+
 ## Performance profiling
 
 Use `--simmer-profile` to print phase and job timings after the summary:

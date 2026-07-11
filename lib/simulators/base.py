@@ -123,6 +123,14 @@ class SimulatorInterface(abc.ABC):
         """
         return
 
+    def prepare_compile_job(self, vcomp_job):
+        """Resolve and validate simulator-specific compile inputs."""
+        return
+
+    def record_compile_artifacts(self, vcomp_job):
+        """Record simulator-specific outputs after a successful compile."""
+        return
+
     def cleanup_shared_runtime_artifacts(self, vcomp_jobs):
         """Clean simulator scratch files created under shared runfiles dirs.
 

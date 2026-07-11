@@ -116,6 +116,34 @@ Use `--vcs-partcomp-mode disabled` to compare against regular incremental
 compilation. Shared partition databases and the full compatibility guidance are
 documented in [VCS and Xcelium workflow](docs/simmer_vcs_xcelium.md#vcs-partition-compile).
 
+### Xcelium MSIE gatesim
+
+For heavy gate-level simulation, keep the stable gate netlist in
+`msie_primary_deps` and the changing testbench/tests in
+`msie_incremental_deps`. Simmer generates both Xcelium filelists through Bazel;
+do not maintain source-tree `msie/*_prim.f` or `*_incr.f` files.
+
+Run the same test target with the same `SIMRESULTS` and `--dir-suffix` through
+the three multi-step stages:
+
+```bash
+MSIE_KEY='XCELIUM-25.03:netlist-r42:sdf_wc'
+simmer -t 'gate_tb:smoke_test@1' --simulator XRUN \
+  --msie-href dut --dir-suffix _sdf_wc
+simmer -t 'gate_tb:smoke_test@1' --simulator XRUN \
+  --msie-prim dut --msie-primary-name dut_sdf_wc \
+  --msie-primary-key "$MSIE_KEY" --dir-suffix _sdf_wc
+simmer -t 'gate_tb:smoke_test@1' --simulator XRUN \
+  --msie-incr dut_sdf_wc --msie-primary-key "$MSIE_KEY" \
+  --dir-suffix _sdf_wc
+```
+
+The incremental stage validates the primary top/name, corner key, generated
+filelist, primary inputs, href/externs, coverage/debug configuration and
+Xcelium environment before XRUN starts. Full BUILD configuration, coverage
+rules and rebuild instructions are in the
+[Xcelium MSIE gatesim workflow](docs/simmer_vcs_xcelium.md#xcelium-msie-gatesim).
+
 ### Regression dashboard
 
 The static HTML dashboard is generated at the end of a `simmer` regression.

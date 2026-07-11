@@ -71,37 +71,50 @@ def add_xcelium_arguments(parser):
         default=COVFILE,
         help=('Pass an existing Xcelium coverage configuration file. An explicitly supplied path requires '
               '--coverage and is validated before Bazel starts; otherwise the testbench xcelium_covfile is preferred.'))
-    gxrun.add_argument('--msie',
-                       type=str,
-                       default=None,
-                       nargs='?',
-                       const='tb_top',
-                       help=('Enable XRUN MSIE single-step automatic mode; optional value is the primary top '
-                             '(default: tb_top). Preparation: provide the generated MSIE filelists and an incr_pkg.sv '
-                             'that packages changing tests. Cannot be combined with --xprop, --mce, or --emulator.'))
-    gxrun.add_argument('--msie-href',
-                       type=str,
-                       nargs='?',
-                       const='tb_top',
-                       default=None,
-                       help=('Generate the XRUN MSIE hierarchy-reference file for the optional primary top '
-                             '(default: tb_top), then stop before simulation. Run this before --msie-prim; '
-                             'cannot be combined with other MSIE modes, --xprop, --mce, or --emulator.'))
-    gxrun.add_argument('--msie-prim',
-                       type=str,
-                       nargs='?',
-                       const='tb_top',
-                       default=None,
-                       help=('Build the XRUN MSIE primary snapshot for the optional primary top (default: tb_top), '
-                             'then stop before simulation. Requires the href/filelist generated for this bench; '
-                             'cannot be combined with other MSIE modes, --xprop, --mce, or --emulator.'))
+    gxrun.add_argument(
+        '--msie',
+        metavar='PRIMARY_TOP',
+        help=('Enable XRUN single-step MSIE for the named stable primary top. Preparation: configure the complete '
+              'testbench in verilog_dv_tb.deps; XRUN partitions that command automatically. This mode does not use '
+              'the multi-step primary/incremental deps and cannot be combined with --xprop, --mce, or --emulator.'))
+    gxrun.add_argument(
+        '--msie-href',
+        metavar='PRIMARY_TOP',
+        help=('Run the first multi-step MSIE stage for the named stable DUT/netlist top, generate href and externs '
+              'under <tb>__XRUN_VCOMP_MSIE, then stop. Preparation: configure the complete model in '
+              'verilog_dv_tb.deps. Run this before --msie-prim; other MSIE modes, --xprop, --mce, and --emulator '
+              'are incompatible.'))
+    gxrun.add_argument(
+        '--msie-prim',
+        metavar='PRIMARY_TOP',
+        help=('Run the second multi-step MSIE stage for the named stable DUT/netlist top, then stop. Preparation: '
+              'configure verilog_dv_tb.msie_primary_deps and complete --msie-href for the same target first. The '
+              'snapshot name defaults to PRIMARY_TOP and can be changed with --msie-primary-name.'))
     gxrun.add_argument(
         '--msie-incr',
         type=str,
+        metavar='PRIMARY_SNAPSHOT',
         default=None,
-        help=('Build the XRUN MSIE incremental partition against the named primary snapshot. '
-              'Preparation: complete --msie-href and --msie-prim for the same source/configuration first. '
-              'Cannot be combined with other MSIE modes, --xprop, --mce, or --emulator.'))
+        help=('Run the final multi-step MSIE stage and simulations against PRIMARY_SNAPSHOT. Preparation: configure '
+              'verilog_dv_tb.msie_incremental_deps and complete matching href/primary stages in the same regression '
+              'directory. Simmer validates the primary manifest before XRUN starts.'))
+    gxrun.add_argument(
+        '--msie-primary-name',
+        metavar='SNAPSHOT',
+        help=('Name the snapshot created by --msie-prim independently from its HDL top. Use the same value as the '
+              'later --msie-incr argument; for example, top dut with snapshot dut_sdf_wc.'))
+    gxrun.add_argument(
+        '--msie-primary-top',
+        metavar='PRIMARY_TOP',
+        help=('Override the primary HDL top expected by --msie-incr. The default is the selected verilog_dv_tb '
+              'dut_top value; set this only when the primary build used a different top.'))
+    gxrun.add_argument(
+        '--msie-primary-key',
+        metavar='KEY',
+        default='',
+        help=('Add an immutable site key to the primary compatibility manifest for --msie-prim/--msie-incr. Include '
+              'the Xcelium release, netlist release and gatesim corner when those identities are not encoded by the '
+              'Bazel target, for example XCELIUM-25.03:netlist-r42:sdf_wc.'))
     gxrun.add_argument(
         '--emulator',
         type=str,
@@ -151,6 +164,12 @@ def validate_xcelium_runtime_options(options, parser):
                      "Stopping before Bazel starts.")
     if options.emulator and (options.mce or any(mode is not None for mode in msie_modes)):
         parser.error("--emulator cannot be combined with MCE or MSIE modes. Stopping before Bazel starts.")
+    if options.msie_primary_name and options.msie_prim is None:
+        parser.error("--msie-primary-name requires --msie-prim. Stopping before Bazel starts.")
+    if options.msie_primary_top and options.msie_incr is None:
+        parser.error("--msie-primary-top is used only with --msie-incr. Stopping before Bazel starts.")
+    if options.msie_primary_key and options.msie_prim is None and options.msie_incr is None:
+        parser.error("--msie-primary-key requires --msie-prim or --msie-incr. Stopping before Bazel starts.")
 
 
 def apply_xcelium_postprocess(options):

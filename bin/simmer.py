@@ -249,7 +249,8 @@ class VCompJob(Job):
         #job_dir = "{}__VCOMP{}".format(self.name, self.rcfg.options.dir_suffix)
         job_dir = "{}__{}_VCOMP{}".format(self.name, self.simulator.get_name().upper(), self.rcfg.options.dir_suffix)
 
-        self.job_dir = self.simulator.get_vcomp_job_dir(os.path.join(self.rcfg.regression_dir, job_dir))
+        self.base_job_dir = os.path.join(self.rcfg.regression_dir, job_dir)
+        self.job_dir = self.simulator.get_vcomp_job_dir(self.base_job_dir)
         self.log_path = os.path.join(self.job_dir, "cmp.log")
 
         self.main_cmdline = None
@@ -275,10 +276,14 @@ class VCompJob(Job):
             "dut_top": "dut",
             "vcs_cm_hier": "",
             "xcelium_covfile": "",
+            "msie_primary_compile_args": "",
+            "msie_incremental_compile_args": "",
+            "msie_primary_inputs": "",
         }
         if os.path.isfile(tb_options_path):
             with open(tb_options_path, "r", encoding="utf-8") as filep:
                 self.tb_options.update(ast.literal_eval(filep.read()))
+        self.simulator.prepare_compile_job(self)
         debug_mode = "default"
         if options.waves is not None:
             debug_mode = "waves"
@@ -338,6 +343,11 @@ class VCompJob(Job):
             'vcs_runner': self.simulator.get_tool_runner() if hasattr(self.simulator, "get_tool_runner") else None,
             # Add simulator name if needed in template
             'simulator_name': self.simulator.get_name(),
+            'msie_href_file': getattr(self, 'msie_href_file', None),
+            'msie_primary_dir': getattr(self, 'msie_primary_dir', None),
+            'msie_primary_name': getattr(self, 'msie_primary_name', None),
+            'msie_primary_top': getattr(self, 'msie_primary_top', None),
+            'msie_extern_files': getattr(self, 'msie_extern_files', []),
         }
         if options.emulator:
             template_context['bazel_compile_args_rtl'] = self.simulator.get_bazel_emu_compile_args_file(
@@ -470,9 +480,16 @@ class VCompJob(Job):
         # --- Final Logging ---
         if self.jobstatus == JobStatus.PASSED and not self.rcfg.options.no_compile:
             try:
-                compile_cache.write_compile_fingerprint(self.job_dir, self.compile_fingerprint)
-            except OSError as exc:
-                log.warning("Could not write compile fingerprint for %s: %s", self, exc)
+                self.simulator.record_compile_artifacts(self)
+            except (OSError, RuntimeError) as exc:
+                self.jobstatus = JobStatus.FAILED
+                log_level = log.error
+                log.error("%s produced incomplete compile artifacts: %s", self, exc)
+            if self.jobstatus == JobStatus.PASSED:
+                try:
+                    compile_cache.write_compile_fingerprint(self.job_dir, self.compile_fingerprint)
+                except OSError as exc:
+                    log.warning("Could not write compile fingerprint for %s: %s", self, exc)
 
         # log_level is determined by initial return code and potential warning failures
         log_level("%s vcomp %s in %s", self.name, self.jobstatus, self.job_dir)

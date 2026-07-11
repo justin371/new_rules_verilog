@@ -66,9 +66,13 @@ def create_parser():
             "Discover, compile, run, retain, and report Verilog/SystemVerilog regressions with VCS or XRUN.\n"
             "Preparation: run from a configured project checkout with Bazel 7.7.1, Python 3.12, and the selected "
             "EDA environment sourced. Quote all test globs."),
-        epilog=(
-            "Start safely with: simmer -t 'bench:test@1' --simulator VCS --discovery-only\n"
-            "Then run without --discovery-only. Use --simmer-profile and the per-job logs to diagnose performance."),
+        epilog=
+        ("Start safely with: simmer -t 'bench:test@1' --simulator VCS --discovery-only\n"
+         "Then run without --discovery-only. Use --simmer-profile and the per-job logs to diagnose performance.\n"
+         "XRUN gatesim MSIE, after configuring verilog_dv_tb MSIE deps, uses the same target/SIMRESULTS/suffix:\n"
+         "  simmer -t 'gate_tb:test@1' --simulator XRUN --msie-href dut\n"
+         "  simmer -t 'gate_tb:test@1' --simulator XRUN --msie-prim dut --msie-primary-name dut_wc --msie-primary-key KEY\n"
+         "  simmer -t 'gate_tb:test@1' --simulator XRUN --msie-incr dut_wc --msie-primary-key KEY"),
         formatter_class=argparse.RawTextHelpFormatter,
     )
 
@@ -121,6 +125,9 @@ def parse_args(argv):
             '--msie-href',
             '--msie-prim',
             '--msie-incr',
+            '--msie-primary-name',
+            '--msie-primary-top',
+            '--msie-primary-key',
             '--emulator',
         ] if argument_explicitly_requested(argv, argument)
     ]

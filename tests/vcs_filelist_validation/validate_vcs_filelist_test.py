@@ -151,6 +151,28 @@ class VcsFilelistValidationTest(unittest.TestCase):
         vcs_options = ast.literal_eval(read_runfile("tests/vcs_filelist_validation/dv_tb_vcs_tb_options.py"))
         self.assertEqual("tests/vcs_filelist_validation/coverage_hier.cfg", vcs_options["vcs_cm_hier"])
 
+    def test_xcelium_msie_filelists_are_bazel_generated_and_partitioned(self):
+        primary_path = "tests/vcs_filelist_validation/dv_tb_xrun_ccf_msie_primary_compile_args.f"
+        incremental_path = "tests/vcs_filelist_validation/dv_tb_xrun_ccf_msie_incremental_compile_args.f"
+        inputs_path = "tests/vcs_filelist_validation/dv_tb_xrun_ccf_msie_primary_inputs.txt"
+        primary = read_runfile(primary_path)
+        incremental = read_runfile(incremental_path)
+        inputs = read_runfile(inputs_path)
+        tb_options = ast.literal_eval(read_runfile("tests/vcs_filelist_validation/dv_tb_xrun_ccf_tb_options.py"))
+
+        self.assertIn("-define MSIE_PRIMARY", primary)
+        self.assertIn("-covfile tests/vcs_filelist_validation/coverage.ccf", primary)
+        self.assertIn("-f tests/vcs_filelist_validation/unit_test_top.f", primary)
+        self.assertNotIn("MSIE_INCREMENTAL", primary)
+        self.assertIn("-define MSIE_INCREMENTAL", incremental)
+        self.assertIn("-f external/filelist_external_fixture/external_rtl.f", incremental)
+        self.assertIn("source\ttests/vcs_filelist_validation/unit_test_top.sv", inputs)
+        self.assertIn("filelist\ttests/vcs_filelist_validation/unit_test_top.f", inputs)
+        self.assertIn("runfile\ttests/vcs_filelist_validation/coverage.ccf", inputs)
+        self.assertEqual(primary_path, tb_options["msie_primary_compile_args"])
+        self.assertEqual(incremental_path, tb_options["msie_incremental_compile_args"])
+        self.assertEqual(inputs_path, tb_options["msie_primary_inputs"])
+
     def test_unit_test_scripts_select_the_requested_simulator(self):
         scripts = {
             "tests/vcs_filelist_validation/dv_unit_vcs_run.sh": ["vcs", "-file", "./simv"],

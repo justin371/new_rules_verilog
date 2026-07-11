@@ -309,6 +309,111 @@ class VcsRuntimeContractTest(unittest.TestCase):
             parse_args(["--simulator", "XRUN", "--msie-incr"])
         self.assertEqual("pcie_primary", parse_args(["--simulator", "XRUN", "--msie-incr", "pcie_primary"]).msie_incr)
 
+        with self.assertRaises(SystemExit):
+            parse_args(["--simulator", "XRUN", "--msie-prim"])
+        with self.assertRaises(SystemExit):
+            parse_args(["--simulator", "XRUN", "--msie-primary-name", "snapshot"])
+
+    def test_xcelium_msie_template_separates_primary_top_and_snapshot(self):
+        template = jinja2.Template(
+            self._read_repo_file("bin/templates/xrun_compile_template.sh.j2"),
+            undefined=jinja2.StrictUndefined,
+        )
+        rendered = template.render(
+            VCOMP_DIR="/results/sys__XRUN_VCOMP_PRIM",
+            additional_defines=[],
+            bazel_compile_args="/runfiles/sys_msie_primary_compile_args.f",
+            bazel_runfiles_main="/runfiles",
+            cov_opts="",
+            debug_mode="default",
+            msie_extern_files=["/results/sys__XRUN_VCOMP_MSIE/dut_externs.v"],
+            msie_href_file="/results/sys__XRUN_VCOMP_MSIE/href.txt",
+            msie_primary_dir="/results/sys__XRUN_VCOMP_PRIM",
+            msie_primary_name="dut_sdf_wc",
+            msie_primary_top="dut",
+            options=SimpleNamespace(
+                compile_args_file=None,
+                mce=False,
+                msie=None,
+                msie_href=None,
+                msie_incr=None,
+                msie_prim="dut",
+            ),
+            xprop_cmd=None,
+        )
+
+        self.assertIn("-top dut -snapshot dut_sdf_wc", rendered)
+        self.assertNotIn("-name dut", rendered)
+        self.assertIn("dut_externs.v", rendered)
+        self.assertNotIn("incr_pkg", rendered)
+
+    def test_xcelium_msie_manifest_rejects_wrong_primary_key(self):
+        root = Path(tempfile.mkdtemp(prefix="xrun_msie_"))
+        runfiles = root / "runfiles"
+        (runfiles / "tb").mkdir(parents=True)
+        (runfiles / "tb/dut.sv").write_text("module dut; endmodule\n", encoding="utf-8")
+        (runfiles / "tb/sys_msie_primary_compile_args.f").write_text("tb/dut.sv\n", encoding="utf-8")
+        (runfiles / "tb/sys_msie_incremental_compile_args.f").write_text("tb/test.sv\n", encoding="utf-8")
+        (runfiles / "tb/sys_msie_primary_inputs.txt").write_text("source\ttb/dut.sv\n", encoding="utf-8")
+        base_job_dir = str(root / "sys__XRUN_VCOMP")
+        artifact_dir = Path(base_job_dir + "_MSIE")
+        artifact_dir.mkdir()
+        (artifact_dir / "href.txt").write_text("@dut *\n", encoding="utf-8")
+        tb_options = {
+            "dut_top": "dut",
+            "msie_incremental_compile_args": "tb/sys_msie_incremental_compile_args.f",
+            "msie_primary_compile_args": "tb/sys_msie_primary_compile_args.f",
+            "msie_primary_inputs": "tb/sys_msie_primary_inputs.txt",
+            "xcelium_covfile": "",
+        }
+
+        def vcomp():
+            return SimpleNamespace(
+                base_job_dir=base_job_dir,
+                bazel_compile_args=str(runfiles / "tb/sys_compile_args.f"),
+                bazel_runfiles_main=str(runfiles),
+                bazel_vcomp_target="//tb:sys",
+                tb_options=tb_options,
+            )
+
+        primary_options = parse_args([
+            "--simulator",
+            "XRUN",
+            "--msie-prim",
+            "dut",
+            "--msie-primary-name",
+            "dut_sdf_wc",
+            "--msie-primary-key",
+            "XCELIUM-25.03:netlist-r42:sdf_wc",
+        ])
+        primary = XceliumSimulator(primary_options, DummyRegressionConfig(), None)
+        primary_vcomp = vcomp()
+        primary.prepare_compile_job(primary_vcomp)
+        Path(primary_vcomp.msie_primary_dir).mkdir()
+        primary.record_compile_artifacts(primary_vcomp)
+
+        incremental_options = parse_args([
+            "--simulator",
+            "XRUN",
+            "--msie-incr",
+            "dut_sdf_wc",
+            "--msie-primary-key",
+            "XCELIUM-25.03:netlist-r42:sdf_wc",
+        ])
+        incremental = XceliumSimulator(incremental_options, DummyRegressionConfig(), None)
+        incremental.prepare_compile_job(vcomp())
+
+        wrong_key_options = parse_args([
+            "--simulator",
+            "XRUN",
+            "--msie-incr",
+            "dut_sdf_wc",
+            "--msie-primary-key",
+            "XCELIUM-25.03:netlist-r43:sdf_wc",
+        ])
+        with self.assertRaisesRegex(RuntimeError, "primary_key"):
+            XceliumSimulator(wrong_key_options, DummyRegressionConfig(), None).prepare_compile_job(vcomp())
+
     def test_xcelium_wave_template_honors_delta_and_end_time(self):
         template = self._read_repo_file("bin/templates/xrun_wave_cmd_template.tcl.j2")
 
