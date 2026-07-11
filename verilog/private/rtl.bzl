@@ -33,7 +33,7 @@ def _resolve_label_default_file(simulator, selected_label, xrun_default_label, x
         return vcs_default_file
     return xrun_default_file
 
-def create_flist_content(ctx, gumi_path, allow_library_discovery, no_synth = False, makelib = ""):
+def create_flist_content(ctx, gumi_path, allow_library_discovery, makelib = ""):
     """Create the content of a '.f' file.
 
     Args:
@@ -49,11 +49,6 @@ def create_flist_content(ctx, gumi_path, allow_library_discovery, no_synth = Fal
         handle -y correctly when invoked many times. As a workaround for these
         tools, setting allow_library_discovery to false will put all module
         files and library files directly onto the command line.
-      no_synth: When true, filter any target that sets no_synth=True
-
-        This is an extra precaution to ensure that nonsynthesizable libraries
-        are not passed to the synthesis tool.
-
     Returns:
       List of strings representing flist content.
     """
@@ -74,23 +69,22 @@ def create_flist_content(ctx, gumi_path, allow_library_discovery, no_synth = Fal
 
     flist_content.append(gumi_path)
 
-    if not no_synth:
+    if allow_library_discovery:
+        for d in libdir:
+            if d == "":
+                d = "."
+            flist_content.append("-y {}".format(d))
+    else:
+        flist_content += [f.short_path for f in ctx.files.modules]
+
+    for f in ctx.files.lib_files:
         if allow_library_discovery:
-            for d in libdir:
-                if d == "":
-                    d = "."
-                flist_content.append("-y {}".format(d))
+            flist_content.append("-v {}".format(f.short_path))
         else:
-            flist_content += [f.short_path for f in ctx.files.modules]
-
-        for f in ctx.files.lib_files:
-            if allow_library_discovery:
-                flist_content.append("-v {}".format(f.short_path))
-            else:
-                flist_content.append(f.short_path)
-
-        for f in ctx.files.direct:
             flist_content.append(f.short_path)
+
+    for f in ctx.files.direct:
+        flist_content.append(f.short_path)
 
     # if using makelib, terminate here
     if len(makelib):
@@ -100,6 +94,10 @@ def create_flist_content(ctx, gumi_path, allow_library_discovery, no_synth = Fal
     return flist_content
 
 def _verilog_rtl_library_impl(ctx):
+    if ctx.attr.no_synth:
+        fail(("{} sets no_synth=True, but rules_verilog has no synthesis consumer that can honor it. " +
+              "Filter this target in the synthesis rule instead.").format(ctx.label))
+
     srcs = ctx.files.headers + ctx.files.modules + ctx.files.lib_files + ctx.files.direct
 
     if ctx.attr.is_pkg:
@@ -238,9 +236,7 @@ verilog_rtl_library = rule(
         ),
         "no_synth": attr.bool(
             default = False,
-            doc = "When True, do not allow the contents of this library to be exposed to synthesis.\n" +
-                  "TODO: This currently enforced via an Aspect which is not included in this repository.\n" +
-                  "The aspect creates a parallel set of 'synth__*.f' which have the filtered views which are passed to the synthesis tool.",
+            doc = "Reserved compatibility attribute. Setting it to True fails analysis because this repository has no synthesis consumer that can honor it. Filter simulation-only targets in the synthesis rule instead.",
         ),
         "is_pkg": attr.bool(
             default = False,
@@ -301,7 +297,8 @@ def verilog_rtl_pkg(
         See verilog_rtl_library::direct.
       no_synth: Default False.
 
-        See verilog_rtl_library::no_synth.
+        Reserved for compatibility. True is rejected because this repository
+        cannot enforce synthesis filtering.
       deps: Other packages this target is dependent on.
 
         See verilog_rtl_library::deps.
@@ -342,7 +339,7 @@ def verilog_rtl_shell(
         power.
       shell_module_label: The Label or file containing the shell.
 
-        See verilog_rtl_library::no_synth.
+        The shell is selected explicitly by simulation consumers.
       deps: Other packages this target is dependent on.
 
         In general. shells should avoid having dependencies. Exceptions include
@@ -358,7 +355,6 @@ def verilog_rtl_shell(
         modules = [shell_module_label],
         # Intentionally do not set deps here
         is_shell_of = module_to_shell_name,
-        no_synth = True,
         enable_gumi = False,
         deps = deps,
     )

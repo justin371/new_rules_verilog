@@ -434,6 +434,9 @@ class VcsRuntimeContractTest(unittest.TestCase):
         self.assertIn('defines.extend(["+define+{}{}', rtl_bzl)
         self.assertNotIn('defines.extend(["+{}{}', rtl_bzl)
         self.assertIn("params['inherits'] = [_gatesim_target(inherit, corner) for inherit in inherits]", dv_bzl)
+        self.assertIn("sets no_synth=True, but rules_verilog has no synthesis consumer", rtl_bzl)
+        self.assertNotIn("        no_synth = True,", rtl_bzl)
+        self.assertNotIn('"_runtime_args_template"', dv_bzl)
 
 
 if __name__ == "__main__":

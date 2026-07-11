@@ -1,4 +1,4 @@
-<!-- Generated with Stardoc: http://skydoc.bazel.build -->
+<!-- Maintained with the public rule definitions in verilog/defs.bzl. -->
 
 Public entry point to all supported Verilog rules and APIs
 
@@ -79,12 +79,12 @@ A DV Testbench.
 | Name  | Description | Type | Mandatory | Default |
 | :------------- | :------------- | :------------- | :------------- | :------------- |
 | <a id="verilog_dv_tb-name"></a>name |  A unique name for this target.   | <a href="https://bazel.build/docs/build-ref.html#name">Name</a> | required |  |
-| <a id="verilog_dv_tb-ccf"></a>ccf |  Coverage configuration file to provider to simmer.   | <a href="https://bazel.build/docs/build-ref.html#labels">List of labels</a> | optional | [] |
+| <a id="verilog_dv_tb-ccf"></a>ccf |  Xcelium coverage configuration file. At most one file is accepted; VCS coverage uses `-cm` options instead.   | <a href="https://bazel.build/docs/build-ref.html#labels">List of labels</a> | optional | [] |
 | <a id="verilog_dv_tb-defines"></a>defines |  Additional preprocessor defines to throw for this testbench compile. Key, value pairs are joined without additional characters. If it is a unary flag, set the value portion to be the empty string. For binary flags, add an '=' as a suffix to the key.   | <a href="https://bazel.build/docs/skylark/lib/dict.html">Dictionary: String -> String</a> | optional | {} |
 | <a id="verilog_dv_tb-deps"></a>deps |  A list of verilog_dv_library or verilog_rtl_library labels that the testbench is dependent on. Dependency ordering within this label list is not necessary if dependencies are consistently declared in all other rules.   | <a href="https://bazel.build/docs/build-ref.html#labels">List of labels</a> | required |  |
 | <a id="verilog_dv_tb-extra_compile_args"></a>extra_compile_args |  Additional flags to pass to the selected simulator compile/elaboration step.   | List of strings | optional | [] |
 | <a id="verilog_dv_tb-extra_runfiles"></a>extra_runfiles |  Additional files that need to be passed as runfiles to bazel. Most commonly used for files referred to by extra_compile_args or extra_runtime_args.   | <a href="https://bazel.build/docs/build-ref.html#labels">List of labels</a> | optional | [] |
-| <a id="verilog_dv_tb-extra_runtime_args"></a>extra_runtime_args |  Additional flags to pass to selected simulator runs. These flags will not be provided to compilation.   | List of strings | optional | [] |
+| <a id="verilog_dv_tb-extra_runtime_args"></a>extra_runtime_args |  Additional flags passed only to simulator runs. Runtime path arguments should use absolute paths or `bazel_runfiles_main/...` paths.   | List of strings | optional | [] |
 | <a id="verilog_dv_tb-shells"></a>shells |  List of shells to use. Each label must be a verilog_rtl_shell instance. Each shell thrown will create two defines:  \<code>define gumi_{module} {module}_shell  \</code>define gumi_use_{module}_shell The shell module declaration must be guarded by the gumi_use_{module}_shell define:  \<code>ifdef gumi_use_{module}_shell     module {module}_shell(/*AUTOARGS*/);       ...     endmodule  \</code>endif   | <a href="https://bazel.build/docs/build-ref.html#labels">List of labels</a> | optional | [] |
 | <a id="verilog_dv_tb-simulator"></a>simulator |  Simulator to use for this DV testbench. Supported values are XRUN and VCS. The selected simulator determines which compile/runtime filelists are generated.   | String | optional | `"XRUN"` |
 | <a id="verilog_dv_tb-warning_waivers"></a>warning_waivers |  Waive warnings in the compile. By default, simmer promotes all compile warnings to errors. This list is converted to python regular expressions which are imported by simmer to waive warning. All warnings may be waived by using '\*W'   | List of strings | optional | [] |
@@ -209,7 +209,7 @@ A collection of RTL design files. Creates a generated flist file to be included 
 | <a id="verilog_rtl_library-is_shell_of"></a>is_shell_of |  INTERNAL: Do not set in verilog_rtl_library instances. Used for internal bookkeeping for macros derived from verilog_rtl_library. If set, this library is represents a 'shell' of another module. Allows downstream test rules to specify this Label as a 'shell' to override another instance via the gumi system.   | String | optional | "" |
 | <a id="verilog_rtl_library-lib_files"></a>lib_files |  Verilog library files containing multiple modules. A '-v' flag will be added for each file in this attribute. It is preferable to used the 'modules' attribute when possible because library files require parsing entire files to discover all modules.   | <a href="https://bazel.build/docs/build-ref.html#labels">List of labels</a> | optional | [] |
 | <a id="verilog_rtl_library-modules"></a>modules |  Verilog files containing a single module where the module name matches the file name. A '-y' flag will be added for each source file's directory. This is the preferred mechanism for specifying RTL modules.   | <a href="https://bazel.build/docs/build-ref.html#labels">List of labels</a> | optional | [] |
-| <a id="verilog_rtl_library-no_synth"></a>no_synth |  When True, do not allow the contents of this library to be exposed to synthesis. TODO: This currently enforced via an Aspect which is not included in this repository. The aspect creates a parallel set of 'synth__*.f' which have the filtered views which are passed to the synthesis tool.   | Boolean | optional | False |
+| <a id="verilog_rtl_library-no_synth"></a>no_synth |  Reserved compatibility attribute. Setting it to True fails analysis because this repository has no synthesis consumer that can enforce filtering. Filter simulation-only targets in the synthesis rule instead.   | Boolean | optional | False |
 
 
 <a id="verilog_rtl_lint_test"></a>
@@ -348,7 +348,7 @@ should not need to depend on all the modules in the block.
 | :------------- | :------------- | :------------- |
 | <a id="verilog_rtl_pkg-name"></a>name |  A unique name for this target.   |  none |
 | <a id="verilog_rtl_pkg-direct"></a>direct |  The Systemverilog file containing the package.<br><br>See verilog_rtl_library::direct.   |  none |
-| <a id="verilog_rtl_pkg-no_synth"></a>no_synth |  Default False.<br><br>See verilog_rtl_library::no_synth.   |  <code>False</code> |
+| <a id="verilog_rtl_pkg-no_synth"></a>no_synth |  Reserved for compatibility. True is rejected because this repository cannot enforce synthesis filtering.   |  <code>False</code> |
 | <a id="verilog_rtl_pkg-deps"></a>deps |  Other packages this target is dependent on.<br><br>See verilog_rtl_library::deps.   |  <code>[]</code> |
 | <a id="verilog_rtl_pkg-visibility"></a>visibility |  Bazel target visibility.   |  <code>None</code> |
 
@@ -377,5 +377,5 @@ limited functionality. Frequent uses include:
 | :------------- | :------------- | :------------- |
 | <a id="verilog_rtl_shell-name"></a>name |  A unique name for this target.   |  none |
 | <a id="verilog_rtl_shell-module_to_shell_name"></a>module_to_shell_name |  The name of the module that will be replaced.<br><br>When a downstream test uses this 'shell', a gumi define will be created using this name.<br><br>When a shell needs to be hand-edited after generation If module_to_shell_name == 'custom', then all rules regarding shells are ignored and gumi shell defines are not thrown, allowing the user great power.   |  none |
-| <a id="verilog_rtl_shell-shell_module_label"></a>shell_module_label |  The Label or file containing the shell.<br><br>See verilog_rtl_library::no_synth.   |  none |
+| <a id="verilog_rtl_shell-shell_module_label"></a>shell_module_label |  The Label or file containing the shell. The shell is selected explicitly by simulation consumers.   |  none |
 | <a id="verilog_rtl_shell-deps"></a>deps |  Other packages this target is dependent on.<br><br>In general. shells should avoid having dependencies. Exceptions include necessary packages and possible a DV model to implement functional behavior.<br><br>See verilog_rtl_library::deps.   |  <code>[]</code> |

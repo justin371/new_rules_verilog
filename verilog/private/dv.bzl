@@ -721,11 +721,6 @@ verilog_dv_tb = rule(
             allow_single_file = True,
             doc = "Template to generate compilation arguments flist.",
         ),
-        "_runtime_args_template": attr.label(
-            default = Label("@rules_verilog//vendors/common:verilog_dv_tb_runtime_args.f.template"),
-            allow_single_file = True,
-            doc = "Template to generate runtime args form the 'extra_runtime_args' attribute.",
-        ),
     },
     outputs = {
         "runtime_args": "%{name}_runtime_args.f",
