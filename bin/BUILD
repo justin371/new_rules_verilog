@@ -20,7 +20,6 @@ py_binary(
     srcs = ["lint_parser_hal.py"],
     deps = [
         "//lib:cmn_logging",
-        "//lib:compile_cache",
         requirement("beautifulsoup4"),
     ],
 )
@@ -45,6 +44,7 @@ py_binary(
         "//bin:check_test",
         "//bin:args_parser",
         "//lib:cmn_logging",
+        "//lib:compile_cache",
         "//lib:job_lib",
         "//lib:parser_actions",
         "//lib:regression",

@@ -24,6 +24,14 @@ DISCOVERY_CACHE_FILES = (
     "tests_to_tags.json",
     "tests_to_simulator.json",
 )
+DISCOVERY_ROOT_FILES = {
+    ".bazelrc",
+    ".bazelversion",
+    "MODULE.bazel",
+    "MODULE.bazel.lock",
+    "WORKSPACE",
+    "WORKSPACE.bazel",
+}
 
 
 class RegressionConfig():
@@ -44,8 +52,7 @@ class RegressionConfig():
         self.regression_dir = rv_utils.calc_simresults_location(self.proj_dir)
 
         # Create regression directory if it doesn't exist
-        if not os.path.exists(self.regression_dir):
-            os.mkdir(self.regression_dir)
+        os.makedirs(self.regression_dir, exist_ok=True)
 
         self.invocation_dir = os.getcwd() # Directory where regression was started
         self.profile_events = []
@@ -159,7 +166,8 @@ class RegressionConfig():
         :param d: Dictionary to save
         :param j: Filename to save to
         """
-        path = os.path.join(self.proj_dir, j)
+        path = self._cache_path(j)
+        os.makedirs(os.path.dirname(path), exist_ok=True)
         temporary_path = "{}.{}.tmp".format(path, os.getpid())
         try:
             with open(temporary_path, "w") as f:
@@ -189,7 +197,7 @@ class RegressionConfig():
             raise
 
     def _cache_path(self, filename):
-        return os.path.join(self.proj_dir, filename)
+        return os.path.join(self.proj_dir, ".simmer", "cache", filename)
 
     def _have_discovery_cache(self):
         return all(os.path.exists(self._cache_path(filename)) for filename in DISCOVERY_CACHE_FILES)
@@ -205,14 +213,16 @@ class RegressionConfig():
         if result.returncode == 0:
             for relative_path in result.stdout.splitlines():
                 filename = os.path.basename(relative_path)
-                if filename in ("BUILD", "BUILD.bazel") or filename.endswith(".bzl"):
+                if filename in ("BUILD", "BUILD.bazel") or filename.endswith(".bzl") or relative_path in DISCOVERY_ROOT_FILES:
                     yield os.path.join(self.proj_dir, os.path.normpath(relative_path))
             return
 
         for root, dirs, files in os.walk(self.proj_dir):
-            dirs[:] = [directory for directory in dirs if directory != ".git" and not directory.startswith("bazel-")]
+            dirs[:] = [directory for directory in dirs if directory not in (".git", ".simmer") and
+                        not directory.startswith("bazel-")]
             for filename in files:
-                if filename in ("BUILD", "BUILD.bazel") or filename.endswith(".bzl"):
+                relative_path = os.path.relpath(os.path.join(root, filename), self.proj_dir)
+                if filename in ("BUILD", "BUILD.bazel") or filename.endswith(".bzl") or relative_path in DISCOVERY_ROOT_FILES:
                     yield os.path.join(root, filename)
 
     def _discovery_cache_is_fresh(self):
@@ -227,8 +237,6 @@ class RegressionConfig():
         return True
 
     def _should_use_cached_discovery(self):
-        if self.options.no_bazel:
-            return self._have_discovery_cache()
         if self._discovery_cache_is_fresh():
             self.log.info("Using cached test discovery")
             return True

@@ -83,6 +83,14 @@ class _RunningProcess:
 
 class JobManagerLaunchTest(unittest.TestCase):
 
+    def test_default_results_directory_uses_xdg_state_home(self):
+        project_dir = tempfile.mkdtemp()
+        state_dir = tempfile.mkdtemp()
+        with mock.patch.dict(os.environ, {"XDG_STATE_HOME": state_dir, "SIMRESULTS": ""}, clear=False):
+            result_dir = rv_utils.calc_simresults_location(project_dir)
+
+        self.assertTrue(result_dir.startswith(os.path.join(state_dir, "simmer")))
+
     def test_bazel_tb_job_builds_runfiles_without_running_dummy_executable(self):
         log = _Logger()
         rcfg = SimpleNamespace(options=SimpleNamespace(timeout=1, no_compile=False, no_bazel=False), log=log)

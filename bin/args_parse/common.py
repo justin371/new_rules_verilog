@@ -6,7 +6,9 @@ PROJ_DIR = os.environ.get('PROJ_DIR', os.getcwd())
 SIM_PLATFORM = os.environ.get('SIM_PLATFORM', 'XRUN')
 _COVFILE = os.environ.get('COVFILE', "coverage.ccf")
 COVFILE = _COVFILE if os.path.isabs(_COVFILE) else os.path.join(PROJ_DIR, _COVFILE)
-REPORT_DIR = os.environ.get('SIMMER_REPORT_DIR', '/nfs/regression/webroot')
+_STATE_HOME = os.environ.get("XDG_STATE_HOME", os.path.expanduser("~/.local/state"))
+_SIMRESULTS = os.path.expanduser(os.environ.get("SIMRESULTS") or os.path.join(_STATE_HOME, "simmer"))
+REPORT_DIR = os.environ.get("SIMMER_REPORT_DIR", os.path.join(_SIMRESULTS, "webroot"))
 
 
 def add_debug_arguments(parser):

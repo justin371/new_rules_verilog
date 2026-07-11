@@ -579,15 +579,20 @@ class TestJob(Job):
     def execution_mode(self):
         return "parallel"
 
-    def __init__(self, rcfg, target, vcomper: VCompJob, icfg, btcj, simulator: SimulatorInterface): # Add simulator
+    def __init__(self, rcfg, target, vcomper: VCompJob, icfg, btcj, simulator: SimulatorInterface,
+                 iteration=None, planned_seed=None): # Add simulator
         self.target = target
         name = target.split(":")[1]
 
         self.icfg = icfg
-        self.iteration = icfg.spawn_count
-        self.icfg.inc(self)
+        self.iteration = iteration if iteration is not None else icfg.spawn_count
+        if iteration is None:
+            self.icfg.inc(self)
+        else:
+            self.icfg.jobs.append(self)
         self.btcj = btcj
         self.job_time = 0
+        self.planned_seed = planned_seed
 
         super(TestJob, self).__init__(rcfg, name)
         self.rcfg = rcfg
@@ -645,6 +650,8 @@ class TestJob(Job):
             except ValueError as exc:
                 raise RuntimeError("VSO.ai returned a non-integer seed {!r} for {}.".format(self.vso_seed,
                                                                                             self.target)) from exc
+        elif self.planned_seed is not None:
+            seed = self.planned_seed
         elif seed is None:
             seed = random.randint(0, (1 << 31) - 1) # xrun treats the seed as a signed integer
         self.seed = seed
@@ -992,11 +999,11 @@ class TestJob(Job):
                 os.remove(".last_sim")
 
         # If iteration count hasnt been hit yet, add another copy onto the run list
-        if self.icfg.spawn_count <= self.icfg.target:
+        if options.vso and self.icfg.spawn_count <= self.icfg.target:
             log.debug(f"Spawning next iteration for {self.name} ({self.icfg.spawn_count}/{self.icfg.target})")
             c = self.clone()
             self.job_lib.manager.add_job(c)
-        elif self.icfg.spawn_count == self.icfg.target:
+        elif options.vso and self.icfg.spawn_count == self.icfg.target:
             log.debug(f"Target iterations reached for {self.name} ({self.icfg.target})")
 
     def _get_total_time_str(self):
@@ -1070,6 +1077,10 @@ def main(rcfg, options):
                           "Multiple builds would otherwise collapse into the same VSO buildname.")
         sys.exit(1)
 
+    seed_rng = random.Random(options.python_seed)
+    if options.python_seed is not None:
+        log.info("Set python random seed to %s", options.python_seed)
+
     for vcomp, test_list in rcfg.all_vcomp.items():
         vcomper = VCompJob(rcfg, vcomp, simulator)
         vcomp_jobs[vcomp] = vcomper
@@ -1085,12 +1096,15 @@ def main(rcfg, options):
             icfg = rv_utils.IterationCfg(iterations)
             icfgs.append(icfg)
 
-            # Create TestJob with simulator
-            t = TestJob(rcfg, test, vcomper=vcomper, icfg=icfg, btcj=btcj, simulator=simulator)
-            tests.append(t)
-
-            # Test depends on its config being built
-            t.add_dependency(btcj)
+            planned_iterations = [None] if options.vso else range(1, iterations + 1)
+            for iteration in planned_iterations:
+                planned_seed = None
+                if not options.vso and options.seed is None:
+                    planned_seed = seed_rng.randint(0, (1 << 31) - 1)
+                t = TestJob(rcfg, test, vcomper=vcomper, icfg=icfg, btcj=btcj, simulator=simulator,
+                            iteration=iteration, planned_seed=planned_seed)
+                tests.append(t)
+                t.add_dependency(btcj)
 
         rcfg.all_vcomp[vcomp] = (icfgs, tests)
 
@@ -1117,6 +1131,7 @@ def main(rcfg, options):
             sys.exit(1)
         if options.seed is not None:
             rcfg.log.critical("--seed can only be used if a single test is run")
+            sys.exit(1)
     rcfg.simmer_results_run = None
     if not options.no_run:
         rcfg.simmer_results_run = simmer_results.create_run(
@@ -1157,10 +1172,6 @@ def main(rcfg, options):
             else:
                 jm.add_job(btcj)
 
-        if options.python_seed:
-            random.seed(options.python_seed)
-            log.info("Set python random seed to %s", options.python_seed)
-
         for vcomp, (icfgs, test_list) in rcfg.all_vcomp.items():
             tests = test_list
             suppress_via_tests = False
@@ -1169,6 +1180,7 @@ def main(rcfg, options):
                     rcfg.log.critical("--gui can only be used on one bench/test at a time")
                 if options.seed:
                     rcfg.log.critical("--seed can only be used on one bench/test at a time")
+                    sys.exit(1)
                 log.info("Suppressing output due to multiple tests begin run")
                 suppress_via_tests = True
 

@@ -153,11 +153,14 @@ Forward that port from the local machine, then open `http://localhost:8000/`:
 ssh -N -L 8000:127.0.0.1:8000 user@redhat-host
 ```
 
-The default report root is `/nfs/regression/webroot`. Override it per command
-with `--report-dir`, or configure a shared report location and its public URL:
+The default simulation and report roots are
+`${XDG_STATE_HOME:-$HOME/.local/state}/simmer` and its `webroot` subdirectory.
+Override the report per command with `--report-dir`, or configure shared result
+and report locations and a public URL:
 
 ```bash
-export SIMMER_REPORT_DIR=/nfs/regression/webroot
+export SIMRESULTS=/nfs/regression
+export SIMMER_REPORT_DIR="$SIMRESULTS/webroot"
 export SIMMER_REPORT_URL=https://regression.example.com/regression_report
 simmer -t 'sys_tb:*' --simulator VCS --report
 ```

@@ -72,36 +72,55 @@ class RegressionDiscoveryTest(unittest.TestCase):
         build_file = proj_dir / "benches" / "soc_tb" / "BUILD"
         build_file.parent.mkdir(parents=True)
         build_file.write_text("filegroup(name='x')\n", encoding="utf-8")
+        bazel_version = proj_dir / ".bazelversion"
+        bazel_version.write_text("7.7.1\n", encoding="utf-8")
 
         config = self._config(proj_dir)
+        cache_dir = proj_dir / ".simmer" / "cache"
+        cache_dir.mkdir(parents=True)
         for filename in ("all_vcomp.json", "tests_to_tags.json", "tests_to_simulator.json"):
-            path = proj_dir / filename
+            path = cache_dir / filename
             path.write_text("{}", encoding="utf-8")
             path.touch()
 
-        cache_time = build_file.stat().st_mtime + 10
+        cache_time = max(build_file.stat().st_mtime, bazel_version.stat().st_mtime) + 10
         for filename in ("all_vcomp.json", "tests_to_tags.json", "tests_to_simulator.json"):
-            path = proj_dir / filename
+            path = cache_dir / filename
             path.touch()
             os.utime(path, (cache_time, cache_time))
 
         self.assertTrue(config._discovery_cache_is_fresh())
 
         newer_time = cache_time + 10
-        os.utime(build_file, (newer_time, newer_time))
+        os.utime(bazel_version, (newer_time, newer_time))
         self.assertFalse(config._discovery_cache_is_fresh())
 
     @mock.patch("lib.regression.os.walk", side_effect=AssertionError("walk should not run"))
     @mock.patch("lib.regression.subprocess.run")
     def test_cache_uses_git_file_index_when_available(self, run, _walk):
         proj_dir = Path(tempfile.mkdtemp())
-        run.return_value = SimpleNamespace(returncode=0, stdout="pkg/BUILD\npkg/file.py\nrules/tool.bzl\n")
+        run.return_value = SimpleNamespace(
+            returncode=0,
+            stdout="pkg/BUILD\npkg/file.py\nrules/tool.bzl\n.bazelversion\nMODULE.bazel.lock\n",
+        )
         config = self._config(proj_dir)
 
         self.assertEqual(
-            [str(proj_dir / "pkg/BUILD"), str(proj_dir / "rules/tool.bzl")],
+            [
+                str(proj_dir / "pkg/BUILD"),
+                str(proj_dir / "rules/tool.bzl"),
+                str(proj_dir / ".bazelversion"),
+                str(proj_dir / "MODULE.bazel.lock"),
+            ],
             list(config._iter_discovery_dependency_paths()),
         )
+
+    def test_no_bazel_rejects_stale_cache(self):
+        config = self._config(Path(tempfile.mkdtemp()))
+        config.options.no_bazel = True
+        config._discovery_cache_is_fresh = lambda: False
+
+        self.assertFalse(config._should_use_cached_discovery())
 
     def test_requested_bench_query_is_scoped(self):
         config = self._config(Path(tempfile.mkdtemp()))
@@ -216,6 +235,8 @@ class RegressionDiscoveryTest(unittest.TestCase):
     def test_init_creates_deferred_messages_with_cached_discovery(self):
         proj_dir = Path(tempfile.mkdtemp())
         results_dir = proj_dir / "results"
+        cache_dir = proj_dir / ".simmer" / "cache"
+        cache_dir.mkdir(parents=True)
         for filename, payload in {
                 "all_vcomp.json": {
                     "//benches/soc_tb:soc_tb": {
@@ -229,7 +250,7 @@ class RegressionDiscoveryTest(unittest.TestCase):
                     "//benches/soc_tb/tests:dma_single_transfer": "VCS"
                 },
         }.items():
-            (proj_dir / filename).write_text(json.dumps(payload), encoding="utf-8")
+            (cache_dir / filename).write_text(json.dumps(payload), encoding="utf-8")
 
         options = self._options(proj_dir)
         options.no_bazel = True

@@ -111,6 +111,14 @@ class VcsRuntimeContractTest(unittest.TestCase):
         with self.assertRaises(SystemExit):
             parse_args(["--jobs", "0"])
 
+    def test_iterations_are_preplanned_for_parallel_execution(self):
+        simmer_source = self._read_repo_file("bin/simmer.py")
+
+        self.assertEqual("0", parse_args(["--python-seed", "0"]).python_seed)
+        self.assertIn("range(1, iterations + 1)", simmer_source)
+        self.assertIn("if options.vso and self.icfg.spawn_count <= self.icfg.target:", simmer_source)
+        self.assertNotIn("random.seed(options.python_seed)", simmer_source)
+
     def test_category_config_is_explicitly_enabled(self):
         self.assertIsNone(parse_args([]).category_cfg)
         self.assertEqual("", parse_args(["--category-cfg"]).category_cfg)

@@ -6,8 +6,9 @@ if ! PROJ_DIR="$(git rev-parse --show-toplevel 2>&1)"; then
 fi
 export PROJ_DIR
 
-export SIMRESULTS="${SIMRESULTS:-/nfs/regression}"
-export TEST_TMPDIR="${TEST_TMPDIR:-${SIMRESULTS}}"
+export SIMRESULTS="${SIMRESULTS:-${XDG_STATE_HOME:-${HOME}/.local/state}/simmer}"
+export TEST_TMPDIR="${TEST_TMPDIR:-${SIMRESULTS}/bazel-tmp}"
+mkdir -p "${SIMRESULTS}" "${TEST_TMPDIR}"
 
 GLOBAL_TOOLS="${GLOBAL_TOOLS:-/global/tools}"
 

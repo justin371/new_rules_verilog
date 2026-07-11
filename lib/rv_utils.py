@@ -11,9 +11,6 @@ from typing import Dict, Optional
 from urllib.parse import urlparse
 
 LOGGER_INDENT = 8
-SIMRESULTS = os.environ.get('SIMRESULTS', '')
-
-
 class DatetimePrinter():
     """Utility class for tracking and printing time intervals"""
 
@@ -248,9 +245,10 @@ def calc_simresults_location(checkout_path):
     """
     username = getpass.getuser()
 
-    sim_results_home = os.path.join(SIMRESULTS, username)
-    if not os.path.exists(sim_results_home):
-        os.mkdir(sim_results_home)
+    state_home = os.environ.get("XDG_STATE_HOME", os.path.expanduser("~/.local/state"))
+    sim_results_root = os.path.expanduser(os.environ.get("SIMRESULTS") or os.path.join(state_home, "simmer"))
+    sim_results_home = os.path.join(sim_results_root, username)
+    os.makedirs(sim_results_home, exist_ok=True)
 
     try:
         checkout_path = re.search(r'{}/(.*)'.format(username), checkout_path).group(1)
