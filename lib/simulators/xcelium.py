@@ -4,6 +4,7 @@ import stat
 import glob
 import shutil
 import logging
+import shlex
 import subprocess
 
 import jinja2
@@ -129,33 +130,38 @@ class XceliumSimulator(SimulatorInterface):
         return opts
 
     def generate_sim_options(self, test_job, seed):
-        sim_opts = ""
-        sim_opts += " -svseed %d " % seed
+        sim_args = ["-svseed", str(seed)]
         # Coverage
         if self.options.coverage:
-            sim_opts += ' -covoverwrite '
+            sim_args.append("-covoverwrite")
             # Ensure cov_work_dir exists on the vcomper object
             if hasattr(test_job.vcomper, 'cov_work_dir') and test_job.vcomper.cov_work_dir:
-                sim_opts += ' -covworkdir {} '.format(test_job.vcomper.cov_work_dir)
+                sim_args.extend(["-covworkdir", test_job.vcomper.cov_work_dir])
             else:
                 log.warning(f"Coverage enabled but cov_work_dir not set for vcomp job {test_job.vcomper.name}")
-            sim_opts += ' -covbaserun {} '.format(test_job.name)
+            sim_args.extend(["-covbaserun", test_job.name])
             if 'A' in self.options.coverage or 'U' in self.options.coverage:
-                sim_opts += ' +SVFCOV=1 '
+                sim_args.append("+SVFCOV=1")
         # MCE
         if self.options.mce:
-            sim_opts += " -mce "
-            sim_opts += " -mce_pie "
-            sim_opts += " -mce_newperf "
-            sim_opts += " -mce_parallel_probing 0 "
-            sim_opts += " -mce_sim_cpu_configuration {} ".format(self.options.mce_sim_cfg)
-            sim_opts += " -mce_sim_thread_count {} ".format(self.options.mce_sim_count)
-            sim_opts += " -mce_split_max_size {} ".format(self.options.mce_split_max_size)
+            sim_args.extend([
+                "-mce",
+                "-mce_pie",
+                "-mce_newperf",
+                "-mce_parallel_probing",
+                "0",
+                "-mce_sim_cpu_configuration",
+                str(self.options.mce_sim_cfg),
+                "-mce_sim_thread_count",
+                str(self.options.mce_sim_count),
+                "-mce_split_max_size",
+                str(self.options.mce_split_max_size),
+            ])
         # Profile
         if self.options.profile:
-            sim_opts += " -profile "
+            sim_args.append("-profile")
 
-        return sim_opts
+        return shlex.join(sim_args)
 
     def get_wave_capture_options(self, test_job, wave_tcl_path):
         wave_type = self.options.wave_type.lower()
@@ -182,7 +188,7 @@ class XceliumSimulator(SimulatorInterface):
         else:
             raise ValueError("{} not allowed".format(self.options.wave_type))
 
-        sim_opts += " -input {} ".format(wave_tcl_path)
+        sim_opts += " " + shlex.join(["-input", wave_tcl_path])
         return {
             'sim_opts': sim_opts,
             'wave_tcl_path': wave_tcl_path,
@@ -192,7 +198,7 @@ class XceliumSimulator(SimulatorInterface):
 
     def get_no_wave_capture_options(self, test_job, nwaves_tcl_path):
         return {
-            'sim_opts': " -input {} ".format(nwaves_tcl_path),
+            'sim_opts': " " + shlex.join(["-input", nwaves_tcl_path]),
             'tcl_commands': ["run"],
         }
 
@@ -235,69 +241,49 @@ class XceliumSimulator(SimulatorInterface):
         """
         Constructs the full simulation command string for XRUN, including logging.
         """
-        options = self.options # Convenience alias
-        # Base executable and common flags
-        # Handle runmod wrapper if used consistently
-        base_exec = "runmod -t xrun -- " # Assume runmod for standard sim
-        run_flags = "-R" # Common run flag
-        if options.gui:
-            # GUI flag handled by get_gui_command_options() adding to sim_opts,
-            # but ensure -R isn't duplicated if GUI already adds it.
-            if " -gui " not in sim_opts and " -R " not in sim_opts:
-                run_flags += " -gui" # Add gui if not already in sim_opts by GUI logic
-
-        # Combine basic parts (excluding logging and user args for now)
-        cmd_parts = [
-            base_exec,
-            run_flags,
-            f"-xmlibdirname {vcomp_job_dir}", # Point to the compile dir
-            #snapshot_arg,
-            sim_opts # Includes seed, coverage, waves, gui, uvm opts etc. from generate_sim_options & common logic
-        ]
-
-        # --- Handle Emulator Variations ---
-        emu_type = options.emulator.upper()
-        if emu_type == 'PLDM_SA' or emu_type == 'PLDM_SIM':
-            base_exec = "xrun"
+        emu_type = self.options.emulator.upper()
+        if emu_type in ('PLDM_SA', 'PLDM_SIM'):
             emu_dpi_lib = os.environ.get("RV_EMU_DPI_LIB", "dv_common/global/libwc_time_dpi.so")
             emu_xmlib_dir = os.environ.get("RV_EMU_XMLIBDIR", "hw_lib")
             cmd_parts = [
-                base_exec,
-                "-R -64 -xmfatal NOTEXP",
-                "-xmlibdirname {}".format(emu_xmlib_dir),
-                "-sv_lib {}".format(emu_dpi_lib),
-                sim_opts,
+                "xrun",
+                "-R",
+                "-64",
+                "-xmfatal",
+                "NOTEXP",
+                "-xmlibdirname",
+                emu_xmlib_dir,
+                "-sv_lib",
+                emu_dpi_lib,
             ]
-            log_handling = f"| tee {log_path}"
-
         elif emu_type == 'SIM':
-            base_exec = "xrun"
             emu_dpi_lib = os.environ.get("RV_EMU_DPI_LIB", "dv_common/global/libwc_time_dpi.so")
             emu_xmlib_dir = os.environ.get("RV_EMU_XMLIBDIR", "sw_lib")
             cmd_parts = [
-                base_exec,
-                "-R -64 -xmfatal NOTEXP",
-                "-xmlibdirname {}".format(emu_xmlib_dir),
-                "-sv_lib {}".format(emu_dpi_lib),
-                sim_opts,
+                "xrun",
+                "-R",
+                "-64",
+                "-xmfatal",
+                "NOTEXP",
+                "-xmlibdirname",
+                emu_xmlib_dir,
+                "-sv_lib",
+                emu_dpi_lib,
             ]
-            log_handling = f"| tee {log_path}"
+        else:
+            cmd_parts = shlex.split("runmod -t xrun --") + ["-R", "-xmlibdirname", vcomp_job_dir]
+            if self.options.gui and " -gui " not in sim_opts:
+                cmd_parts.append("-gui")
 
-        else: # Standard XRUN simulation (not EMU)
-            # Add user arguments if provided
-            if user_args_list:
-                cmd_parts.extend(user_args_list)
-            # Standard XRUN uses pipe tee for logging based on original template
-            log_handling = f"-l {log_path}"
-
-        # Join command parts into a single string
-        base_command = " ".join(filter(None, cmd_parts)) # Filter removes empty strings
-
-        # Combine base command with the log handling mechanism
-        full_command = f"{base_command} {log_handling}"
+        if user_args_list:
+            cmd_parts.extend(user_args_list)
+        cmd_parts.extend(["-l", log_path])
+        full_command = shlex.join(cmd_parts)
+        if sim_opts:
+            full_command += " " + sim_opts
 
         log.debug(f"Constructed XRUN sim command: {full_command}")
-        return full_command.strip() # Return the complete command string
+        return full_command
 
     def get_sim_working_dir(self, test_job):
         """Run each XRUN simulation from its own test job directory."""

@@ -399,21 +399,18 @@ class VcsSimulator(SimulatorInterface):
         return None
 
     def generate_sim_options(self, test_job, seed):
-        sim_opts = ""
+        sim_args = []
         if self.options.vso:
             vso_run_id = getattr(test_job, "vso_run_id", None) or test_job.simname
-            sim_opts += ' -vso cso '
-            sim_opts += ' -vso_opts workdir={} '.format(self._get_vso_workdir())
-            sim_opts += ' -vso_opts run_id={} '.format(vso_run_id)
-        sim_opts += " +ntb_random_seed=%0d " % seed
-        sim_opts += " -xlrm hier_inst_seed "
-        sim_opts += " -assert nopostproc "
+            sim_args.extend(["-vso", "cso", "-vso_opts", "workdir={}".format(self._get_vso_workdir())])
+            sim_args.extend(["-vso_opts", "run_id={}".format(vso_run_id)])
+        sim_args.extend(["+ntb_random_seed={}".format(seed), "-xlrm", "hier_inst_seed", "-assert", "nopostproc"])
         if self.options.fgp is not None:
-            sim_opts += " -fgp=num_threads:{} ".format(self.options.fgp)
+            sim_args.append("-fgp=num_threads:{}".format(self.options.fgp))
         if self.options.vcs_xprop_banner:
-            sim_opts += " -xprop=banner "
+            sim_args.append("-xprop=banner")
         if self.options.vcs_xprop_report:
-            sim_opts += " -report=xprop "
+            sim_args.append("-report=xprop")
         test_job.test_name_seed = "{}_seed_{}".format(test_job.name, seed) # Needed for VCS sim script template
 
         # Coverage
@@ -422,11 +419,16 @@ class VcsSimulator(SimulatorInterface):
             cm_level = self.options.cm
             if 'A' in cm_level:
                 cm_level = 'line+cond+fsm+tgl+assert+branch'
-            sim_opts += ' -cm {} '.format(cm_level)
-            sim_opts += ' -cm_dir {} '.format(test_job.vcomper.cov_work_dir)
-            sim_opts += ' -cm_name {}_sv{} '.format(test_job.name, seed)
+            sim_args.extend([
+                "-cm",
+                cm_level,
+                "-cm_dir",
+                test_job.vcomper.cov_work_dir,
+                "-cm_name",
+                "{}_sv{}".format(test_job.name, seed),
+            ])
 
-        return sim_opts
+        return shlex.join(sim_args)
 
     def get_wave_capture_options(self, test_job, wave_tcl_path):
         wave_type = self.options.wave_type.lower()
@@ -446,7 +448,7 @@ class VcsSimulator(SimulatorInterface):
         else:
             raise ValueError("{} wave dumping is not supported for VCS".format(self.options.wave_type))
 
-        sim_opts += " -ucli -do {} ".format(wave_tcl_path)
+        sim_opts += " " + shlex.join(["-ucli", "-do", wave_tcl_path])
         return {
             'sim_opts': sim_opts,
             'wave_tcl_path': wave_tcl_path,
@@ -463,7 +465,7 @@ class VcsSimulator(SimulatorInterface):
 
         tcl_commands = ["config reversedebug on", "run"]
         return {
-            'sim_opts': " -ucli -do {} ".format(nwaves_tcl_path),
+            'sim_opts': " " + shlex.join(["-ucli", "-do", nwaves_tcl_path]),
             'tcl_commands': tcl_commands,
         }
 
@@ -527,32 +529,19 @@ class VcsSimulator(SimulatorInterface):
         """
         Constructs the full simulation command string for VCS, including logging.
         """
-        # Base executable and common flags
-        base_exec = self.get_tool_runner()
-        simv_path = f"{vcomp_job_dir}/simv" # Path to compiled executable
-
-        # VCS smartlog is useful for debug, but batch runs skip it by default.
-        smartlog_handling = "-sml" if self.use_smartlog() else ""
-        log_handling = f"-l {log_path}"
-
-        # Combine parts
-        cmd_parts = [
-            base_exec,
-            simv_path,
-            smartlog_handling,
-            log_handling,
-            sim_opts # Includes seed, coverage, waves, gui, uvm opts etc.
-        ]
-
-        # Add user arguments if provided
+        cmd_parts = shlex.split(self.get_tool_runner())
+        cmd_parts.append(os.path.join(vcomp_job_dir, "simv"))
+        if self.use_smartlog():
+            cmd_parts.append("-sml")
+        cmd_parts.extend(["-l", log_path])
         if user_args_list:
             cmd_parts.extend(user_args_list)
-
-        # Join into final command string
-        full_command = " ".join(filter(None, cmd_parts))
+        full_command = shlex.join(cmd_parts)
+        if sim_opts:
+            full_command += " " + sim_opts
 
         log.debug(f"Constructed VCS sim command: {full_command}")
-        return full_command.strip()
+        return full_command
 
     def get_sim_working_dir(self, test_job):
         """Run each VCS simulation from its own test job directory."""

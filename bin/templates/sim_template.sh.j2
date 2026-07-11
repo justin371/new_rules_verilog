@@ -115,7 +115,7 @@ function testFunction {
 
     # Execute the main simulation command with timing
     set +o errexit # Disable errexit to capture the simulation's exit code
-    time eval "{{ simulation_command }}" # Use eval to correctly interpret the command string
+    time {{ simulation_command }}
     local sim_exit_code=$?
     set -o errexit # Re-enable errexit
     echo "Simulation finished with exit code: $sim_exit_code"

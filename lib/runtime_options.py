@@ -1,5 +1,6 @@
 """Helpers for the shared DV test runtime-options contract."""
 
+import shlex
 
 RUNTIME_OPTIONS_SCHEMA_VERSION = 1
 
@@ -68,7 +69,7 @@ def merge_test_runtime_sim_opts(runtime_options, cli_sim_opts):
 
 def format_sim_opts_dict(sim_opts):
     """Format a normalized sim_opts dict into simulator command-line fragments."""
-    return " ".join("".join(item) for item in sim_opts.items()).replace('\"', ' ')
+    return shlex.join("{}{}".format(key, value) for key, value in sim_opts.items())
 
 
 def resolve_test_timeout_hours(runtime_options, default_timeout_hours, cli_timeout_was_explicit):

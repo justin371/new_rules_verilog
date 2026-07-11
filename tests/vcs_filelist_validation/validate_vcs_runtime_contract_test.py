@@ -1,5 +1,6 @@
 import os
 from pathlib import Path
+import shlex
 import sys
 import tempfile
 import unittest
@@ -14,6 +15,7 @@ if str(BIN_DIR) not in sys.path:
     sys.path.insert(0, str(BIN_DIR))
 
 from args_parser import parse_args
+from lib.runtime_options import format_sim_opts_dict
 from lib.simulators.vcs import VcsSimulator
 from lib.simulators.xcelium import XceliumSimulator
 
@@ -116,6 +118,23 @@ class VcsRuntimeContractTest(unittest.TestCase):
         self.assertNotIn("-file bazel_runfiles_main/unit/test_runtime_args.f", command)
         self.assertNotIn(" -sml ", command)
 
+    def test_runtime_options_are_shell_escaped_once(self):
+        value = "label with spaces;$(touch should_not_run)"
+        formatted = format_sim_opts_dict({"+LABEL=": value})
+
+        self.assertEqual(["+LABEL=" + value], shlex.split(formatted))
+
+        options = parse_args(["-t", "unit:test", "--simulator", "VCS"])
+        simulator = VcsSimulator(options, DummyRegressionConfig(), None)
+        command = simulator.get_sim_command(
+            test_job=None,
+            sim_opts=formatted,
+            vcomp_job_dir="/tmp/vcomp with spaces",
+            log_path="/tmp/log with spaces/stdout.log",
+        )
+        self.assertIn("/tmp/vcomp with spaces/simv", shlex.split(command))
+        self.assertIn("+LABEL=" + value, shlex.split(command))
+
     def test_vcs_smartlog_is_debug_only_by_default(self):
         default_options = parse_args(["-t", "unit:test", "--simulator", "VCS"])
         smartlog_options = parse_args(["-t", "unit:test", "--simulator", "VCS", "--smartlog"])
@@ -196,6 +215,8 @@ class VcsRuntimeContractTest(unittest.TestCase):
         self.assertIn("set -Eeuo pipefail", coverage)
         self.assertNotIn("final_result + sim_exit_code", sim)
         self.assertNotIn("sockets_exit_code + socket_exit_code", sim)
+        self.assertNotIn('time eval "{{ simulation_command }}"', sim)
+        self.assertIn("time {{ simulation_command }}", sim)
         self.assertIn('kill "${{ socket_name|upper }}_PID"', sim)
         self.assertIn("{POST_FLIST_ARGS} \\", svunit)
         self.assertIn('"${remaining_args[@]}"', svunit)
@@ -288,8 +309,24 @@ class VcsRuntimeContractTest(unittest.TestCase):
         self.assertIn("{{ reproduce_args }}", template)
         self.assertIn("{{ rerun_target }}", template)
         self.assertIn("${SIMMER_BIN:-simmer}", template)
+        self.assertIn("{{ project_dir }}", template)
+        self.assertIn('cd "$PROJECT_DIR"', template)
         self.assertNotIn("job.vcomper.name", template)
         self.assertNotIn("--waves --simulator", template)
+
+    def test_rerun_argument_filtering_is_positional(self):
+        options = parse_args([
+            "--timeout",
+            "42",
+            "-t",
+            "unit:test",
+            "--seed",
+            "42",
+            "--simulator",
+            "VCS",
+        ])
+
+        self.assertEqual(["--timeout", "42", "--simulator", "VCS"], options.reproduce_args)
 
     def test_generated_helper_scripts_are_workspace_and_launcher_portable(self):
         sim_template = self._read_repo_file("bin/templates/sim_template.sh.j2")
@@ -307,6 +344,9 @@ class VcsRuntimeContractTest(unittest.TestCase):
         self.assertNotIn("text = logp.read()", source)
         self.assertNotIn('subprocess.run(["chmod", "-R"', source)
         self.assertIn("completed without simulation log", source)
+        self.assertIn("ENV_CAPTURE_KEYS", source)
+        self.assertNotIn("sorted(os.environ.items())", source)
+        self.assertIn("j.jobstatus == JobStatus.FAILED", source)
         self.assertLess(source.index('"coverage_merge"'), source.index("print_simmer_profile(rcfg, jm)"))
 
     def test_vcs_unit_test_rules_use_simulator_specific_defaults(self):

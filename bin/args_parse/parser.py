@@ -19,6 +19,34 @@ from .xcelium import (
     validate_xcelium_switches_for_vcs,
 )
 
+_RERUN_OMITTED_OPTIONS = {
+    '-t',
+    '--tests',
+    '--tag',
+    '--ntag',
+    '--seed',
+    '--global-tag',
+    '--global-ntag',
+}
+
+
+def reproduction_args(argv):
+    """Keep original options except selectors replaced by rerun.sh."""
+    result = []
+    index = 0
+    while index < len(argv):
+        argument = argv[index]
+        option_name = argument.split('=', 1)[0]
+        if option_name in _RERUN_OMITTED_OPTIONS:
+            index += 1 if '=' in argument else 2
+            continue
+        if argument.startswith('-t') and not argument.startswith('--'):
+            index += 1
+            continue
+        result.append(argument)
+        index += 1
+    return result
+
 
 def validate_simulator_specific_options(options, parser):
     if options.simulator == 'VCS':
@@ -68,16 +96,7 @@ def parse_args(argv):
     options.xprop_was_explicit = argument_explicitly_requested(argv, '--xprop')
     options.timeout_was_explicit = argument_explicitly_requested(argv, '--timeout')
 
-    skip_list = ['-t', '--tag', '--ntag', '--seed', '--global-tag', '--global-ntag']
-    skip_list.append(str(options.seed))
-    for test in options.tests:
-        skip_list.append(test.btiglob)
-        for tag in test.tag:
-            skip_list.append(tag)
-        for ntag in test.ntag:
-            skip_list.append(ntag)
-    reproduce_args = [arg for arg in argv if arg not in skip_list]
-    setattr(options, 'reproduce_args', reproduce_args)
+    options.reproduce_args = reproduction_args(argv)
 
     options.simulator = (options.simulator if options.simulator_was_explicit else SIM_PLATFORM).upper()
     if options.wave_start < 0:

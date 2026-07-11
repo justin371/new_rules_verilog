@@ -121,6 +121,7 @@ py_test(
     ],
     deps = [
         "//bin:args_parser_lib",
+        "//lib:runtime_options",
         "//lib/simulators:vcs",
         "//lib/simulators:xcelium",
     ],

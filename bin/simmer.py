@@ -45,6 +45,21 @@ from lib import regression_report
 
 log = None
 
+ENV_CAPTURE_KEYS = (
+    "HOME",
+    "HOSTNAME",
+    "LM_LICENSE_FILE",
+    "LOADEDMODULES",
+    "MODULEPATH",
+    "PATH",
+    "PROJ_DIR",
+    "SIMRESULTS",
+    "SIM_PLATFORM",
+    "VCS_HOME",
+    "VSO_HOME",
+    "XCELIUMHOME",
+)
+
 # Use the absolute path to locate the 'templates' directory
 file_loader = jinja2.FileSystemLoader(searchpath=os.path.join(dir_path, 'templates'))
 jinja2_env = jinja2.Environment(loader=file_loader)
@@ -260,8 +275,9 @@ class VCompJob(Job):
             log.debug("Skipping lmstat -a")
 
         with open(os.path.join(self.job_dir, 'env.out'), 'w') as env_out:
-            for key, value in sorted(os.environ.items()):
-                env_out.write("{}={}\n".format(key, value))
+            for key in ENV_CAPTURE_KEYS:
+                if key in os.environ:
+                    env_out.write("{}={}\n".format(key, os.environ[key]))
         with open(os.path.join(self.job_dir, 'hostname.out'), 'w') as hostname_out:
             subprocess.run(["hostname"], stdout=hostname_out, stderr=subprocess.STDOUT, check=False)
 
@@ -660,16 +676,16 @@ class TestJob(Job):
             # As such, we'll use that name as the unique value to create hash
             socket_file = os.path.join(self.job_dir, "{}.socket".format(socket_name))
             socket_file = os.path.join("/tmp", sha1(socket_file.encode('ascii')).hexdigest())
-            sim_opts += " +SOCKET__{}={}".format(socket_name, socket_file)
+            sim_opts += " " + shlex.join(["+SOCKET__{}={}".format(socket_name, socket_file)])
             socket_command = socket_command.format(socket_file=socket_file)
             sockets.append((socket_name, socket_command, socket_file))
 
         # --- Add Test Name and Merge CLI/Bazel Options (Common Logic) ---
-        sim_opts += " +UVM_TESTNAME={uvm_testname} ".format(uvm_testname=runtime_options['uvm_testname'], )
+        sim_opts += " " + shlex.join(["+UVM_TESTNAME={}".format(runtime_options['uvm_testname'])])
         combined_sim_args = merge_test_runtime_sim_opts(runtime_options, options.sim_opts)
         sim_opts += ' ' + format_sim_opts_dict(combined_sim_args)
 
-        pre_run_cmd = runtime_options['pre_run']
+        pre_run_cmd = shlex.quote(runtime_options['pre_run']) if runtime_options['pre_run'] else ""
 
         default_capture = 'hdl_top'
         waves_db = self.job_dir
@@ -711,13 +727,13 @@ class TestJob(Job):
                     filep.write("\n".join(tcl_commands))
 
         if options.uvm_set_int:
-            sim_opts += ' +uvm_set_config_int=' + ' +uvm_set_config_int='.join(options.uvm_set_int)
+            sim_opts += " " + shlex.join(["+uvm_set_config_int={}".format(value) for value in options.uvm_set_int])
         if options.uvm_set_str:
-            sim_opts += ' +uvm_set_config_string=' + ' +uvm_set_config_string='.join(options.uvm_set_str)
+            sim_opts += " " + shlex.join(["+uvm_set_config_string={}".format(value) for value in options.uvm_set_str])
         if options.sim_opts_file:
             with open(options.sim_opts_file, 'r') as sim_opts_file:
                 for line in sim_opts_file:
-                    sim_opts += ' ' + line.strip()
+                    sim_opts += " " + shlex.join(shlex.split(line, comments=True))
 
         if options.verbosity:
             if 'UVM_VERBOSITY' not in sim_opts:
@@ -736,19 +752,23 @@ class TestJob(Job):
         if options.uvm_max_quit_count:
             sim_opts += ' +UVM_MAX_QUIT_COUNT={}'.format(options.uvm_max_quit_count)
         if options.uvm_set_verbosity:
-            sim_opts += ' +uvm_set_verbosity=' + ' +uvm_set_verbosity='.join(options.uvm_set_verbosity)
+            sim_opts += " " + shlex.join(["+uvm_set_verbosity={}".format(value) for value in options.uvm_set_verbosity])
         if options.uvm_set_config_int:
-            sim_opts += ' +uvm_set_config_int=' + ' +uvm_set_config_int='.join(options.uvm_set_config_int)
+            sim_opts += " " + shlex.join(
+                ["+uvm_set_config_int={}".format(value) for value in options.uvm_set_config_int])
         if options.uvm_set_config_string:
-            sim_opts += ' +uvm_set_config_string=' + ' +uvm_set_config_string='.join(options.uvm_set_config_string)
+            sim_opts += " " + shlex.join(
+                ["+uvm_set_config_string={}".format(value) for value in options.uvm_set_config_string])
         if options.gui:
             sim_opts += self.simulator.get_gui_command_options()
 
         # --- Runtime Args File (Delegate path) ---
         bazel_runtime_args_file = self.vcomper.bazel_runtime_args # Get path from vcomper
         if os.path.exists(bazel_runtime_args_file):
-            sim_opts += " -f {} ".format(
-                sim_artifacts.runfiles_path(bazel_runtime_args_file, self.vcomper.bazel_runfiles_main))
+            sim_opts += " " + shlex.join([
+                "-f",
+                sim_artifacts.runfiles_path(bazel_runtime_args_file, self.vcomper.bazel_runfiles_main),
+            ])
         else:
             log.warning(f"Runtime args file not found: {bazel_runtime_args_file}")
 
@@ -820,6 +840,7 @@ class TestJob(Job):
         sim_artifacts.write_executable_script(
             rerun_script_path,
             rerun_template.render(
+                project_dir=shlex.quote(self.rcfg.proj_dir),
                 rerun_target=shlex.quote(self.target),
                 seed=seed,
                 reproduce_args=shlex.join(options.reproduce_args),
@@ -1203,7 +1224,7 @@ def main(rcfg, options):
 
     failures = {}
     for bench, (icfgs, test_list) in rcfg.all_vcomp.items():
-        failures[bench] = sum([not j.jobstatus.successful for icfg in icfgs for j in icfg.jobs])
+        failures[bench] = sum([j.jobstatus == JobStatus.FAILED for icfg in icfgs for j in icfg.jobs])
         # Count failures directly from the job objects stored in test_jobs_list
         #num_failed = sum(1 for j in test_jobs_list if j.jobstatus and not j.jobstatus.successful)
         #failures[bench] = num_failed

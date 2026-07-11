@@ -2,4 +2,7 @@
 set -euo pipefail
 
 SIMMER_BIN="${SIMMER_BIN:-simmer}"
+PROJECT_DIR={{ project_dir }}
+cd "$PROJECT_DIR"
+export PROJ_DIR="$PROJECT_DIR"
 exec "$SIMMER_BIN" -t {{ rerun_target }} --seed {{ seed }} {{ reproduce_args }} "$@"

@@ -31,6 +31,12 @@ py_test(
 )
 
 py_test(
+    name = "cmn_logging_test",
+    srcs = ["cmn_logging_test.py"],
+    deps = ["//lib:cmn_logging"],
+)
+
+py_test(
     name = "job_manager_launch_test",
     srcs = ["job_manager_launch_test.py"],
     deps = [
