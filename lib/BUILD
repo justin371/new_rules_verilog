@@ -1,6 +1,7 @@
+load("@pip_deps//:requirements.bzl", "requirement")
+
 # vim: set ft=bzl :
 load("@rules_python//python:defs.bzl", "py_library")
-load("@pip_deps//:requirements.bzl", "requirement")
 
 package(default_visibility = ["//visibility:public"])
 

@@ -10,6 +10,7 @@ rules_verilog_public_repositories()
 # Swap the load/call above if that environment needs to be restored.
 
 load("@rules_python//python:repositories.bzl", "py_repositories")
+
 py_repositories()
 
 load("@rules_python//python:pip.bzl", "pip_parse")
@@ -21,6 +22,7 @@ pip_parse(
 )
 
 load("@pip_deps//:requirements.bzl", "install_deps")
+
 install_deps()
 
 load("@bazel_skylib//:workspace.bzl", "bazel_skylib_workspace")
@@ -28,6 +30,7 @@ load("@bazel_skylib//:workspace.bzl", "bazel_skylib_workspace")
 bazel_skylib_workspace()
 
 load("@buildifier_prebuilt//:defs.bzl", "buildifier_prebuilt_register_toolchains")
+
 buildifier_prebuilt_register_toolchains()
 
 local_repository(

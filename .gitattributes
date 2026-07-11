@@ -1,3 +1,5 @@
-# Force GitHugb to recognize BUILD and *.bzl files with the Starlark language
+* text=auto eol=lf
+
+# Force GitHub to recognize BUILD and *.bzl files as Starlark.
 *.bzl linguist-language=Starlark
 BUILD linguist-language=Starlark

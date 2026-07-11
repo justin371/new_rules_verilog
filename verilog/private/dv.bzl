@@ -1,8 +1,8 @@
 # vim: set ft=bzl :
 """Rules for building DV infrastructure."""
 
-load(":verilog.bzl", "ToolEncapsulationInfo", "VerilogInfo", "flists_to_arguments", "gather_shell_defines", "get_transitive_srcs", "runfiles_relative_short_path")
 load("//deps:gatesim_modes_list.bzl", "GATESIM_MODES")
+load(":verilog.bzl", "ToolEncapsulationInfo", "VerilogInfo", "flists_to_arguments", "gather_shell_defines", "get_transitive_srcs", "runfiles_relative_short_path")
 
 DVTestInfo = provider(fields = {
     "sim_opts": "Simulation :options to carry forward.",
@@ -84,7 +84,7 @@ def _validate_runtime_args(runtime_args, simulator):
                     fail(
                         "{} runtime arg '{}' uses a sim-root-relative path. " +
                         "Use bazel_runfiles_main/... or an absolute path instead."
-                        .format(simulator, arg)
+                            .format(simulator, arg),
                     )
 
 def _verilog_dv_test_cfg_impl(ctx):
@@ -150,7 +150,7 @@ def _verilog_dv_test_cfg_impl(ctx):
     if tb_simulator and simulator != tb_simulator:
         fail(
             "verilog_dv_test_cfg {} resolved simulator '{}' but tb {} uses '{}'."
-            .format(ctx.label, simulator, tb.label, tb_simulator)
+                .format(ctx.label, simulator, tb.label, tb_simulator),
         )
 
     pre_run = None
@@ -269,7 +269,7 @@ _verilog_dv_test_cfg_rule = rule(
                   "This option is inheritable. Use -1 to inherit, 0 to disable, or a positive value to set a timeout.",
         ),
         "description": attr.string(
-            doc = "The test scenario descriptions"
+            doc = "The test scenario descriptions",
         ),
     },
     outputs = {
@@ -292,33 +292,33 @@ def verilog_dv_test_cfg(name = None, tags = None, abstract = None, inherits = No
     #get testcase arguments
     params = {}
     if name != None:
-        params['name'] = name
+        params["name"] = name
     if abstract != None:
-        params['abstract'] = abstract
+        params["abstract"] = abstract
     if inherits != None:
-        params['inherits'] = inherits
+        params["inherits"] = inherits
     if uvm_testname != None:
-        params['uvm_testname'] = uvm_testname
+        params["uvm_testname"] = uvm_testname
     if tb != None:
-        params['tb'] = tb
+        params["tb"] = tb
     if simulator != None:
-        params['simulator'] = simulator
+        params["simulator"] = simulator
     if no_run != None:
-        params['no_run'] = no_run
+        params["no_run"] = no_run
     if sockets != None:
-        params['sockets'] = sockets
+        params["sockets"] = sockets
     if pre_run != None:
-        params['pre_run'] = pre_run
+        params["pre_run"] = pre_run
     if timeout != None:
-        params['timeout'] = timeout
+        params["timeout"] = timeout
     if description != None:
-        params['description'] = description
+        params["description"] = description
 
     #bazel case for pre_sim
     pre_sim_opts = dict(sim_opts)
     pre_sim_opts.update(pre_opts)
 
-    params['sim_opts'] = pre_sim_opts
+    params["sim_opts"] = pre_sim_opts
 
     #bazel case for pre_sim
     #remove "gatesim" keyword in tags when pre_sim
@@ -327,8 +327,9 @@ def verilog_dv_test_cfg(name = None, tags = None, abstract = None, inherits = No
         for tag in tags:
             if tag != "gatesim":
                 temp_tags.append(tag)
+
     #replace temp_tags without "gatesim" with params['tags']
-    params['tags'] = temp_tags
+    params["tags"] = temp_tags
     _verilog_dv_test_cfg_rule(**params)
 
     #bazel case for post_sim
@@ -336,27 +337,28 @@ def verilog_dv_test_cfg(name = None, tags = None, abstract = None, inherits = No
         post_sim_opts = dict(sim_opts)
         post_sim_opts.update(post_opts)
 
-        params['sim_opts'] = post_sim_opts
+        params["sim_opts"] = post_sim_opts
 
         #remove "ci_gate", "nightly", "weekly" keyword in tags when post_sim
         temp_tags = []
         for tag in tags:
             if tag != "ci_gate" and tag != "nightly" and tag != "weekly":
                 temp_tags.append(tag)
-        params['tags'] = temp_tags
+        params["tags"] = temp_tags
 
         #add suffix for name,tb,inherits according gatesim corner to create post_sim testcase
         for corner in gatesim_modes:
-            params['name'] = name + "_" + corner
+            params["name"] = name + "_" + corner
             if inherits != None:
-                params['inherits'] = [_gatesim_target(inherit, corner) for inherit in inherits]
+                params["inherits"] = [_gatesim_target(inherit, corner) for inherit in inherits]
+
             #determin gatesim tb when gls_tb is transmited
             if gls_tb != None:
-                params['tb'] = _gatesim_target(gls_tb, corner)
+                params["tb"] = _gatesim_target(gls_tb, corner)
             elif tb != None:
-                params['tb'] = _gatesim_target(tb, corner)
+                params["tb"] = _gatesim_target(tb, corner)
             if uvm_testname != None:
-                params['uvm_testname'] = uvm_testname
+                params["uvm_testname"] = uvm_testname
             _verilog_dv_test_cfg_rule(**params)
 
 def _is_dpi_shared_lib(path):
@@ -378,6 +380,7 @@ def _verilog_dv_library_impl(ctx):
         in_flist = ctx.files.srcs
 
     content = []
+
     # If using makelib, start here
     if ctx.attr.makelib:
         content.append("-makelib")
@@ -520,10 +523,11 @@ def _verilog_dv_tb_impl(ctx):
             compile_args.append(cfg)
         else:
             compile_args.append("-compcnfg {}".format(cfg))
+
     #vcs_extra_compile_args.append("-top {}".format(top))
     #xrun_extra_compile_args.append("-top {}".format(top))
     #vcs_extra_compile_args.append("-top hdl_top -top hvl_top")
-    #xrun_extra_compile_args.append("-top hdl_top -top hvl_top")    
+    #xrun_extra_compile_args.append("-top hdl_top -top hvl_top")
     selected_compile_args = ctx.attr.extra_compile_args
     if simulator == "VCS":
         compile_args.extend(_sanitize_vcs_compile_args(selected_compile_args))

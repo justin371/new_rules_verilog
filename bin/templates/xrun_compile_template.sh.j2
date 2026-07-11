@@ -1,7 +1,9 @@
 #!/usr/bin/env bash
+set -Eeuo pipefail
 
-cd {{ bazel_runfiles_main }} && \
+trap 'rc=$?; printf "ERROR: Xcelium compile failed at line %s (exit %s): %s\n" "$LINENO" "$rc" "$BASH_COMMAND" >&2' ERR
 
+cd {{ bazel_runfiles_main }}
 runmod -t xrun -- \
   {% if options.msie_prim is none -%}
   -xmlibdirname {{ VCOMP_DIR }} \

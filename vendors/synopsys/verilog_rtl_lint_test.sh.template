@@ -3,6 +3,8 @@
 # It is not intended to be run stand-alone
 set -Eeuo pipefail
 
+trap 'rc=$?; printf "ERROR: VCS lint script failed at line %s (exit %s): %s\n" "$LINENO" "$rc" "$BASH_COMMAND" >&2' ERR
+
 mv lint.log lint.log.bak 2> /dev/null || true
 {SIMULATOR_COMMAND} \
   -l lint.log \

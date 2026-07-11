@@ -4,6 +4,8 @@
 # See http://agilesoc.com/open-source-projects/svunit/
 set -Eeuo pipefail
 
+trap 'rc=$?; printf "ERROR: SVUnit script failed at line %s (exit %s): %s\n" "$LINENO" "$rc" "$BASH_COMMAND" >&2' ERR
+
 generate_waves=0
 launch_wave_viewer=0
 remaining_args=()

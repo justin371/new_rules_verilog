@@ -2,8 +2,11 @@
 """Public entry point to all supported Verilog rules and APIs"""
 
 load(
-    "//verilog/private:verilog.bzl",
-    _verilog_tool_encapsulation = "verilog_tool_encapsulation",
+    "//verilog/private:dv.bzl",
+    _verilog_dv_library = "verilog_dv_library",
+    _verilog_dv_tb = "verilog_dv_tb",
+    _verilog_dv_test_cfg = "verilog_dv_test_cfg",
+    _verilog_dv_unit_test = "verilog_dv_unit_test",
 )
 load(
     "//verilog/private:rtl.bzl",
@@ -15,11 +18,8 @@ load(
     _verilog_rtl_unit_test = "verilog_rtl_unit_test",
 )
 load(
-    "//verilog/private:dv.bzl",
-    _verilog_dv_library = "verilog_dv_library",
-    _verilog_dv_tb = "verilog_dv_tb",
-    _verilog_dv_test_cfg = "verilog_dv_test_cfg",
-    _verilog_dv_unit_test = "verilog_dv_unit_test",
+    "//verilog/private:verilog.bzl",
+    _verilog_tool_encapsulation = "verilog_tool_encapsulation",
 )
 
 verilog_tool_encapsulation = _verilog_tool_encapsulation

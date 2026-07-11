@@ -1,9 +1,8 @@
 #!/usr/bin/env bash
 
-# Set shell options for safety
-set -o errexit
-set -o nounset
-set -o pipefail
+set -Eeuo pipefail
+
+trap 'rc=$?; printf "ERROR: simulation script failed at line %s (exit %s): %s\n" "$LINENO" "$rc" "$BASH_COMMAND" >&2' ERR
 
 # Export variables that might be useful for sub-processes or debugging
 export PROJ_DIR={{ job.vcomper.rcfg.proj_dir }}

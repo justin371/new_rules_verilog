@@ -225,6 +225,7 @@ class VcsRuntimeContractTest(unittest.TestCase):
 
     def test_shell_templates_preserve_failures_and_argv(self):
         coverage = self._read_repo_file("bin/templates/vcs_cov_merge_template.sh.j2")
+        vcs_compile = self._read_repo_file("bin/templates/vcs_compile_template.sh.j2")
         sim = self._read_repo_file("bin/templates/sim_template.sh.j2")
         svunit = self._read_repo_file("vendors/cadence/verilog_rtl_unit_test_svunit.sh.template")
         cdc = self._read_repo_file("vendors/cadence/verilog_rtl_cdc_test.sh.template")
@@ -235,6 +236,9 @@ class VcsRuntimeContractTest(unittest.TestCase):
         ]
 
         self.assertIn("set -Eeuo pipefail", coverage)
+        self.assertIn("set -Eeuo pipefail", vcs_compile)
+        self.assertIn("VCS compile failed at line", vcs_compile)
+        self.assertIn("simulation script failed at line", sim)
         self.assertNotIn("final_result + sim_exit_code", sim)
         self.assertNotIn("sockets_exit_code + socket_exit_code", sim)
         self.assertNotIn('time eval "{{ simulation_command }}"', sim)
@@ -458,6 +462,8 @@ class VcsRuntimeContractTest(unittest.TestCase):
 
         self.assertIn("{{ reproduce_args }}", template)
         self.assertIn("{{ rerun_target }}", template)
+        self.assertIn("SIMMER_KEEP_TERMINAL", template)
+        self.assertNotIn('exec "$SIMMER_BIN"', template)
         self.assertIn("${SIMMER_BIN:-simmer}", template)
         self.assertIn("{{ project_dir }}", template)
         self.assertIn('cd "$PROJECT_DIR"', template)
@@ -510,7 +516,7 @@ class VcsRuntimeContractTest(unittest.TestCase):
         self.assertIn('pre_fa.append("  +define+{}{}', rtl_bzl)
         self.assertIn('defines.extend(["+define+{}{}', rtl_bzl)
         self.assertNotIn('defines.extend(["+{}{}', rtl_bzl)
-        self.assertIn("params['inherits'] = [_gatesim_target(inherit, corner) for inherit in inherits]", dv_bzl)
+        self.assertIn("[_gatesim_target(inherit, corner) for inherit in inherits]", dv_bzl)
         self.assertIn("sets no_synth=True, but rules_verilog has no synthesis consumer", rtl_bzl)
         self.assertNotIn("        no_synth = True,", rtl_bzl)
         self.assertNotIn('"_runtime_args_template"', dv_bzl)

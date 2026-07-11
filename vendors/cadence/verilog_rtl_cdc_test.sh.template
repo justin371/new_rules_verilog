@@ -3,6 +3,8 @@
 # It is not intended to be run stand-alone
 set -Eeuo pipefail
 
+trap 'rc=$?; printf "ERROR: CDC script failed at line %s (exit %s): %s\n" "$LINENO" "$rc" "$BASH_COMMAND" >&2' ERR
+
 use_gui=0
 remaining_args=()
 

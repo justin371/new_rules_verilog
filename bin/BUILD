@@ -1,6 +1,7 @@
+load("@pip_deps//:requirements.bzl", "requirement")
+
 # vim: set ft=bzl :
 load("@rules_python//python:defs.bzl", "py_binary", "py_library")
-load("@pip_deps//:requirements.bzl", "requirement")
 
 package(default_visibility = ["//visibility:public"])
 
@@ -38,22 +39,22 @@ py_binary(
 
 py_binary(
     name = "simmer",
-    data = glob(["templates/**"]),
     srcs = ["simmer.py"],
+    data = glob(["templates/**"]),
     deps = [
-        "//bin:check_test",
         "//bin:args_parser",
+        "//bin:check_test",
         "//lib:cmn_logging",
         "//lib:compile_cache",
         "//lib:job_lib",
         "//lib:parser_actions",
         "//lib:regression",
-        "//lib:rv_utils",
+        "//lib:regression_report",
         "//lib:runtime_options",
+        "//lib:rv_utils",
         "//lib:sim_artifacts",
         "//lib:simmer_results",
-        "//lib/simulators:simulators",
-        "//lib:regression_report",
+        "//lib/simulators",
         requirement("jinja2"),
     ],
 )
@@ -61,12 +62,12 @@ py_binary(
 py_library(
     name = "args_parser_lib",
     srcs = [
-        "args_parser.py",
         "args_parse/__init__.py",
         "args_parse/common.py",
         "args_parse/parser.py",
         "args_parse/vcs.py",
         "args_parse/xcelium.py",
+        "args_parser.py",
     ],
     deps = ["//lib:parser_actions"],
 )
@@ -74,12 +75,12 @@ py_library(
 py_binary(
     name = "args_parser",
     srcs = [
-        "args_parser.py",
         "args_parse/__init__.py",
         "args_parse/common.py",
         "args_parse/parser.py",
         "args_parse/vcs.py",
         "args_parse/xcelium.py",
+        "args_parser.py",
     ],
     deps = ["//lib:parser_actions"],
 )

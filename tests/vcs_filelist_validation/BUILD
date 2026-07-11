@@ -14,21 +14,20 @@ package(default_visibility = ["//visibility:public"])
 
 verilog_rtl_library(
     name = "unit_test_top",
-    deps = ["@filelist_external_fixture//:external_rtl"],
     modules = ["unit_test_top.sv"],
+    deps = ["@filelist_external_fixture//:external_rtl"],
 )
 
 verilog_rtl_lint_test(
     name = "rtl_lint_vcs",
-    deps = [":unit_test_top"],
     simulator = "VCS",
     tags = ["manual"],
     top = "unit_test_top",
+    deps = [":unit_test_top"],
 )
 
 verilog_dv_tb(
     name = "dv_tb_vcs",
-    deps = [":unit_test_top"],
     extra_compile_args = [
         "+define+UNIFIED_VCS_COMPILE_ARG",
     ],
@@ -39,21 +38,22 @@ verilog_dv_tb(
     run_pass_patterns = ["^PROJECT PASS$"],
     simulator = "VCS",
     vcs_cm_hier = "coverage_hier.cfg",
+    deps = [":unit_test_top"],
 )
 
 verilog_dv_tb(
     name = "dv_tb_xrun_ccf",
     ccf = ["coverage.ccf"],
-    deps = [":unit_test_top"],
     simulator = "XRUN",
+    deps = [":unit_test_top"],
 )
 
 verilog_dv_test_cfg(
     name = "dv_cfg_vcs",
+    timeout = 17,
     simulator = "VCS",
     tags = ["manual"],
     tb = ":dv_tb_vcs",
-    timeout = 17,
 )
 
 verilog_dv_test_cfg(
@@ -64,68 +64,67 @@ verilog_dv_test_cfg(
 
 verilog_dv_test_cfg(
     name = "dv_cfg_vcs_no_timeout",
+    timeout = 0,
     tags = ["manual"],
     tb = ":dv_tb_vcs",
-    timeout = 0,
 )
 
 verilog_dv_unit_test(
     name = "dv_unit_vcs",
     compile_args = ["+UNIT_VCS_COMPILE_ARG"],
-    deps = [":unit_test_top"],
     run_args = ["+UNIT_VCS_RUN_ARG"],
     simulator = "VCS",
     tags = ["manual"],
+    deps = [":unit_test_top"],
 )
 
 verilog_dv_unit_test(
     name = "dv_unit_xrun",
-    deps = [":unit_test_top"],
     simulator = "XRUN",
     tags = ["manual"],
+    deps = [":unit_test_top"],
 )
 
 verilog_rtl_unit_test(
     name = "rtl_unit_vcs",
-    deps = [":unit_test_top"],
     simulator = "VCS",
     tags = ["manual"],
+    deps = [":unit_test_top"],
 )
 
 verilog_rtl_unit_test(
     name = "rtl_unit_xrun",
-    deps = [":unit_test_top"],
     simulator = "XRUN",
     tags = ["manual"],
+    deps = [":unit_test_top"],
 )
 
 py_test(
     name = "vcs_filelist_validation_test",
-    main = "validate_vcs_filelist_test.py",
     srcs = ["validate_vcs_filelist_test.py"],
     data = [
         ":dv_cfg_vcs",
         ":dv_cfg_vcs_inherited",
         ":dv_cfg_vcs_no_timeout",
-        ":dv_unit_vcs",
-        ":dv_unit_xrun",
         ":dv_tb_vcs",
         ":dv_tb_vcs_compile_args.f",
         ":dv_tb_vcs_runtime_args.f",
         ":dv_tb_vcs_tb_options.py",
         ":dv_tb_xrun_ccf_compile_args.f",
         ":dv_tb_xrun_ccf_tb_options.py",
+        ":dv_unit_vcs",
+        ":dv_unit_xrun",
         ":rtl_lint_vcs",
         ":rtl_lint_vcs_cmds.tcl",
         ":rtl_unit_vcs",
         ":rtl_unit_xrun",
         "@filelist_external_fixture//:external_rtl",
     ],
+    main = "validate_vcs_filelist_test.py",
 )
 
 py_test(
     name = "vcs_runtime_contract_test",
-    main = "validate_vcs_runtime_contract_test.py",
     srcs = ["validate_vcs_runtime_contract_test.py"],
     data = [
         "//bin:simmer.py",
@@ -144,9 +143,10 @@ py_test(
         "//verilog/private:dv.bzl",
         "//verilog/private:rtl.bzl",
     ],
+    main = "validate_vcs_runtime_contract_test.py",
     deps = [
-        "//bin:lint_parser_hal",
         "//bin:args_parser_lib",
+        "//bin:lint_parser_hal",
         "//lib:job_lib",
         "//lib:runtime_options",
         "//lib/simulators:vcs",
