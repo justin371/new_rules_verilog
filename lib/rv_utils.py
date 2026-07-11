@@ -6,11 +6,9 @@ import getpass
 import os
 import re
 import json
-import shutil
 import subprocess
 from typing import Dict, Optional
 from urllib.parse import urlparse
-from bs4 import BeautifulSoup
 
 LOGGER_INDENT = 8
 SIMRESULTS = os.environ.get('SIMRESULTS', '')
@@ -308,100 +306,6 @@ def get_report_header(rcfg):
         "revision": _git_output(project_dir, "rev-parse", "--short", "HEAD") or "unknown",
         "commit": commit_url,
     }
-
-
-def process_value(value):
-    """
-    Process coverage values to remove extra percentage symbols
-    :param value: Coverage value string
-    :return: Processed value string
-    """
-    value = str(value)
-    if '%' in value:
-        return value.split('%')[0] + '%'
-    return value
-
-
-def get_coverage_data(rcfg, vcomp_jobs):
-    """
-    Collect coverage data from regression results
-    :param rcfg: Regression configuration object
-    :param vcomp_jobs: Dictionary of vcomponent jobs
-    :return: Dictionary containing coverage data
-    """
-    cov = {}
-
-    include = 'summ'
-    dut_pattern = 'hdl_top</A>.dut'
-    env_pattern = 'uvm_pkg</A>.uvm_test_top'
-
-    for vcomp, job in vcomp_jobs.items():
-        vcomp_name = vcomp.split(":")[-1]
-        cov[vcomp_name] = {'cc': {}, 'cf': {}}
-        if rcfg.options.coverage:
-            if not job.cov_work_dir:
-                rcfg.log.warning("Coverage work directory is unavailable for %s", vcomp_name)
-                continue
-            report_dir = os.path.join(job.cov_work_dir, "imc_report")
-            cmd = ["runmod", "xrun", "--", "imc", "-exec", os.path.join(job.cov_work_dir, "imc_report.tcl"), "-verbose"]
-            p = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
-            if p.returncode != 0:
-                rcfg.log.error("IMC report generation failed:\n%s", p.stderr)
-                continue
-
-            result = subprocess.run(['grep', '-rl', dut_pattern, report_dir], capture_output=True, text=True)
-            grep_files = result.stdout.splitlines()
-            dut_file = [f for f in grep_files if include in f]
-            if len(dut_file) != 1:
-                rcfg.log.error("Error: Dut coverage file not found")
-            else:
-                dut_file = dut_file[0]
-                with open(dut_file, 'r', encoding='utf-8') as f:
-                    soup = BeautifulSoup(f, 'html.parser')
-                    table = soup.find('table', id='totalTable')
-                    if table:
-                        rows = table.find_all('tr')
-                        if len(rows) >= 2:
-                            header = [th.get_text(strip=True).replace('\u00a0', '') for th in rows[0].find_all('th')]
-                            for row in rows[1:]:
-                                cells = [td.get_text(strip=True).replace('\u00a0', '') for td in row.find_all('td')]
-                                if 'Cumulative' in cells:
-                                    cov[vcomp_name]['cc'] = dict(zip(header, cells))
-
-            result = subprocess.run(['grep', '-rl', env_pattern, report_dir], capture_output=True, text=True)
-            grep_files = result.stdout.splitlines()
-            env_file = [f for f in grep_files if include in f]
-            if len(env_file) != 1:
-                rcfg.log.error("Error: Function coverage file not found")
-            else:
-                env_file = env_file[0]
-                with open(env_file, 'r', encoding='utf-8') as f:
-                    soup = BeautifulSoup(f, 'html.parser')
-                    table = soup.find('table', id='totalTable')
-                    if table:
-                        rows = table.find_all('tr')
-                        if len(rows) >= 2:
-                            header = [th.get_text(strip=True).replace('\u00a0', '') for th in rows[0].find_all('th')]
-                            for row in rows[1:]:
-                                cells = [td.get_text(strip=True).replace('\u00a0', '') for td in row.find_all('td')]
-                                if 'Cumulative' in cells:
-                                    cov[vcomp_name]['cf'] = dict(zip(header, cells))
-
-            cc_filtered = {
-                k.split(' ')[0]: process_value(v)
-                for k, v in cov[vcomp_name].get('cc', {}).items() if 'Average' in k and 'CoverGroup' not in k
-            }
-            cf_filtered = {
-                k.split(' ')[0]: process_value(v)
-                for k, v in cov[vcomp_name].get('cf', {}).items()
-                if k in ['Overall Average', 'Assertion Average', 'CoverGroup Average']
-            }
-            cov[vcomp_name]['cc'] = cc_filtered
-            cov[vcomp_name]['cf'] = cf_filtered
-
-            shutil.rmtree(report_dir, ignore_errors=True)
-
-    return cov
 
 
 def load_category_total_cases(cfg_path: Optional[str] = None) -> Dict[str, Dict]:

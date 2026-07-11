@@ -53,8 +53,8 @@ verilog_dv_library(
 ## verilog_dv_tb
 
 <pre>
-verilog_dv_tb(<a href="#verilog_dv_tb-name">name</a>, <a href="#verilog_dv_tb-ccf">ccf</a>, <a href="#verilog_dv_tb-defines">defines</a>, <a href="#verilog_dv_tb-deps">deps</a>, <a href="#verilog_dv_tb-extra_compile_args">extra_compile_args</a>, <a href="#verilog_dv_tb-extra_runfiles">extra_runfiles</a>, <a href="#verilog_dv_tb-extra_runtime_args">extra_runtime_args</a>,
-              <a href="#verilog_dv_tb-run_fail_patterns">run_fail_patterns</a>, <a href="#verilog_dv_tb-run_pass_patterns">run_pass_patterns</a>, <a href="#verilog_dv_tb-shells">shells</a>, <a href="#verilog_dv_tb-simulator">simulator</a>, <a href="#verilog_dv_tb-warning_waivers">warning_waivers</a>)
+verilog_dv_tb(<a href="#verilog_dv_tb-name">name</a>, <a href="#verilog_dv_tb-ccf">ccf</a>, <a href="#verilog_dv_tb-defines">defines</a>, <a href="#verilog_dv_tb-deps">deps</a>, <a href="#verilog_dv_tb-dut_instance">dut_instance</a>, <a href="#verilog_dv_tb-dut_top">dut_top</a>, <a href="#verilog_dv_tb-extra_compile_args">extra_compile_args</a>, <a href="#verilog_dv_tb-extra_runfiles">extra_runfiles</a>,
+              <a href="#verilog_dv_tb-extra_runtime_args">extra_runtime_args</a>, <a href="#verilog_dv_tb-run_fail_patterns">run_fail_patterns</a>, <a href="#verilog_dv_tb-run_pass_patterns">run_pass_patterns</a>, <a href="#verilog_dv_tb-shells">shells</a>, <a href="#verilog_dv_tb-simulator">simulator</a>, <a href="#verilog_dv_tb-vcs_cm_hier">vcs_cm_hier</a>, <a href="#verilog_dv_tb-warning_waivers">warning_waivers</a>, <a href="#verilog_dv_tb-xcelium_covfile">xcelium_covfile</a>)
 </pre>
 
 A DV Testbench.
@@ -82,6 +82,8 @@ A DV Testbench.
 | <a id="verilog_dv_tb-ccf"></a>ccf |  Xcelium coverage configuration file. At most one file is accepted; VCS coverage uses `-cm` options instead.   | <a href="https://bazel.build/docs/build-ref.html#labels">List of labels</a> | optional | [] |
 | <a id="verilog_dv_tb-defines"></a>defines |  Additional preprocessor defines to throw for this testbench compile. Key, value pairs are joined without additional characters. If it is a unary flag, set the value portion to be the empty string. For binary flags, add an '=' as a suffix to the key.   | <a href="https://bazel.build/docs/skylark/lib/dict.html">Dictionary: String -> String</a> | optional | {} |
 | <a id="verilog_dv_tb-deps"></a>deps |  A list of verilog_dv_library or verilog_rtl_library labels that the testbench is dependent on. Dependency ordering within this label list is not necessary if dependencies are consistently declared in all other rules.   | <a href="https://bazel.build/docs/build-ref.html#labels">List of labels</a> | required |  |
+| <a id="verilog_dv_tb-dut_instance"></a>dut_instance |  DUT instance hierarchy used by coverage reports.   | String | optional | `"hdl_top.dut"` |
+| <a id="verilog_dv_tb-dut_top"></a>dut_top |  DUT module name used to scope code coverage.   | String | optional | `"dut"` |
 | <a id="verilog_dv_tb-extra_compile_args"></a>extra_compile_args |  Additional flags to pass to the selected simulator compile/elaboration step.   | List of strings | optional | [] |
 | <a id="verilog_dv_tb-extra_runfiles"></a>extra_runfiles |  Additional files that need to be passed as runfiles to bazel. Most commonly used for files referred to by extra_compile_args or extra_runtime_args.   | <a href="https://bazel.build/docs/build-ref.html#labels">List of labels</a> | optional | [] |
 | <a id="verilog_dv_tb-extra_runtime_args"></a>extra_runtime_args |  Additional flags passed only to simulator runs. Runtime path arguments should use absolute paths or `bazel_runfiles_main/...` paths.   | List of strings | optional | [] |
@@ -89,7 +91,9 @@ A DV Testbench.
 | <a id="verilog_dv_tb-run_pass_patterns"></a>run_pass_patterns |  Regular expressions that identify a successful simulation. When set, at least one must match.   | List of strings | optional | [] |
 | <a id="verilog_dv_tb-shells"></a>shells |  List of shells to use. Each label must be a verilog_rtl_shell instance. Each shell thrown will create two defines:  \<code>define gumi_{module} {module}_shell  \</code>define gumi_use_{module}_shell The shell module declaration must be guarded by the gumi_use_{module}_shell define:  \<code>ifdef gumi_use_{module}_shell     module {module}_shell(/*AUTOARGS*/);       ...     endmodule  \</code>endif   | <a href="https://bazel.build/docs/build-ref.html#labels">List of labels</a> | optional | [] |
 | <a id="verilog_dv_tb-simulator"></a>simulator |  Simulator to use for this DV testbench. Supported values are XRUN and VCS. The selected simulator determines which compile/runtime filelists are generated.   | String | optional | `"XRUN"` |
+| <a id="verilog_dv_tb-vcs_cm_hier"></a>vcs_cm_hier |  VCS `-cm_hier` coverage configuration file.   | <a href="https://bazel.build/docs/build-ref.html#labels">Label</a> | optional | None |
 | <a id="verilog_dv_tb-warning_waivers"></a>warning_waivers |  Waive warnings in the compile. By default, simmer promotes all compile warnings to errors. This list is converted to python regular expressions which are imported by simmer to waive warning. All warnings may be waived by using '\*W'   | List of strings | optional | [] |
+| <a id="verilog_dv_tb-xcelium_covfile"></a>xcelium_covfile |  Xcelium coverage configuration file. Replaces the legacy `ccf` attribute.   | <a href="https://bazel.build/docs/build-ref.html#labels">Label</a> | optional | None |
 
 
 <a id="verilog_dv_test_cfg"></a>

@@ -15,6 +15,16 @@ py_library(
 )
 
 py_library(
+    name = "compile_cache",
+    srcs = ["compile_cache.py"],
+)
+
+py_library(
+    name = "coverage_data",
+    srcs = ["coverage_data.py"],
+)
+
+py_library(
     name = "job_lib",
     srcs = ["job_lib.py"],
     deps = [":runtime_options"],
@@ -37,7 +47,6 @@ py_library(
 py_library(
     name = "rv_utils",
     srcs = ["rv_utils.py"],
-    deps = [requirement("beautifulsoup4")],
 )
 
 py_library(

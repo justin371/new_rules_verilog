@@ -35,14 +35,16 @@
       <tbody>
         {% for item in benches %}
         {% set passrate = item.passrate|default(0, true)|float %}
-        {% set code_coverage = item.cov_code|default(0, true)|float %}
-        {% set functional_coverage = item.cov_func|default(0, true)|float %}
+        {% set code_available = item.cov_code is not none and item.cov_code is defined %}
+        {% set functional_available = item.cov_func is not none and item.cov_func is defined %}
+        {% set code_coverage = item.cov_code|float if code_available else 0 %}
+        {% set functional_coverage = item.cov_func|float if functional_available else 0 %}
         <tr>
           <td class="cell-primary"><a href="{{ project_name|urlencode }}/{{ item.bench|urlencode }}/index.html">{{ item.bench }}</a></td>
           <td>{{ item.total|default(0, true) }}</td>
           <td class="{% if passrate >= 99.999 %}heat-good{% elif passrate >= 90 %}heat-warn{% else %}heat-bad{% endif %}">{{ "%.2f"|format(passrate) }}%</td>
-          <td class="{% if code_coverage >= 90 %}heat-good{% elif code_coverage >= 75 %}heat-warn{% elif code_coverage > 0 %}heat-bad{% else %}heat-neutral{% endif %}">{{ "%.2f"|format(code_coverage) }}%</td>
-          <td class="{% if functional_coverage >= 90 %}heat-good{% elif functional_coverage >= 75 %}heat-warn{% elif functional_coverage > 0 %}heat-bad{% else %}heat-neutral{% endif %}">{{ "%.2f"|format(functional_coverage) }}%</td>
+          <td class="{% if not code_available %}heat-neutral{% elif code_coverage >= 90 %}heat-good{% elif code_coverage >= 75 %}heat-warn{% else %}heat-bad{% endif %}">{% if code_available %}{{ "%.2f"|format(code_coverage) }}%{% else %}N/A{% endif %}</td>
+          <td class="{% if not functional_available %}heat-neutral{% elif functional_coverage >= 90 %}heat-good{% elif functional_coverage >= 75 %}heat-warn{% else %}heat-bad{% endif %}">{% if functional_available %}{{ "%.2f"|format(functional_coverage) }}%{% else %}N/A{% endif %}</td>
           <td class="{% if item.failed|default(0, true)|int > 0 %}heat-bad{% else %}heat-good{% endif %}">{{ item.failed|default(0, true) }}</td>
           <td class="cell-muted">{{ item.timestamp|default("No report", true) }}</td>
         </tr>

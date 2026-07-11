@@ -6,7 +6,10 @@ import csv
 import json
 import re
 import shlex
+import shutil
 import subprocess
+
+from lib.coverage_data import parse_coverage_summary
 
 from .base import SimulatorInterface
 
@@ -339,7 +342,11 @@ class VcsSimulator(SimulatorInterface):
         # Coverage (Functional/Code)
         if self.options.cm:
             vcomp_job.cov_work_dir = os.path.join(self.rcfg.regression_dir, vcomp_job.name + "__COV_WORK_VCS.vdb")
-            # No need to create dir here, VCS does it with -cm_dir
+            if self.options.no_compile:
+                shutil.rmtree(os.path.join(vcomp_job.cov_work_dir, "snps", "coverage", "db", "testdata"),
+                              ignore_errors=True)
+            else:
+                shutil.rmtree(vcomp_job.cov_work_dir, ignore_errors=True)
             opts['cov_opts'] += ' -cm_dir {} '.format(vcomp_job.cov_work_dir)
             # Translate coverage level options if needed
             cm_level = self.options.cm
@@ -350,8 +357,9 @@ class VcsSimulator(SimulatorInterface):
                 opts['cov_opts'] += ' -cm_line {} '.format(self.options.vcs_cm_line)
             if self.options.vcs_cm_report is not None:
                 opts['cov_opts'] += ' -cm_report {} '.format(self.options.vcs_cm_report)
-            if self.options.vcs_cm_hier is not None:
-                opts['cov_opts'] += ' -cm_hier {} '.format(self.options.vcs_cm_hier)
+            cm_hier = self.options.vcs_cm_hier or getattr(vcomp_job, "tb_options", {}).get("vcs_cm_hier")
+            if cm_hier:
+                opts['cov_opts'] += ' -cm_hier {} '.format(cm_hier)
             self.setup_coverage_merge(vcomp_job) # Setup merge script
 
         # XPROP
@@ -411,7 +419,8 @@ class VcsSimulator(SimulatorInterface):
             sim_args.append("-xprop=banner")
         if self.options.vcs_xprop_report:
             sim_args.append("-report=xprop")
-        test_job.test_name_seed = "{}_seed_{}".format(test_job.name, seed) # Needed for VCS sim script template
+        coverage_name = "{}_sv{}_i{}".format(test_job.name, seed, test_job.iteration)
+        test_job.test_name_seed = coverage_name
 
         # Coverage
         if self.options.cm:
@@ -425,8 +434,16 @@ class VcsSimulator(SimulatorInterface):
                 "-cm_dir",
                 test_job.vcomper.cov_work_dir,
                 "-cm_name",
-                "{}_sv{}".format(test_job.name, seed),
+                coverage_name,
             ])
+            test_job.coverage_db_path = os.path.join(
+                test_job.vcomper.cov_work_dir,
+                "snps",
+                "coverage",
+                "db",
+                "testdata",
+                coverage_name,
+            )
 
         return shlex.join(sim_args)
 
@@ -498,6 +515,8 @@ class VcsSimulator(SimulatorInterface):
         st = os.stat(merge_sh)
         os.chmod(merge_sh, st.st_mode | stat.S_IEXEC)
         vcomp_job.coverage_merge_script = merge_sh
+        vcomp_job.coverage_report_dir = report_dir
+        vcomp_job.merged_coverage_dir = merged_db_path
         self.rcfg.deferred_messages.append("Merge/Launch VCS coverage with {}".format(merge_sh))
 
     def run_report_coverage_merge(self, vcomp_jobs):
@@ -510,6 +529,33 @@ class VcsSimulator(SimulatorInterface):
             result = subprocess.run(["bash", merge_script], capture_output=True, text=True)
             if result.returncode != 0:
                 raise RuntimeError("VCS coverage merge failed:\n{}\n{}".format(result.stdout, result.stderr))
+
+    def cleanup_test_coverage(self, test_job):
+        path = getattr(test_job, "coverage_db_path", None)
+        if path:
+            shutil.rmtree(path, ignore_errors=True)
+
+    def collect_coverage_data(self, vcomp_jobs):
+        if not self.options.cm:
+            return {vcomp.split(":")[-1]: {"cc": {}, "cf": {}} for vcomp in vcomp_jobs}
+        coverage = {}
+        for vcomp, job in vcomp_jobs.items():
+            report_dir = getattr(job, "coverage_report_dir", None)
+            metrics = parse_coverage_summary(os.path.join(report_dir, "dashboard.txt")) if report_dir else {}
+            code_metrics = {
+                key: value for key, value in metrics.items()
+                if key not in ("CoverGroup", )
+            }
+            functional_metrics = {}
+            if "CoverGroup" in metrics:
+                functional_metrics = {
+                    "Overall": metrics["CoverGroup"],
+                    "CoverGroup": metrics["CoverGroup"],
+                }
+            if "Assertion" in metrics:
+                functional_metrics["Assertion"] = metrics["Assertion"]
+            coverage[vcomp.split(":")[-1]] = {"cc": code_metrics, "cf": functional_metrics}
+        return coverage
 
     def get_log_parsing_info(self):
         return {'warning_regex': r"^(?:Warning|Error)(?:-|\s*:).*"}

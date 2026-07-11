@@ -21,11 +21,13 @@ def _safe_int(value):
 
 
 def _coverage_metric(coverage, section, metric="Overall"):
-    value = coverage.get(section, {}).get(metric, 0)
+    value = coverage.get(section, {}).get(metric)
+    if value in (None, ""):
+        return None
     try:
         return float(str(value).rstrip("%"))
     except (TypeError, ValueError):
-        return 0.0
+        return None
 
 
 def _slug(value):

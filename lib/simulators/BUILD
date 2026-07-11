@@ -15,6 +15,7 @@ py_library(
     srcs = ["xcelium.py"],
     deps = [
         ":base",
+        "//lib:coverage_data",
         requirement("jinja2"),
     ],
 )
@@ -24,7 +25,7 @@ py_library(
     srcs = ["vcs.py"],
     deps = [
         ":base",
-        # Add deps needed by vcs.py
+        "//lib:coverage_data",
     ],
 )
 

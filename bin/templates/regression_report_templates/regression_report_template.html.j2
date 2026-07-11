@@ -25,16 +25,18 @@
 </div>
 
 {% set passrate = summary.passrate|default(0, true)|float %}
-{% set code_coverage = summary.cov_code|default(0, true)|float %}
-{% set functional_coverage = summary.cov_func|default(0, true)|float %}
+{% set code_available = summary.cov_code is not none and summary.cov_code is defined %}
+{% set functional_available = summary.cov_func is not none and summary.cov_func is defined %}
+{% set code_coverage = summary.cov_code|float if code_available else 0 %}
+{% set functional_coverage = summary.cov_func|float if functional_available else 0 %}
 <div class="metric-strip" aria-label="Latest regression summary">
   <div class="metric"><span class="metric-label">Tests</span><span class="metric-value">{{ summary.total|default(0, true) }}</span></div>
   <div class="metric"><span class="metric-label">Passed</span><span class="metric-value">{{ summary.passed|default(0, true) }}</span></div>
   <div class="metric"><span class="metric-label">Failed</span><span class="metric-value">{{ summary.failed|default(0, true) }}</span></div>
   <div class="metric"><span class="metric-label">Skipped</span><span class="metric-value">{{ summary.skipped|default(0, true) }}</span></div>
   <div class="metric {% if passrate >= 99.999 %}heat-good{% elif passrate >= 90 %}heat-warn{% else %}heat-bad{% endif %}"><span class="metric-label">Passing</span><span class="metric-value">{{ "%.2f"|format(passrate) }}%</span></div>
-  <div class="metric {% if code_coverage >= 90 %}heat-good{% elif code_coverage >= 75 %}heat-warn{% elif code_coverage > 0 %}heat-bad{% else %}heat-neutral{% endif %}"><span class="metric-label">Code Coverage</span><span class="metric-value">{{ "%.2f"|format(code_coverage) }}%</span></div>
-  <div class="metric {% if functional_coverage >= 90 %}heat-good{% elif functional_coverage >= 75 %}heat-warn{% elif functional_coverage > 0 %}heat-bad{% else %}heat-neutral{% endif %}"><span class="metric-label">Functional Coverage</span><span class="metric-value">{{ "%.2f"|format(functional_coverage) }}%</span></div>
+  <div class="metric {% if not code_available %}heat-neutral{% elif code_coverage >= 90 %}heat-good{% elif code_coverage >= 75 %}heat-warn{% else %}heat-bad{% endif %}"><span class="metric-label">Code Coverage</span><span class="metric-value">{% if code_available %}{{ "%.2f"|format(code_coverage) }}%{% else %}N/A{% endif %}</span></div>
+  <div class="metric {% if not functional_available %}heat-neutral{% elif functional_coverage >= 90 %}heat-good{% elif functional_coverage >= 75 %}heat-warn{% else %}heat-bad{% endif %}"><span class="metric-label">Functional Coverage</span><span class="metric-value">{% if functional_available %}{{ "%.2f"|format(functional_coverage) }}%{% else %}N/A{% endif %}</span></div>
 </div>
 
 <div class="metadata" aria-label="Run metadata">

@@ -4,7 +4,6 @@ import unittest
 import datetime
 import os
 import signal
-import subprocess
 from pathlib import Path
 from types import SimpleNamespace
 from unittest import mock
@@ -252,23 +251,6 @@ class JobManagerLaunchTest(unittest.TestCase):
         self.assertIn("profiled_job", output)
         self.assertIn("cmd: echo profiled", output)
         self.assertIn("test_discovery_match", output)
-
-    def test_coverage_imc_command_preserves_paths_with_spaces(self):
-        log = _Logger()
-        rcfg = SimpleNamespace(options=SimpleNamespace(coverage=True), log=log)
-        job = SimpleNamespace(cov_work_dir="/tmp/path with spaces")
-        failed = SimpleNamespace(returncode=1, stderr="failed")
-
-        with mock.patch("lib.rv_utils.subprocess.run", return_value=failed) as run:
-            rv_utils.get_coverage_data(rcfg, {"//pkg:sys_tb": job})
-
-        run.assert_called_once_with(
-            ["runmod", "xrun", "--", "imc", "-exec",
-             os.path.join(job.cov_work_dir, "imc_report.tcl"), "-verbose"],
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            text=True,
-        )
 
     def test_summary_leaves_max_job_time_blank_for_skipped_tests(self):
         log = _SummaryLogger()

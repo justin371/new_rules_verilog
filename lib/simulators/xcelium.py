@@ -9,6 +9,8 @@ import subprocess
 
 import jinja2
 
+from lib.coverage_data import parse_coverage_summary
+
 from .base import SimulatorInterface
 
 log = logging.getLogger(__name__)
@@ -79,6 +81,12 @@ class XceliumSimulator(SimulatorInterface):
         # Coverage
         if self.options.coverage:
             vcomp_job.cov_work_dir = os.path.join(self.rcfg.regression_dir, vcomp_job.name + "__COV_WORK")
+            for stale_path in [
+                    os.path.join(vcomp_job.cov_work_dir, "scope"),
+                    os.path.join(vcomp_job.cov_work_dir, "merged_db"),
+                    os.path.join(vcomp_job.cov_work_dir, "imc_report"),
+            ]:
+                shutil.rmtree(stale_path, ignore_errors=True)
             os.makedirs(vcomp_job.cov_work_dir, exist_ok=True) # Use makedirs
             merge_exec_tcl = os.path.join(vcomp_job.cov_work_dir, "merge_exec.tcl")
             imc_report_tcl = os.path.join(vcomp_job.cov_work_dir, "imc_report.tcl")
@@ -87,9 +95,13 @@ class XceliumSimulator(SimulatorInterface):
                 filep.write("merge -initial_model union_all -out {} -overwrite {}".format(
                     merged_output, os.path.join(vcomp_job.cov_work_dir, "scope", "*")))
             report_output = os.path.join(vcomp_job.cov_work_dir, "imc_report")
+            code_report = os.path.join(vcomp_job.cov_work_dir, "coverage_code.txt")
+            functional_report = os.path.join(vcomp_job.cov_work_dir, "coverage_functional.txt")
             with open(imc_report_tcl, 'w') as filep:
                 filep.write("".join([
                     "load {}\n".format(merged_output),
+                    "report -summary -metrics all -all -cumulative on -out {}\n".format(code_report),
+                    "report -summary -metrics covergroup -type -all -out {}\n".format(functional_report),
                     "report -html -out {} -grading both -overwrite\n".format(report_output),
                 ]))
             merge_sh = os.path.join(vcomp_job.cov_work_dir, "merge.sh")
@@ -102,9 +114,21 @@ class XceliumSimulator(SimulatorInterface):
             st = os.stat(merge_sh)
             os.chmod(merge_sh, st.st_mode | stat.S_IEXEC)
             cov_args = ["-coverage", self.options.coverage]
-            if os.path.isfile(self.options.covfile):
-                cov_args.extend(["-covfile", self.options.covfile])
+            dut_top = getattr(vcomp_job, "tb_options", {}).get("dut_top")
+            if dut_top:
+                cov_args.extend(["-covdut", dut_top])
+            covfile = self.options.covfile if self.options.covfile_was_explicit else getattr(
+                vcomp_job, "tb_options", {}).get("xcelium_covfile")
+            if not covfile and os.path.isfile(self.options.covfile):
+                covfile = self.options.covfile
+            if covfile:
+                cov_args.extend(["-covfile", covfile])
             opts['cov_opts'] = shlex.join(cov_args)
+            vcomp_job.coverage_code_report = code_report
+            vcomp_job.coverage_functional_report = functional_report
+            vcomp_job.coverage_report_tcl = imc_report_tcl
+            vcomp_job.coverage_report_dir = report_output
+            vcomp_job.merged_coverage_dir = merged_output
 
             self.rcfg.deferred_messages.append("Launch XRUN coverage with {}".format(merge_sh))
 
@@ -138,10 +162,12 @@ class XceliumSimulator(SimulatorInterface):
                 sim_args.extend(["-covworkdir", test_job.vcomper.cov_work_dir])
             else:
                 log.warning(f"Coverage enabled but cov_work_dir not set for vcomp job {test_job.vcomper.name}")
+            coverage_name = "{}_sv{}_i{}".format(test_job.name, seed, test_job.iteration)
             sim_args.extend([
                 "-covbaserun",
-                "{}_sv{}_i{}".format(test_job.name, seed, test_job.iteration),
+                coverage_name,
             ])
+            test_job.coverage_db_path = os.path.join(test_job.vcomper.cov_work_dir, "scope", coverage_name)
             if 'A' in self.options.coverage or 'U' in self.options.coverage:
                 sim_args.append("+SVFCOV=1")
         # MCE
@@ -231,6 +257,39 @@ class XceliumSimulator(SimulatorInterface):
             )
             if result.returncode != 0:
                 raise RuntimeError("XRUN coverage merge failed:\n{}\n{}".format(result.stdout, result.stderr))
+
+    def cleanup_test_coverage(self, test_job):
+        path = getattr(test_job, "coverage_db_path", None)
+        if path:
+            shutil.rmtree(path, ignore_errors=True)
+
+    def collect_coverage_data(self, vcomp_jobs):
+        coverage = {}
+        if not self.options.coverage:
+            return {vcomp.split(":")[-1]: {"cc": {}, "cf": {}} for vcomp in vcomp_jobs}
+        for vcomp, job in vcomp_jobs.items():
+            result = subprocess.run(
+                ["runmod", "xrun", "--", "imc", "-exec", job.coverage_report_tcl, "-verbose"],
+                capture_output=True,
+                text=True,
+            )
+            if result.returncode != 0:
+                log.error("IMC report generation failed:\n%s", result.stderr)
+                code_metrics = {}
+                functional_metrics = {}
+            else:
+                code_metrics = parse_coverage_summary(job.coverage_code_report)
+                functional = parse_coverage_summary(job.coverage_functional_report)
+                functional_metrics = {}
+                if "CoverGroup" in functional:
+                    functional_metrics = {
+                        "Overall": functional["CoverGroup"],
+                        "CoverGroup": functional["CoverGroup"],
+                    }
+                if "Assertion" in code_metrics:
+                    functional_metrics["Assertion"] = code_metrics["Assertion"]
+            coverage[vcomp.split(":")[-1]] = {"cc": code_metrics, "cf": functional_metrics}
+        return coverage
 
     def get_log_parsing_info(self):
         return {'warning_regex': r"\*W.*"}

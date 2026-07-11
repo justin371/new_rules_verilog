@@ -37,6 +37,7 @@ verilog_dv_tb(
     run_fail_patterns = ["^PROJECT FAIL$"],
     run_pass_patterns = ["^PROJECT PASS$"],
     simulator = "VCS",
+    vcs_cm_hier = "coverage_hier.cfg",
 )
 
 verilog_dv_tb(
@@ -110,7 +111,9 @@ py_test(
         ":dv_tb_vcs",
         ":dv_tb_vcs_compile_args.f",
         ":dv_tb_vcs_runtime_args.f",
+        ":dv_tb_vcs_tb_options.py",
         ":dv_tb_xrun_ccf_compile_args.f",
+        ":dv_tb_xrun_ccf_tb_options.py",
         ":rtl_lint_vcs",
         ":rtl_lint_vcs_cmds.tcl",
         ":rtl_unit_vcs",

@@ -1,7 +1,7 @@
 # vim: set ft=bzl :
 """Rules for building DV infrastructure."""
 
-load(":verilog.bzl", "ToolEncapsulationInfo", "VerilogInfo", "flists_to_arguments", "gather_shell_defines", "get_transitive_srcs")
+load(":verilog.bzl", "ToolEncapsulationInfo", "VerilogInfo", "flists_to_arguments", "gather_shell_defines", "get_transitive_srcs", "runfiles_relative_short_path")
 load("//deps:gatesim_modes_list.bzl", "GATESIM_MODES")
 
 DVTestInfo = provider(fields = {
@@ -17,9 +17,13 @@ DVTestInfo = provider(fields = {
 
 DVTBInfo = provider(fields = {
     "ccf": "Coverage config file.",
+    "dut_instance": "DUT hierarchy used by coverage reports.",
+    "dut_top": "DUT module used to scope code coverage.",
     "run_fail_patterns": "Project-specific simulation failure regexes.",
     "run_pass_patterns": "Project-specific simulation pass regexes.",
     "simulator": "Simulator selected for this DV testbench.",
+    "vcs_cm_hier": "VCS coverage hierarchy configuration file.",
+    "xcelium_covfile": "Xcelium coverage configuration file.",
 })
 
 def _sanitize_vcs_defines(defines):
@@ -486,8 +490,18 @@ def _verilog_dv_tb_impl(ctx):
         fail("verilog_dv_tb simulator must be one of ['XRUN', 'VCS'], got '{}'".format(simulator))
     if len(ctx.files.ccf) > 1:
         fail("verilog_dv_tb {} accepts only one ccf file".format(ctx.label))
+    if ctx.file.xcelium_covfile and ctx.files.ccf:
+        fail("verilog_dv_tb {} accepts either xcelium_covfile or legacy ccf, not both".format(ctx.label))
     if simulator == "VCS" and ctx.files.ccf:
         fail("verilog_dv_tb {} ccf is Xcelium-only; use VCS -cm options instead".format(ctx.label))
+    if simulator == "VCS" and ctx.file.xcelium_covfile:
+        fail("verilog_dv_tb {} xcelium_covfile cannot be used with VCS".format(ctx.label))
+    if simulator == "XRUN" and ctx.file.vcs_cm_hier:
+        fail("verilog_dv_tb {} vcs_cm_hier cannot be used with Xcelium".format(ctx.label))
+
+    xcelium_covfile = ctx.file.xcelium_covfile
+    if not xcelium_covfile and ctx.files.ccf:
+        xcelium_covfile = ctx.files.ccf[0]
 
     defines = {}
     defines.update(ctx.attr.defines)
@@ -515,8 +529,6 @@ def _verilog_dv_tb_impl(ctx):
         compile_args.extend(_sanitize_vcs_compile_args(selected_compile_args))
     else:
         compile_args.extend(selected_compile_args)
-        if ctx.files.ccf:
-            compile_args.append("-covfile {}".format(ctx.files.ccf[0].short_path))
     pldm_ice_extra_compile_args.extend(selected_compile_args)
     pldm_sa_extra_compile_args.extend(selected_compile_args)
 
@@ -595,6 +607,15 @@ def _verilog_dv_tb_impl(ctx):
         output = ctx.outputs.compile_warning_waivers,
         content = "[\n" + "\n".join(["re.compile({}),".format(repr(ww)) for ww in ctx.attr.warning_waivers]) + "\n]\n",
     )
+    ctx.actions.write(
+        output = ctx.outputs.tb_options,
+        content = str({
+            "dut_instance": ctx.attr.dut_instance,
+            "dut_top": ctx.attr.dut_top,
+            "vcs_cm_hier": runfiles_relative_short_path(ctx.file.vcs_cm_hier) if ctx.file.vcs_cm_hier else "",
+            "xcelium_covfile": runfiles_relative_short_path(xcelium_covfile) if xcelium_covfile else "",
+        }),
+    )
 
     # Null action to trigger run?
     ctx.actions.run_shell(
@@ -608,6 +629,7 @@ def _verilog_dv_tb_impl(ctx):
         ctx.outputs.compile_args,
         ctx.outputs.runtime_args,
         ctx.outputs.compile_warning_waivers,
+        ctx.outputs.tb_options,
         ctx.outputs.executable,
     ]
     if simulator == "XRUN":
@@ -622,15 +644,19 @@ def _verilog_dv_tb_impl(ctx):
         DefaultInfo(
             files = all_files,
             runfiles = ctx.runfiles(
-                files = ctx.files.ccf + ctx.files.extra_runfiles + [runtime_template],
+                files = ctx.files.ccf + ctx.files.extra_runfiles + ([ctx.file.xcelium_covfile] if ctx.file.xcelium_covfile else []) + ([ctx.file.vcs_cm_hier] if ctx.file.vcs_cm_hier else []) + [runtime_template],
                 transitive_files = all_files,
             ),
         ),
         DVTBInfo(
             ccf = ctx.files.ccf,
+            dut_instance = ctx.attr.dut_instance,
+            dut_top = ctx.attr.dut_top,
             run_fail_patterns = ctx.attr.run_fail_patterns,
             run_pass_patterns = ctx.attr.run_pass_patterns,
             simulator = simulator,
+            vcs_cm_hier = ctx.file.vcs_cm_hier,
+            xcelium_covfile = xcelium_covfile,
         ),
     ]
 
@@ -661,6 +687,14 @@ verilog_dv_tb = rule(
                   "Key, value pairs are joined without additional characters. If it is a unary flag, set the value portion to be the empty string.\n" +
                   "For binary flags, add an '=' as a suffix to the key.",
         ),
+        "dut_instance": attr.string(
+            default = "hdl_top.dut",
+            doc = "DUT instance hierarchy used by coverage reports.",
+        ),
+        "dut_top": attr.string(
+            default = "dut",
+            doc = "DUT module name used to scope code coverage.",
+        ),
         "simulator": attr.string(
             default = "XRUN",
             doc = "Simulator to use for this DV testbench. Supported values are XRUN and VCS.\n" +
@@ -686,6 +720,14 @@ verilog_dv_tb = rule(
         "ccf": attr.label_list(
             allow_files = True,
             doc = "Coverage configuration file to provide to simmer.",
+        ),
+        "xcelium_covfile": attr.label(
+            allow_single_file = True,
+            doc = "Xcelium coverage configuration file. Replaces the legacy ccf attribute.",
+        ),
+        "vcs_cm_hier": attr.label(
+            allow_single_file = True,
+            doc = "VCS -cm_hier coverage configuration file.",
         ),
         "extra_compile_args": attr.string_list(
             doc = "Additional flags to pass to the selected simulator compile/elaboration step.\n",
@@ -746,6 +788,7 @@ verilog_dv_tb = rule(
         "compile_args_pldm_ice": "%{name}_compile_args_pldm_ice.f",
         "compile_args_pldm_sa": "%{name}_compile_args_pldm_sa.f",
         "compile_warning_waivers": "%{name}_compile_warning_waivers",
+        "tb_options": "%{name}_tb_options.py",
     },
     # TODO does this still need to be executable with a empty command?
     executable = True,

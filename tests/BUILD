@@ -37,6 +37,18 @@ py_test(
 )
 
 py_test(
+    name = "compile_cache_test",
+    srcs = ["compile_cache_test.py"],
+    deps = ["//lib:compile_cache"],
+)
+
+py_test(
+    name = "coverage_data_test",
+    srcs = ["coverage_data_test.py"],
+    deps = ["//lib:coverage_data"],
+)
+
+py_test(
     name = "docs_test",
     srcs = ["docs_test.py"],
     data = [

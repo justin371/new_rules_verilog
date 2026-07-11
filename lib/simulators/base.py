@@ -131,6 +131,14 @@ class SimulatorInterface(abc.ABC):
         """
         return
 
+    def cleanup_test_coverage(self, test_job):
+        """Remove one failed test's simulator-specific coverage database."""
+        return
+
+    def collect_coverage_data(self, vcomp_jobs):
+        """Return dashboard coverage summaries keyed by testbench name."""
+        return {vcomp.split(":")[-1]: {"cc": {}, "cf": {}} for vcomp in vcomp_jobs}
+
     def get_vso_build_name(self, vcomp_job):
         """Return the VSO.ai buildname for a compile job.
 

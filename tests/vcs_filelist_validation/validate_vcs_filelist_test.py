@@ -130,8 +130,13 @@ class VcsFilelistValidationTest(unittest.TestCase):
 
     def test_xcelium_tb_coverage_file_is_in_compile_args(self):
         compile_args = read_runfile("tests/vcs_filelist_validation/dv_tb_xrun_ccf_compile_args.f")
+        tb_options = ast.literal_eval(read_runfile("tests/vcs_filelist_validation/dv_tb_xrun_ccf_tb_options.py"))
 
-        self.assertIn("-covfile tests/vcs_filelist_validation/coverage.ccf", compile_args)
+        self.assertNotIn("-covfile", compile_args)
+        self.assertEqual("tests/vcs_filelist_validation/coverage.ccf", tb_options["xcelium_covfile"])
+
+        vcs_options = ast.literal_eval(read_runfile("tests/vcs_filelist_validation/dv_tb_vcs_tb_options.py"))
+        self.assertEqual("tests/vcs_filelist_validation/coverage_hier.cfg", vcs_options["vcs_cm_hier"])
 
     def test_unit_test_scripts_select_the_requested_simulator(self):
         scripts = {

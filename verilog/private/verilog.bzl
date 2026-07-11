@@ -69,7 +69,7 @@ def get_transitive_srcs(srcs, deps, provider, attr_name, allow_other_outputs = F
         transitive = trans,
     )
 
-def _runfiles_relative_short_path(f):
+def runfiles_relative_short_path(f):
     short_path = f.short_path
     if short_path.startswith("../"):
         return "external/" + short_path[3:]
@@ -92,12 +92,12 @@ def flists_to_arguments(deps, provider, field, prefix, separator = "", tool_name
     if tool_name == "vcs":
         formatted_args = []
         for flist in trans:
-            normalized_short_path = _runfiles_relative_short_path(flist)
+            normalized_short_path = runfiles_relative_short_path(flist)
             if normalized_short_path.endswith(".so"):
                 formatted_args.append(" {} {}{}".format(prefix, path_prefix, normalized_short_path[:-3]))
             else:
                 formatted_args.append(" {} {}{}".format(prefix, path_prefix, normalized_short_path))
     else:
-        formatted_args = [" {} {}{}".format(prefix, path_prefix, _runfiles_relative_short_path(flist)) for flist in trans]
+        formatted_args = [" {} {}{}".format(prefix, path_prefix, runfiles_relative_short_path(flist)) for flist in trans]
 
     return separator.join(formatted_args)

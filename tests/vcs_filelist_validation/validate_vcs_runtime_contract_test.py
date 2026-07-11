@@ -38,6 +38,12 @@ class DummyVcompJob:
     def __init__(self):
         self.bench_dir = tempfile.mkdtemp(prefix="vcs_bench_")
         self.name = "unit_vcomp"
+        self.tb_options = {
+            "dut_instance": "hdl_top.dut",
+            "dut_top": "unit_test_top",
+            "vcs_cm_hier": "tests/coverage_hier.cfg",
+            "xcelium_covfile": "tests/coverage.ccf",
+        }
 
 
 class VcsRuntimeContractTest(unittest.TestCase):
@@ -285,6 +291,7 @@ class VcsRuntimeContractTest(unittest.TestCase):
             compile_args = shlex.split(simulator.generate_compile_options(DummyVcompJob())["cov_opts"])
 
         self.assertIn("-coverage", compile_args)
+        self.assertEqual("unit_test_top", compile_args[compile_args.index("-covdut") + 1])
         self.assertIn("-covfile", compile_args)
         self.assertIn(covfile.name, compile_args)
 
@@ -295,6 +302,29 @@ class VcsRuntimeContractTest(unittest.TestCase):
         )
         sim_args = shlex.split(simulator.generate_sim_options(test_job, 42))
         self.assertEqual("same_test_sv42_i2", sim_args[sim_args.index("-covbaserun") + 1])
+        Path(test_job.coverage_db_path).mkdir(parents=True)
+        simulator.cleanup_test_coverage(test_job)
+        self.assertFalse(Path(test_job.coverage_db_path).exists())
+
+    def test_xcelium_coverage_report_command_preserves_paths_with_spaces(self):
+        options = parse_args(["--simulator", "XRUN", "--coverage", "A"])
+        simulator = XceliumSimulator(options, DummyRegressionConfig(), None)
+        job = SimpleNamespace(
+            coverage_report_tcl="/tmp/path with spaces/imc_report.tcl",
+            coverage_code_report="/tmp/code.txt",
+            coverage_functional_report="/tmp/functional.txt",
+        )
+        failed = SimpleNamespace(returncode=1, stderr="failed")
+
+        with mock.patch("lib.simulators.xcelium.subprocess.run", return_value=failed) as run:
+            coverage = simulator.collect_coverage_data({"//pkg:sys_tb": job})
+
+        run.assert_called_once_with(
+            ["runmod", "xrun", "--", "imc", "-exec", job.coverage_report_tcl, "-verbose"],
+            capture_output=True,
+            text=True,
+        )
+        self.assertEqual({"sys_tb": {"cc": {}, "cf": {}}}, coverage)
 
     def test_xcelium_coverage_and_mce_details_are_validated(self):
         with self.assertRaises(SystemExit):
@@ -374,10 +404,43 @@ class VcsRuntimeContractTest(unittest.TestCase):
 
         self.assertTrue(vcomp.cov_work_dir.endswith(".vdb"))
         self.assertIn("-cm_dir {}".format(vcomp.cov_work_dir), compile_options["cov_opts"])
+        self.assertIn("-cm_hier tests/coverage_hier.cfg", compile_options["cov_opts"])
 
         template = self._read_repo_file("bin/templates/vcs_cov_merge_template.sh.j2")
         self.assertIn("{{ urg_command }}", template)
         self.assertIn("{{ verdi_command }}", template)
+
+    def test_vcs_coverage_names_include_iteration_and_failed_db_can_be_removed(self):
+        options = parse_args(["--simulator", "VCS", "--cm", "line"])
+        simulator = VcsSimulator(options, DummyRegressionConfig(), None)
+        coverage_root = tempfile.mkdtemp()
+        test_job = SimpleNamespace(
+            iteration=3,
+            name="same_test",
+            vcomper=SimpleNamespace(cov_work_dir=coverage_root),
+        )
+
+        sim_args = shlex.split(simulator.generate_sim_options(test_job, 42))
+
+        self.assertEqual("same_test_sv42_i3", sim_args[sim_args.index("-cm_name") + 1])
+        Path(test_job.coverage_db_path).mkdir(parents=True)
+        simulator.cleanup_test_coverage(test_job)
+        self.assertFalse(Path(test_job.coverage_db_path).exists())
+
+    def test_vcs_dashboard_reads_urg_text_report(self):
+        options = parse_args(["--simulator", "VCS", "--cm", "line"])
+        simulator = VcsSimulator(options, DummyRegressionConfig(), None)
+        report_dir = Path(tempfile.mkdtemp())
+        (report_dir / "dashboard.txt").write_text(
+            "SCORE LINE COND TOGGLE FSM BRANCH ASSERT GROUP\n"
+            "87.50 90.00 80.00 70.00 100.00 85.00 95.00 76.00\n",
+            encoding="utf-8",
+        )
+
+        coverage = simulator.collect_coverage_data({"//pkg:sys_tb": SimpleNamespace(coverage_report_dir=str(report_dir))})
+
+        self.assertEqual("87.50%", coverage["sys_tb"]["cc"]["Overall"])
+        self.assertEqual("76.00%", coverage["sys_tb"]["cf"]["Overall"])
 
     def test_rerun_preserves_original_options_without_forcing_waves(self):
         template = self._read_repo_file("bin/templates/rerun_template.sh.j2")

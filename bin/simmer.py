@@ -28,6 +28,7 @@ from args_parse.vcs import validate_vcs_runtime_options, validate_vcs_switches_f
 from args_parse.xcelium import validate_xcelium_runtime_options, validate_xcelium_switches_for_vcs
 from lib.job_lib import Job, JobStatus
 from lib import cmn_logging
+from lib import compile_cache
 from lib import job_lib
 from lib import regression
 from lib import rv_utils
@@ -255,6 +256,26 @@ class VCompJob(Job):
         super(VCompJob, self).pre_run()
 
         options = self.rcfg.options
+        relpath, bazel_target = self.bazel_vcomp_target.split(':')
+        relpath = relpath[2:] # Remove leading //
+        bazel_bin = get_bazel_bin()
+        self.bazel_runfiles_main = os.path.join(bazel_bin, relpath, "{}.runfiles".format(bazel_target), "__main__")
+        self.bazel_compile_args = self.simulator.get_bazel_compile_args_file(self.bazel_runfiles_main, relpath,
+                                                                             bazel_target)
+        self.bazel_runtime_args = self.simulator.get_bazel_runtime_args_file(self.bazel_runfiles_main, relpath,
+                                                                             bazel_target)
+        self.compile_warning_waivers_path = os.path.join(self.bazel_runfiles_main, relpath,
+                                                         "{}_compile_warning_waivers".format(bazel_target))
+        tb_options_path = os.path.join(self.bazel_runfiles_main, relpath, "{}_tb_options.py".format(bazel_target))
+        self.tb_options = {
+            "dut_instance": "hdl_top.dut",
+            "dut_top": "dut",
+            "vcs_cm_hier": "",
+            "xcelium_covfile": "",
+        }
+        if os.path.isfile(tb_options_path):
+            with open(tb_options_path, "r", encoding="utf-8") as filep:
+                self.tb_options.update(ast.literal_eval(filep.read()))
         debug_mode = "default"
         if options.waves is not None:
             debug_mode = "waves"
@@ -290,19 +311,6 @@ class VCompJob(Job):
             shutil.rmtree(self.job_dir, ignore_errors=True)
             os.makedirs(self.job_dir, exist_ok=True)
 
-        relpath, bazel_target = self.bazel_vcomp_target.split(':')
-        relpath = relpath[2:] # Remove leading //
-
-        bazel_bin = get_bazel_bin()
-        self.bazel_runfiles_main = os.path.join(bazel_bin, relpath, "{}.runfiles".format(bazel_target), "__main__")
-
-        self.bazel_compile_args = self.simulator.get_bazel_compile_args_file(self.bazel_runfiles_main, relpath,
-                                                                             bazel_target)
-
-        self.bazel_runtime_args = self.simulator.get_bazel_runtime_args_file(self.bazel_runfiles_main, relpath,
-                                                                             bazel_target)
-        self.compile_warning_waivers_path = os.path.join(self.bazel_runfiles_main, relpath,
-                                                         "{}_compile_warning_waivers".format(bazel_target))
         # --- Template Rendering ---
         vcomp_sh_path = os.path.join(self.job_dir, "vcomp.sh")
         compile_template = self.simulator.get_compile_template(self)
@@ -333,12 +341,19 @@ class VCompJob(Job):
                 bazel_target,
             )
 
-        sim_artifacts.write_executable_script(vcomp_sh_path, compile_template.render(**template_context))
+        compile_script = compile_template.render(**template_context)
+        sim_artifacts.write_executable_script(vcomp_sh_path, compile_script)
+        self.compile_fingerprint = compile_cache.compile_fingerprint(
+            self.rcfg.proj_dir,
+            compile_script,
+            self.bazel_compile_args,
+        )
 
         log.debug("bazel_runfiles_main: %s", self.bazel_runfiles_main)
 
         if self.rcfg.options.no_compile:
             self.simulator.validate_reusable_compile_artifacts(self)
+            compile_cache.validate_compile_fingerprint(self.job_dir, self.compile_fingerprint)
             self.main_cmdline = "echo \"Bypassing {} due to --no-compile\"".format(self)
         else:
             self.main_cmdline = "bash {}".format(vcomp_sh_path)
@@ -448,6 +463,12 @@ class VCompJob(Job):
             if self.jobstatus == JobStatus.PASSED: self.jobstatus = JobStatus.FAILED
 
         # --- Final Logging ---
+        if self.jobstatus == JobStatus.PASSED and not self.rcfg.options.no_compile:
+            try:
+                compile_cache.write_compile_fingerprint(self.job_dir, self.compile_fingerprint)
+            except OSError as exc:
+                log.warning("Could not write compile fingerprint for %s: %s", self, exc)
+
         # log_level is determined by initial return code and potential warning failures
         log_level("%s vcomp %s in %s", self.name, self.jobstatus, self.job_dir)
         simmer_results.record_compile_job(getattr(self.rcfg, "simmer_results_run", None), self)
@@ -922,6 +943,9 @@ class TestJob(Job):
                     self.error_message = str(exc)
                 self.jobstatus = JobStatus.FAILED
 
+        if self.jobstatus == JobStatus.FAILED:
+            self.simulator.cleanup_test_coverage(self)
+
         # Wave path logging (adjust based on actual file names if they differ)
         if options.waves is not None:
             wave_path = self.job_dir
@@ -1209,7 +1233,7 @@ def main(rcfg, options):
         project_lock_path = os.path.join(report_root, ".{}.lock".format(project_lock_name))
         index_lock_path = os.path.join(report_root, ".index.lock")
         os.makedirs(report_root, exist_ok=True)
-        rrt.prepare(report_header, trd, rv_utils.get_coverage_data(rcfg, vcomp_jobs), category_stats)
+        rrt.prepare(report_header, trd, simulator.collect_coverage_data(vcomp_jobs), category_stats)
         with open(project_lock_path, "w") as report_lock:
             import fcntl
             fcntl.flock(report_lock, fcntl.LOCK_EX)
