@@ -163,6 +163,8 @@ def validate_xcelium_runtime_options(options, parser):
     if options.mce_split_max_size <= 0:
         parser.error("--mce-split-max-size must be positive. Stopping before Bazel starts.")
     msie_modes = [options.msie, options.msie_href, options.msie_prim, options.msie_incr]
+    if options.xprop and (options.mce or any(mode is not None for mode in msie_modes)):
+        parser.error("--xprop cannot be combined with Xcelium MCE or MSIE modes. Stopping before Bazel starts.")
     if sum(mode is not None for mode in msie_modes) > 1:
         parser.error("Use only one of --msie, --msie-href, --msie-prim, or --msie-incr per invocation. "
                      "Stopping before Bazel starts.")

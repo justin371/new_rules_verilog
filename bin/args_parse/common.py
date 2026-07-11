@@ -129,9 +129,9 @@ def add_test_configuration_arguments(parser):
                               'for setting variables in the simulation'))
     gtestc.add_argument('--xprop',
                         type=str,
-                        default='F',
+                        default=None,
                         action=parser_actions.XpropAction,
-                        help=('Shared X-propagation selector. F=more pessimistic mode, C=ternary-like mode, D=Disable. '
+                        help=('Opt-in X-propagation selector. F=more pessimistic mode, C=ternary-like mode, D=Disable. '
                               'On Xcelium, F maps to FOX and C maps to CAT. '
                               'On VCS, F falls back to -xprop=xmerge and C falls back to -xprop=tmerge '
                               'when no VCS xprop config file is present.'))

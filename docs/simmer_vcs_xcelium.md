@@ -164,7 +164,8 @@ Xcelium behavior is unchanged:
 - default simulator remains XRUN
 - batch mode only
 - waves default to VWDB when `--waves` is used without `--wave-type`
-- xprop defaults to FOX through the existing `--xprop F` behavior
+- xprop is opt-in; `--xprop F` uses a bench `fox_xprop.txt` when present and
+  otherwise uses Xcelium's direct FOX mode
 
 ## Performance profiling
 

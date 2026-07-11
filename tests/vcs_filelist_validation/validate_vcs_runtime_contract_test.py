@@ -82,13 +82,13 @@ class VcsRuntimeContractTest(unittest.TestCase):
         simulator = VcsSimulator(options, DummyRegressionConfig(), None)
         self.assertEqual("runmod vcs --", simulator.get_tool_runner())
 
-    def test_vcs_default_batch_disables_xprop_in_template_only(self):
+    def test_xprop_is_opt_in_for_both_simulators(self):
         vcs_options = parse_args(["-t", "unit:test", "--simulator", "VCS"])
         xcelium_options = parse_args(["-t", "unit:test", "--simulator", "XRUN"])
 
-        self.assertEqual("F", vcs_options.xprop)
+        self.assertIsNone(vcs_options.xprop)
         self.assertFalse(vcs_options.xprop_was_explicit)
-        self.assertEqual("F", xcelium_options.xprop)
+        self.assertIsNone(xcelium_options.xprop)
 
         simulator = VcsSimulator(vcs_options, DummyRegressionConfig(), None)
         self.assertIsNone(simulator.generate_compile_options(DummyVcompJob())["xprop_cmd"])
@@ -269,7 +269,7 @@ class VcsRuntimeContractTest(unittest.TestCase):
         simulator.validate_reusable_compile_artifacts(vcomp)
 
     def test_xcelium_batch_vwdb_and_xprop_contract(self):
-        options = parse_args(["-t", "unit:test", "--simulator", "XRUN", "--waves"])
+        options = parse_args(["-t", "unit:test", "--simulator", "XRUN", "--waves", "--xprop", "F"])
         self.assertEqual("vwdb", options.wave_type)
         self.assertFalse(options.gui)
 
@@ -282,6 +282,9 @@ class VcsRuntimeContractTest(unittest.TestCase):
         vcomp = DummyVcompJob()
         Path(vcomp.bench_dir, "fox_xprop.txt").touch()
         self.assertIn("fox_xprop.txt", simulator.generate_compile_options(vcomp)["xprop_cmd"])
+
+        Path(vcomp.bench_dir, "fox_xprop.txt").unlink()
+        self.assertEqual("-xprop F -xverbose", simulator.generate_compile_options(vcomp)["xprop_cmd"])
 
     def test_xcelium_coverage_uses_explicit_ccf_and_unique_base_runs(self):
         with tempfile.NamedTemporaryFile() as covfile:

@@ -133,8 +133,7 @@ class XceliumSimulator(SimulatorInterface):
             self.rcfg.deferred_messages.append("Launch XRUN coverage with {}".format(merge_sh))
 
         # XPROP
-        if self.options.xprop and not (self.options.mce or self.options.msie or self.options.msie_prim
-                                       or self.options.msie_href):
+        if self.options.xprop_was_explicit and self.options.xprop:
             if self.options.xprop == 'F':
                 xprop_file = 'fox_xprop.txt'
             else:
@@ -143,7 +142,7 @@ class XceliumSimulator(SimulatorInterface):
             if os.path.exists(xprop_file_path):
                 opts['xprop_cmd'] = '-xfile {} -xverbose'.format(xprop_file_path)
             else:
-                log.warning(f"Xcelium XPROP file not found: {xprop_file_path}")
+                opts['xprop_cmd'] = '-xprop {} -xverbose'.format(self.options.xprop)
 
         # Defines
         if self.options.rtl_defines is not None:
