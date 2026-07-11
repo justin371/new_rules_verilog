@@ -64,7 +64,7 @@ jobs:
         uses: vsco/bazelisk-action@170327f90b7b6c4364a97741d6e64f888d76bcb5
         with:
           version: '1.7.5'
-          bazel-install-path: './.local/bin'
+          bazel-install-path: '${{ runner.temp }}/bazelisk-bin'
           os: 'linux'
 
       - name: run-redhat-smoke
