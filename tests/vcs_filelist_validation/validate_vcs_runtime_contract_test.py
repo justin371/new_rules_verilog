@@ -135,7 +135,8 @@ class VcsRuntimeContractTest(unittest.TestCase):
         xrun_options = parse_args(["--simulator", "XRUN", "--mce", "--mce-sim-count", "3"])
 
         self.assertEqual(4, VcsSimulator(vcs_options, DummyRegressionConfig(), None).get_scheduler_threads_per_test())
-        self.assertEqual(3, XceliumSimulator(xrun_options, DummyRegressionConfig(), None).get_scheduler_threads_per_test())
+        self.assertEqual(3,
+                         XceliumSimulator(xrun_options, DummyRegressionConfig(), None).get_scheduler_threads_per_test())
 
     def test_vcs_adapter_validates_vso_environment(self):
         options = parse_args(["--simulator", "VCS", "--vso", "--cm", "line"])
