@@ -18,6 +18,7 @@ if str(LIB_DIR) not in sys.path:
     sys.path.insert(0, str(LIB_DIR))
 
 from args_parser import parse_args
+from args_parse.parser import create_parser
 from lint_parser_hal import HalLintLog
 from lib.job_lib import JobStatus
 from lib.runtime_options import format_sim_opts_dict, resolve_test_timeout_hours
@@ -48,6 +49,23 @@ class DummyVcompJob:
 
 
 class VcsRuntimeContractTest(unittest.TestCase):
+
+    def test_simmer_help_documents_every_option_and_critical_preparation(self):
+        parser = create_parser()
+        for action in parser._actions:
+            if not action.option_strings:
+                continue
+            self.assertIsInstance(action.help, str, action.option_strings)
+            self.assertGreaterEqual(len(action.help.strip()), 20, action.option_strings)
+
+        help_text = parser.format_help()
+        self.assertIn("Bazel 7.7.1, Python 3.12", help_text)
+        self.assertIn("Quote all test globs", help_text)
+        self.assertIn("default: adaptive", help_text)
+        self.assertIn("must already exist", help_text)
+        self.assertIn("custom external partcomp/sharedlib directories are preserved", help_text)
+        self.assertIn("Run this before --msie-prim", help_text)
+        self.assertIn("Requires EMU_JINJA2_PATH", help_text)
 
     def test_zero_test_timeout_disables_job_timeout(self):
         self.assertEqual(0, resolve_test_timeout_hours({"timeout_minutes": 0}, 12.0, False))
@@ -258,6 +276,8 @@ class VcsRuntimeContractTest(unittest.TestCase):
         with self.assertRaises(SystemExit):
             parse_args(["-t", "unit:test", "--simulator", "VCS", "--probe-packed", "64"])
         with self.assertRaises(SystemExit):
+            parse_args(["-t", "unit:test", "--simulator", "VCS", "--probe-packed", "128"])
+        with self.assertRaises(SystemExit):
             parse_args(["-t", "unit:test", "--simulator", "XRUN", "--gui"])
         with mock.patch("args_parse.parser.SIM_PLATFORM", "VCS"):
             with self.assertRaises(SystemExit):
@@ -279,6 +299,15 @@ class VcsRuntimeContractTest(unittest.TestCase):
             parse_args(["--wave-start", "-1"])
         with self.assertRaises(SystemExit):
             parse_args(["--wave-start", "20", "--wave-end", "10"])
+        with self.assertRaises(SystemExit):
+            parse_args(["--simulator", "XRUN", "--wave-delta"])
+        with self.assertRaises(SystemExit):
+            parse_args(["--simulator", "XRUN", "--waves", "--wave-type", "vwdb", "--wave-delta"])
+
+    def test_xcelium_msie_incremental_requires_primary_snapshot_name(self):
+        with self.assertRaises(SystemExit):
+            parse_args(["--simulator", "XRUN", "--msie-incr"])
+        self.assertEqual("pcie_primary", parse_args(["--simulator", "XRUN", "--msie-incr", "pcie_primary"]).msie_incr)
 
     def test_xcelium_wave_template_honors_delta_and_end_time(self):
         template = self._read_repo_file("bin/templates/xrun_wave_cmd_template.tcl.j2")

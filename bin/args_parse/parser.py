@@ -59,25 +59,18 @@ def validate_simulator_specific_options(options, parser):
         validate_xcelium_runtime_options(options, parser)
 
 
-def parse_args(argv):
-    """
-    simmer configuration is handled through a series of command
-    line arguments and a handful of environment variables
-
-    historically, simmer has been dependant on an environment
-    variable PROJ_DIR.  to remove this scrict dependency, simmer
-    will now check if env(PROJ_DIR) is defined, and if not,
-    will use the current working directory
-
-    simmer defaults to using Xcelium for model compiles and
-    simulations.  however, the user and/or project can define
-    an environement varible SIM_PLATFORM to effectively change
-    the default.  the use of --vcs or --xrun on the command line
-    will always take precedence over env(SIM_PLATFORM)
-
-    simmer schedules compile and simulation jobs internally.
-    """
-    parser = argparse.ArgumentParser(description="Runs simulations!", formatter_class=argparse.RawTextHelpFormatter)
+def create_parser():
+    parser = argparse.ArgumentParser(
+        prog="simmer",
+        description=(
+            "Discover, compile, run, retain, and report Verilog/SystemVerilog regressions with VCS or XRUN.\n"
+            "Preparation: run from a configured project checkout with Bazel 7.7.1, Python 3.12, and the selected "
+            "EDA environment sourced. Quote all test globs."),
+        epilog=(
+            "Start safely with: simmer -t 'bench:test@1' --simulator VCS --discovery-only\n"
+            "Then run without --discovery-only. Use --simmer-profile and the per-job logs to diagnose performance."),
+        formatter_class=argparse.RawTextHelpFormatter,
+    )
 
     add_debug_arguments(parser)
     add_test_configuration_arguments(parser)
@@ -86,6 +79,12 @@ def parse_args(argv):
     add_regression_arguments(parser)
     add_flow_control_arguments(parser)
     add_basic_arguments(parser)
+    return parser
+
+
+def parse_args(argv):
+    """Parse and validate simmer command-line options."""
+    parser = create_parser()
 
     options = parser.parse_args(argv)
     if options.jobs is not None and options.jobs < 1:
@@ -104,6 +103,27 @@ def parse_args(argv):
             '--mce-sim-cfg',
             '--mce-split-max-size',
         ])
+    options.xcelium_explicit_switches = [
+        argument for argument in [
+            '--wave-delta',
+            '--probe-packed',
+            '--probe-unpacked',
+            '--profile',
+            '--mce',
+            '--mce-build-count',
+            '--mce-build-cfg',
+            '--mce-sim-count',
+            '--mce-sim-cfg',
+            '--mce-split-max-size',
+            '--coverage',
+            '--covfile',
+            '--msie',
+            '--msie-href',
+            '--msie-prim',
+            '--msie-incr',
+            '--emulator',
+        ] if argument_explicitly_requested(argv, argument)
+    ]
     options.vcs_partcomp_explicit_switches = [
         argument for argument in [
             '--vcs-partcomp-mode',
