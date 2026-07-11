@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # This is a template for the bazel verilog_rtl_cdc_test rule
 # It is not intended to be run stand-alone
-set -e
+set -Eeuo pipefail
 
 use_gui=0
 remaining_args=()
@@ -14,7 +14,7 @@ do
             ;;
         *)
             remaining_args+=("$1")
-            ;;    
+            ;;
     esac
     shift
 done
@@ -38,4 +38,8 @@ fi
     {CMD_FILES} \
     {EPILOGUE_CMDS} \
     ${remaining_args[@]}"
+if [ ! -f cdc_run/jg.log ]; then
+    echo "ERROR: CDC completed without cdc_run/jg.log" >&2
+    exit 1
+fi
 ! grep "^\[*ERROR" cdc_run/jg.log

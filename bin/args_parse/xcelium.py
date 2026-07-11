@@ -5,10 +5,6 @@ from .common import COVFILE
 
 def add_xcelium_arguments(parser):
     gxrun = parser.add_argument_group("Xcelium arguments")
-    gxrun.add_argument('--wave-exclude',
-                       type=str,
-                       default="x",
-                       help='Exclude a scope or object pattern from Xcelium wave probing.')
     gxrun.add_argument('--wave-delta',
                        default=False,
                        action='store_true',
@@ -105,8 +101,6 @@ def validate_xcelium_switches_for_vcs(options, parser):
     xcelium_only_switches = []
     if options.profile:
         xcelium_only_switches.append('--profile')
-    if options.wave_exclude != "x":
-        xcelium_only_switches.append('--wave-exclude')
     if options.wave_delta:
         xcelium_only_switches.append('--wave-delta')
     if options.probe_packed != 128:

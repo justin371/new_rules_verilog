@@ -6,6 +6,8 @@ import unittest
 from types import SimpleNamespace
 from unittest import mock
 
+import jinja2
+
 REPO_ROOT = Path(__file__).resolve().parents[2]
 BIN_DIR = REPO_ROOT / "bin"
 if str(BIN_DIR) not in sys.path:
@@ -143,6 +145,61 @@ class VcsRuntimeContractTest(unittest.TestCase):
         self.assertIn("--gui", vcs)
         self.assertIn("--wave-delta", xcelium)
         self.assertIn("--probe-packed", xcelium)
+        self.assertNotIn("--wave-exclude", xcelium)
+
+    def test_wave_time_range_is_validated(self):
+        with self.assertRaises(SystemExit):
+            parse_args(["--wave-start", "-1"])
+        with self.assertRaises(SystemExit):
+            parse_args(["--wave-start", "20", "--wave-end", "10"])
+
+    def test_xcelium_wave_template_honors_delta_and_end_time(self):
+        template = self._read_repo_file("bin/templates/xrun_wave_cmd_template.tcl.j2")
+
+        self.assertIn("-default{{ delta }}", template)
+        self.assertNotIn("options.delta", template)
+        self.assertIn("options.wave_end - options.wave_start", template)
+        self.assertIn("database -close shm_db", template)
+        self.assertIn("database -close vcd_db", template)
+
+        rendered = jinja2.Template(template, undefined=jinja2.StrictUndefined).render(
+            delta=" -event",
+            options=SimpleNamespace(
+                probe_packed=128,
+                probe_unpacked=128,
+                probes=["hdl_top.dut"],
+                wave_depth=8,
+                wave_end=100,
+                wave_start=20,
+                wave_type="shm",
+            ),
+            waves_db="waves.shm",
+        )
+        self.assertIn("-default -event", rendered)
+        self.assertIn("run 80ns", rendered)
+        self.assertIn("database -close shm_db", rendered)
+
+    def test_shell_templates_preserve_failures_and_argv(self):
+        coverage = self._read_repo_file("bin/templates/vcs_cov_merge_template.sh.j2")
+        sim = self._read_repo_file("bin/templates/sim_template.sh.j2")
+        svunit = self._read_repo_file("vendors/cadence/verilog_rtl_unit_test_svunit.sh.template")
+        cdc = self._read_repo_file("vendors/cadence/verilog_rtl_cdc_test.sh.template")
+        lint_templates = [
+            self._read_repo_file("vendors/cadence/verilog_rtl_lint_test.sh.template"),
+            self._read_repo_file("vendors/synopsys/verilog_rtl_lint_test.sh.template"),
+            self._read_repo_file("vendors/real_intent/verilog_rtl_lint_test.sh.template"),
+        ]
+
+        self.assertIn("set -Eeuo pipefail", coverage)
+        self.assertNotIn("final_result + sim_exit_code", sim)
+        self.assertNotIn("sockets_exit_code + socket_exit_code", sim)
+        self.assertIn('kill "${{ socket_name|upper }}_PID"', sim)
+        self.assertIn("{POST_FLIST_ARGS} \\", svunit)
+        self.assertIn('"${remaining_args[@]}"', svunit)
+        self.assertIn("completed without cdc_run/jg.log", cdc)
+        for template in lint_templates:
+            self.assertIn("set -Eeuo pipefail", template)
+            self.assertIn('"$@"', template)
 
     def test_vcs_compile_template_defaults_to_incremental_compile(self):
         template = self._read_repo_file("bin/templates/vcs_compile_template.sh.j2")

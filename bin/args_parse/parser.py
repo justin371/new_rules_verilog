@@ -80,6 +80,10 @@ def parse_args(argv):
     setattr(options, 'reproduce_args', reproduce_args)
 
     options.simulator = (options.simulator if options.simulator_was_explicit else SIM_PLATFORM).upper()
+    if options.wave_start < 0:
+        parser.error("--wave-start must be non-negative.")
+    if options.wave_end != 99999999 and options.wave_end <= options.wave_start:
+        parser.error("--wave-end must be greater than --wave-start.")
     validate_simulator_specific_options(options, parser)
 
     if options.simulator == 'XRUN':

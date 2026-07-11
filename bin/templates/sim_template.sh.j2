@@ -13,9 +13,6 @@ export SIM_WORK_DIR="{{ sim_working_dir }}"
 export VIP_LOG_DIR="$SIMRESULTS"
 export SVT_LOG_DIR="$SIMRESULTS"
 
-# Store user arguments safely
-ARGS=("$@")
-
 # --- Main Test Function ---
 function testFunction {
     # Variable to accumulate return codes (0 = success)
@@ -53,6 +50,7 @@ function testFunction {
         if [ "$wait_count" -ge "$max_wait" ]; then
             echo "%E- ERROR: Timeout waiting for socket {{ socket_name }} (PID ${{ socket_name|upper }}_PID) to create {{ socket_file }}."
             final_result=1
+            kill "${{ socket_name|upper }}_PID" 2>/dev/null || true
             break
         fi
     done
@@ -121,7 +119,9 @@ function testFunction {
     local sim_exit_code=$?
     set -o errexit # Re-enable errexit
     echo "Simulation finished with exit code: $sim_exit_code"
-    final_result=$((final_result + sim_exit_code)) # Add sim exit code to final result
+    if [ "$sim_exit_code" -ne 0 ] && [ "$final_result" -eq 0 ]; then
+        final_result=$sim_exit_code
+    fi
 
     # Execute any simulator-specific post-commands
     {% for cmd in post_sim_commands %}
@@ -160,7 +160,7 @@ function testFunction {
         if [ $socket_exit_code -ne 0 ]; then
             echo "%E- ERROR: Socket process {{ socket_name }} (PID $current_pid) returned non-zero exit code $socket_exit_code."
             echo "Check log: {{ job.job_dir }}/{{ socket_name }}.log"
-            sockets_exit_code=$((sockets_exit_code + socket_exit_code)) # Accumulate socket errors
+            sockets_exit_code=1
         fi
     else
         echo "%W- WARNING: PID variable '$SOCKET_PID_VARNAME' not found for socket {{ socket_name }}. Cannot wait/check status."
@@ -196,7 +196,7 @@ function testFunction {
             # Add parsing exit code to final result ONLY IF simulation itself passed
             # Avoid masking the original simulation failure code
             if [ $sim_exit_code -eq 0 ]; then
-                 final_result=$((final_result + parse_exit_code))
+                 final_result=$parse_exit_code
             fi
         fi
     elif [ ! -f "$check_test_script" ]; then
@@ -223,9 +223,9 @@ function testFunction {
 function signal_exit {
     # This function is called when specific signals are received
     echo "$(date): TRAPPED SIGNAL. Terminating script."
-    # Optional: Add cleanup here if needed, e.g., kill background jobs
-    # Find and kill background socket processes? Be careful not to kill unrelated processes.
-    # pkill -P $$ # Kills children of this script (use with caution)
+    for child_pid in $(jobs -pr); do
+        kill "$child_pid" 2>/dev/null || true
+    done
     exit 1 # Exit with a non-zero status
 }
 

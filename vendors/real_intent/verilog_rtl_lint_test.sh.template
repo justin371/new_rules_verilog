@@ -1,8 +1,10 @@
-#!/usr/bin/bash
+#!/usr/bin/env bash
 # This is a template for the bazel verilog_rtl_lint_test rule
 # It is not intended to be run stand-alone
-mv lint.log lint.log.bak 2> /dev/null
+set -Eeuo pipefail
+
+mv lint.log lint.log.bak 2> /dev/null || true
 {SIMULATOR_COMMAND} \
      -log lint.log -i {COMMAND_SCRIPT} -wait_license
 
-./{LINT_PARSER} $@
+./{LINT_PARSER} "$@"

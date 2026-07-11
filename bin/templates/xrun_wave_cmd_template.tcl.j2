@@ -10,7 +10,14 @@ call xmDumpLog
 call xmDumpMDA
 call xmDumpSVA +assertdebug
 call xmDumpflush
+{% if options.wave_end != 99999999 -%}
+run {{ options.wave_end - options.wave_start }}ns
+call xmDumpflush
+call xmDumpoff
 run
+{% else -%}
+run
+{% endif -%}
 exit
 {% endif -%}
 
@@ -18,11 +25,17 @@ exit
 {% if options.wave_start -%}
 run {{ options.wave_start }}ns
 {% endif -%}
-database -open shm_db -shm -into {{ waves_db }} -default {{ options.delta }}
+database -open shm_db -shm -into {{ waves_db }} -default{{ delta }}
 {% for probe in options.probes -%}
 probe -database shm_db {{ probe }} -all -memories -dynamic -depth {{ options.wave_depth }} -packed {{ options.probe_packed }} -unpacked {{ options.probe_unpacked }}
 {% endfor -%}
+{% if options.wave_end != 99999999 -%}
+run {{ options.wave_end - options.wave_start }}ns
+database -close shm_db
 run
+{% else -%}
+run
+{% endif -%}
 {% endif -%}
 
 {% if options.wave_type == 'vcd' -%}
@@ -33,5 +46,11 @@ database -open -vcd vcd_db -into {{ waves_db }} -default
 {% for probe in options.probes -%}
 probe -database vcd_db {{ probe }} -all -memories -depth all -vcd -packed {{ options.probe_packed }} -unpacked {{ options.probe_unpacked }}
 {% endfor -%}
+{% if options.wave_end != 99999999 -%}
+run {{ options.wave_end - options.wave_start }}ns
+database -close vcd_db
 run
+{% else -%}
+run
+{% endif -%}
 {% endif -%}
