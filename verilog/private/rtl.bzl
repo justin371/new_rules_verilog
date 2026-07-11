@@ -593,7 +593,7 @@ def _verilog_rtl_lint_test_impl(ctx):
     # See github issue #24
     shell_defines_string = "-define {}{}"
     attr_defines_string = "-define {}{}"
-    if str(ctx.attr.run_template.label) == "@rules_verilog//vendors/real_intent:verilog_rtl_lint_test.sh.template":
+    if simulator == "VCS" or str(ctx.attr.run_template.label) == "@rules_verilog//vendors/real_intent:verilog_rtl_lint_test.sh.template":
         shell_defines_string = "+define+{}{}"
         attr_defines_string = "+define+{}{}"
 

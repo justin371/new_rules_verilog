@@ -82,6 +82,13 @@ class VcsFilelistValidationTest(unittest.TestCase):
         self.assertEqual("VCS", dynamic_args["simulator"])
         self.assertEqual("dv_cfg_vcs", dynamic_args["uvm_testname"])
 
+        inherited_args = ast.literal_eval(read_runfile(
+            "tests/vcs_filelist_validation/dv_cfg_vcs_inherited_dynamic_args.py",
+        ))
+        self.assertEqual("VCS", inherited_args["simulator"])
+        self.assertEqual("dv_cfg_vcs", inherited_args["uvm_testname"])
+        self.assertEqual(17, inherited_args["timeout_minutes"])
+
     def test_vcs_outputs_use_dash_file(self):
         filelist_checks = {
             "tests/vcs_filelist_validation/rtl_lint_vcs": [
@@ -90,6 +97,7 @@ class VcsFilelistValidationTest(unittest.TestCase):
                 "./bin/lint_parser_vcs.py",
             ],
             "tests/vcs_filelist_validation/rtl_lint_vcs_cmds.tcl": [
+                "+define+LINT",
                 "-file tests/vcs_filelist_validation/unit_test_top.f",
                 "-file vendors/synopsys/verilog_rtl_lint_default_opts.f",
             ],

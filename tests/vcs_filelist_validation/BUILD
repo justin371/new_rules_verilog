@@ -42,6 +42,13 @@ verilog_dv_test_cfg(
     simulator = "VCS",
     tags = ["manual"],
     tb = ":dv_tb_vcs",
+    timeout = 17,
+)
+
+verilog_dv_test_cfg(
+    name = "dv_cfg_vcs_inherited",
+    inherits = [":dv_cfg_vcs"],
+    tags = ["manual"],
 )
 
 verilog_dv_unit_test(
@@ -78,6 +85,7 @@ py_test(
     srcs = ["validate_vcs_filelist_test.py"],
     data = [
         ":dv_cfg_vcs",
+        ":dv_cfg_vcs_inherited",
         ":dv_unit_vcs",
         ":dv_unit_xrun",
         ":dv_tb_vcs",

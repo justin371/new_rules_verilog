@@ -119,7 +119,7 @@ def _verilog_dv_test_cfg_impl(ctx):
         uvm_testname = ctx.attr.name
 
     timeout = None
-    if ctx.attr.timeout:
+    if ctx.attr.timeout >= 0:
         timeout = ctx.attr.timeout
     elif len(parent_timeouts):
         timeout = parent_timeouts[0]
@@ -127,8 +127,10 @@ def _verilog_dv_test_cfg_impl(ctx):
     tb = None
     if ctx.attr.tb:
         tb = ctx.attr.tb
-    else:
+    elif len(parent_tbs):
         tb = parent_tbs[0]
+    else:
+        fail("verilog_dv_test_cfg {} requires tb directly or through inherits".format(ctx.label))
 
     tb_simulator = None
     if tb and DVTBInfo in tb:
@@ -209,6 +211,7 @@ _verilog_dv_test_cfg_rule = rule(
                   "See 'inherits' attribute.\n",
         ),
         "inherits": attr.label_list(
+            providers = [DVTestInfo],
             doc = "Inherit configurations from other verilog_dv_test_cfg targets.\n" +
                   "Entries later in the list will override arguments set by previous inherits entries.\n" +
                   "Only attributes noted as inheritable in documentation may be inherited.\n" +
@@ -219,6 +222,7 @@ _verilog_dv_test_cfg_rule = rule(
                   "This attribute is inheritable. See 'inherits' attribute.\n",
         ),
         "tb": attr.label(
+            providers = [DVTBInfo],
             doc = "The testbench to run this test on. This label must be a 'verilog_dv_tb' target." +
                   "This attribute is inheritable. See 'inherits' attribute.\n" +
                   "Future: Allow tb to be a list of labels to allow a test to run on multiple verilog_dv_tb",
@@ -261,7 +265,7 @@ _verilog_dv_test_cfg_rule = rule(
         "timeout": attr.int(
             default = -1,
             doc = "Duration in minutes before the test will be killed due to timeout.\n" +
-                  "This option is inheritable.",
+                  "This option is inheritable. Use -1 to inherit, 0 to disable, or a positive value to set a timeout.",
         ),
         "description": attr.string(
             doc = "The test scenario descriptions"
@@ -271,6 +275,13 @@ _verilog_dv_test_cfg_rule = rule(
         "dynamic_args": "%{name}_dynamic_args.py",
     },
 )
+
+def _gatesim_target(label, corner):
+    value = str(label)
+    if ":" in value:
+        return value + "_" + corner
+    target = value.rsplit("/", 1)[-1]
+    return "{}:{}_{}".format(value, target, corner)
 
 def verilog_dv_test_cfg(name = None, tags = None, abstract = None, inherits = None, uvm_testname = None, tb = None, simulator = None, sim_opts = None, no_run = None, sockets = None, pre_run = None, timeout = None, description = None, gls_tb = None, pre_opts = None, post_opts = None):
     sim_opts = dict(sim_opts) if sim_opts != None else {}
@@ -337,13 +348,12 @@ def verilog_dv_test_cfg(name = None, tags = None, abstract = None, inherits = No
         for corner in GATESIM_MODES:
             params['name'] = name + "_" + corner
             if inherits != None:
-                for inherit in inherits:
-                    params['inherits'] = [inherit + "_" + corner]
+                params['inherits'] = [_gatesim_target(inherit, corner) for inherit in inherits]
             #determin gatesim tb when gls_tb is transmited
             if gls_tb != None:
-                params['tb'] = gls_tb + "_" + corner
+                params['tb'] = _gatesim_target(gls_tb, corner)
             elif tb != None:
-                params['tb'] = tb + "_" + corner
+                params['tb'] = _gatesim_target(tb, corner)
             if uvm_testname != None:
                 params['uvm_testname'] = uvm_testname
             _verilog_dv_test_cfg_rule(**params)
@@ -487,6 +497,8 @@ def _verilog_dv_tb_impl(ctx):
     pldm_sa_extra_compile_args = []
     compile_args = []
     if len(ctx.attr.verilog_config):
+        if len(ctx.attr.verilog_config) > 1:
+            fail("verilog_dv_tb {} accepts only one verilog_config entry".format(ctx.label))
         top = ctx.attr.verilog_config.keys()[0]
         cfg = ctx.attr.verilog_config[top]
         if simulator == "VCS":
@@ -579,7 +591,7 @@ def _verilog_dv_tb_impl(ctx):
     )
     ctx.actions.write(
         output = ctx.outputs.compile_warning_waivers,
-        content = "[\n" + "\n".join(["re.compile('{}'),".format(ww) for ww in ctx.attr.warning_waivers]) + "\n]\n",
+        content = "[\n" + "\n".join(["re.compile({}),".format(repr(ww)) for ww in ctx.attr.warning_waivers]) + "\n]\n",
     )
 
     # Null action to trigger run?
@@ -745,6 +757,7 @@ def _verilog_dv_unit_test_impl(ctx):
     srcs_list = trans_srcs.to_list()
     flists = get_transitive_srcs([], ctx.attr.deps, VerilogInfo, "transitive_flists")
     flists_list = flists.to_list()
+    dpi = get_transitive_srcs([], ctx.attr.deps, VerilogInfo, "transitive_dpi")
     simulator = ctx.attr.simulator
     unit_test_template = ctx.file.ut_sim_template
     default_sim_opts = ctx.file.default_sim_opts
@@ -773,7 +786,7 @@ def _verilog_dv_unit_test_impl(ctx):
         is_executable = True,
     )
 
-    runfiles = ctx.runfiles(files = flists_list + srcs_list + [default_sim_opts])
+    runfiles = ctx.runfiles(files = flists_list + srcs_list + dpi.to_list() + [default_sim_opts])
     return [DefaultInfo(
         runfiles = runfiles,
         executable = ctx.outputs.out,

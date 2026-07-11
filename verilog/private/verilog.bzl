@@ -65,6 +65,8 @@ def get_transitive_srcs(srcs, deps, provider, attr_name, allow_other_outputs = F
             trans.append(getattr(dep[provider], attr_name))
         elif allow_other_outputs:
             trans.append(dep[DefaultInfo].files)
+        else:
+            fail("{} does not provide the required provider".format(dep.label))
 
     return depset(
         srcs,

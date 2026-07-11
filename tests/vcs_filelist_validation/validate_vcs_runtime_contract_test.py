@@ -252,6 +252,7 @@ class VcsRuntimeContractTest(unittest.TestCase):
         self.assertIn('filelist_flag = "-file"', rtl_bzl)
         self.assertIn("_ut_sim_waves_template_vcs_default", rtl_bzl)
         self.assertIn('pre_fa.append("  +define+{}{}', rtl_bzl)
+        self.assertIn("params['inherits'] = [_gatesim_target(inherit, corner) for inherit in inherits]", dv_bzl)
 
 
 if __name__ == "__main__":
