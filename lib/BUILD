@@ -43,6 +43,7 @@ py_library(
 py_library(
     name = "regression_report",
     srcs = ["regression_report.py"],
+    deps = [requirement("jinja2")],
 )
 
 py_library(

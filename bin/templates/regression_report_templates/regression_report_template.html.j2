@@ -1,8 +1,7 @@
 <!DOCTYPE html>
 <html class="writer-html5" lang="en">
 <head>
-  <meta charset="utf-8" /><meta name="viewport" content="width=device-width, initial-scale=1" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta charset="utf-8" /><meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>{{bench_name}} &mdash; Regression Report</title>
   <link rel="stylesheet" type="text/css" href="../../_static/pygments.css?v=80d5e7a1" />
   <link rel="stylesheet" type="text/css" href="../../_static/css/theme.css?v=19f00094" />
@@ -182,7 +181,7 @@
                       <th align="center" style="background-color:#3D1067; color:white; padding-bottom:12px; padding-top:12px; text-transform:uppercase; border:1px solid #f2f2f2; padding:8px" bgcolor="#3D1067">Tag</th>
                       <th align="center" style="background-color:#3D1067; color:white; padding-bottom:12px; padding-top:12px; text-transform:uppercase; border:1px solid #f2f2f2; padding:8px" bgcolor="#3D1067">Max job time</th>
                       <th align="center" style="background-color:#3D1067; color:white; padding-bottom:12px; padding-top:12px; text-transform:uppercase; border:1px solid #f2f2f2; padding:8px" bgcolor="#3D1067">Passed</th>
-                      <th align="center" style="background-color:#3D1067; color:white; padding-bottom:12px; padding-top:12px; text-transform:uppercase; border:1px solid #f2f2f2; padding:8px" bgcolor="#3D1067">Sikpped</th>
+                      <th align="center" style="background-color:#3D1067; color:white; padding-bottom:12px; padding-top:12px; text-transform:uppercase; border:1px solid #f2f2f2; padding:8px" bgcolor="#3D1067">Skipped</th>
                       <th align="center" style="background-color:#3D1067; color:white; padding-bottom:12px; padding-top:12px; text-transform:uppercase; border:1px solid #f2f2f2; padding:8px" bgcolor="#3D1067">Failed</th>
                       <th align="center" style="background-color:#3D1067; color:white; padding-bottom:12px; padding-top:12px; text-transform:uppercase; border:1px solid #f2f2f2; padding:8px" bgcolor="#3D1067">Total</th>
                       <th align="center" style="background-color:#3D1067; color:white; padding-bottom:12px; padding-top:12px; text-transform:uppercase; border:1px solid #f2f2f2; padding:8px" bgcolor="#3D1067">Pass Rate</th>
@@ -208,7 +207,7 @@
                       <td align="center" style="border:1px solid #f2f2f2; padding:8px;background-color:#be2e25">{{pass_rate}}</td>
                       {% endif %}
                       {% if logs != "" %}
-                      <td align="center" style="border:1px solid #f2f2f2; padding:8px; border-top: 1px solid #f2f2f2"><button onclick="openLocalFolderOrFile('logs/{{logs_html}}')">logs</botton></td>
+                      <td align="center" style="border:1px solid #f2f2f2; padding:8px; border-top: 1px solid #f2f2f2"><a href="logs/{{logs_html|urlencode}}" target="_blank" rel="noopener">logs</a></td>
                       {% else %}
                       <td align="center" style="border:1px solid #f2f2f2; padding:8px"></td>
                       {% endif %}
@@ -297,19 +296,10 @@
       });
   </script> 
   <script>
-      function openLocalFolderOrFile(path) {
-          window.open(
-              path, 
-              '_blank', 
-              'width=1400,height=600,left=200,top=100,scrollbars=yes,resizable=yes'
-          );
-      }
-  </script>
-  <script>
       const ctx = document.getElementById('PassrateChart').getContext('2d');
       <!-- update chart -->
-      const labels = {{regressions}};
-      const data0 = {{passrate_list}};
+      const labels = {{regressions|tojson}};
+      const data0 = {{passrate_list|tojson}};
       <!-- update chart -->
 
       let myChart;

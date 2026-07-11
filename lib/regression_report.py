@@ -9,6 +9,18 @@ from datetime import datetime
 # Bigger libraries
 import json
 
+import jinja2
+
+
+def create_template_environment(template_dir):
+    """Create the autoescaping Jinja environment used by HTML reports."""
+    environment = jinja2.Environment(
+        autoescape=jinja2.select_autoescape(enabled_extensions=("html", "xml", "html.j2", "xml.j2")),
+        loader=jinja2.FileSystemLoader(searchpath=template_dir),
+    )
+    environment.filters['zip'] = zip
+    return environment
+
 
 def regression_history_series(regressions, timestamps):
     """Return pass, code-coverage, and functional-coverage chart series."""
@@ -35,7 +47,6 @@ class RegressionReport():
         self.project_info_path = self.output_path + '/' + 'project_info.json'
 
         # template filep load
-        self.env.filters['zip'] = zip
         self.HOME_TEMPLATE = self.env.get_template("regression_report_templates/home_template.html.j2")
         self.BENCHS_TEMPLATE = self.env.get_template("regression_report_templates/benchs_template.html.j2")
         self.REGRESSION_REPORT_TEMPLATE = self.env.get_template('regression_report_templates/regression_report_template.html.j2')

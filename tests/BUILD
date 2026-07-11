@@ -48,6 +48,7 @@ py_test(
 py_test(
     name = "regression_report_test",
     srcs = ["regression_report_test.py"],
+    data = ["//bin:regression_report_templates"],
     deps = ["//lib:regression_report"],
 )
 

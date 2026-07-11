@@ -48,6 +48,7 @@ log = None
 # Use the absolute path to locate the 'templates' directory
 file_loader = jinja2.FileSystemLoader(searchpath=os.path.join(dir_path, 'templates'))
 jinja2_env = jinja2.Environment(loader=file_loader)
+report_jinja2_env = regression_report.create_template_environment(os.path.join(dir_path, 'templates'))
 
 #XRUN_COMPILE_TEMPLATE = jinja2_env.get_template('xrun_compile_template.sh.j2')
 #VCS_COMPILE_TEMPLATE = jinja2_env.get_template('vcs_compile_template.sh.j2')
@@ -1196,7 +1197,7 @@ def main(rcfg, options):
         if report_header is not None and 'tag' in report_header:
             if '-' in report_header['tag']:
                 report_header['tag'] = ''
-        rrt = regression_report.RegressionReport(rcfg, jinja2_env, webroot_path)
+        rrt = regression_report.RegressionReport(rcfg, report_jinja2_env, webroot_path)
         report_root = os.path.join(webroot_path, "regression_report")
         project_lock_path = os.path.join(report_root, ".{}.lock".format(report_header['project_name']))
         index_lock_path = os.path.join(report_root, ".index.lock")

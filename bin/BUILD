@@ -4,6 +4,11 @@ load("@pip_deps//:requirements.bzl", "requirement")
 
 package(default_visibility = ["//visibility:public"])
 
+filegroup(
+    name = "regression_report_templates",
+    srcs = glob(["templates/regression_report_templates/*.html.j2"]),
+)
+
 exports_files([
     "lint_parser_vcs.py",
     "simmer.py",
