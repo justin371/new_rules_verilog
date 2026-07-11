@@ -159,7 +159,7 @@ Compiles and runs a small unit test for DV.
 
 <pre>
 verilog_rtl_cdc_test(<a href="#verilog_rtl_cdc_test-name">name</a>, <a href="#verilog_rtl_cdc_test-bash_template">bash_template</a>, <a href="#verilog_rtl_cdc_test-bbox_array_size">bbox_array_size</a>, <a href="#verilog_rtl_cdc_test-bbox_modules">bbox_modules</a>, <a href="#verilog_rtl_cdc_test-cmd_files">cmd_files</a>, <a href="#verilog_rtl_cdc_test-defines">defines</a>, <a href="#verilog_rtl_cdc_test-deps">deps</a>,
-                     <a href="#verilog_rtl_cdc_test-epilogue_template">epilogue_template</a>, <a href="#verilog_rtl_cdc_test-preamble_template">preamble_template</a>, <a href="#verilog_rtl_cdc_test-run_template">run_template</a>, <a href="#verilog_rtl_cdc_test-shells">shells</a>, <a href="#verilog_rtl_cdc_test-top">top</a>)
+                     <a href="#verilog_rtl_cdc_test-epilogue_template">epilogue_template</a>, <a href="#verilog_rtl_cdc_test-preamble_template">preamble_template</a>, <a href="#verilog_rtl_cdc_test-shells">shells</a>, <a href="#verilog_rtl_cdc_test-top">top</a>)
 </pre>
 
 Run Jaspergold CDC on a verilog_rtl_library.
@@ -178,7 +178,6 @@ Run Jaspergold CDC on a verilog_rtl_library.
 | <a id="verilog_rtl_cdc_test-deps"></a>deps |  Other verilog libraries this target is dependent upon. All Labels specified here must provide a VerilogInfo provider.   | <a href="https://bazel.build/docs/build-ref.html#labels">List of labels</a> | required |  |
 | <a id="verilog_rtl_cdc_test-epilogue_template"></a>epilogue_template |  The template to generate the final reporting commands for this cdc test.   | <a href="https://bazel.build/docs/build-ref.html#labels">Label</a> | optional | @rules_verilog//vendors/cadence:verilog_rtl_cdc_epilogue_cmds.tcl.template |
 | <a id="verilog_rtl_cdc_test-preamble_template"></a>preamble_template |  The template to generate the initial commands (the preamble) for this cdc test.   | <a href="https://bazel.build/docs/build-ref.html#labels">Label</a> | optional | @rules_verilog//vendors/cadence:verilog_rtl_cdc_preamble_cmds.tcl.template |
-| <a id="verilog_rtl_cdc_test-run_template"></a>run_template |  The template to generate the script to run the cdc test.   | <a href="https://bazel.build/docs/build-ref.html#labels">Label</a> | optional | @rules_verilog//vendors/cadence:verilog_rtl_cdc_test.sh.template |
 | <a id="verilog_rtl_cdc_test-shells"></a>shells |  List of verilog_rtl_shell Labels. For each Label, a gumi define will be placed on the command line to use this shell instead of the original module. This requires that the original module was instantiated using \<code>gumi_&lt;module_name&gt; instead of just &lt;module_name&gt;.   | <a href="https://bazel.build/docs/build-ref.html#labels">List of labels</a> | optional | [] |
 | <a id="verilog_rtl_cdc_test-top"></a>top |  The name of the top-level module for this cdc run   | String | required |  |
 
@@ -306,30 +305,6 @@ Compile and simulate a verilog_rtl_library.
 | <a id="verilog_rtl_unit_test-ut_sim_template"></a>ut_sim_template |  The template to generate the script to run the test. Also available is a [SVUnit](http://agilesoc.com/open-source-projects/svunit/) test template: @rules_verilog//vendors/cadence:verilog_rtl_unit_test_svunit.sh.template If using the SVUnit template, you may also want to throw: <pre><code>    post_flist_args = [     "--directory &lt;path_to_test_directory_from_workspace&gt;",  ],</code></pre>   | <a href="https://bazel.build/docs/build-ref.html#labels">Label</a> | optional | @rules_verilog//vendors/cadence:verilog_rtl_unit_test.sh.template |
 | <a id="verilog_rtl_unit_test-ut_sim_waves_template"></a>ut_sim_waves_template |  The template to generate the waves command script to run in the test. When using the SVUnit ut_sim_template or a custom SVUnit invocation, the default verilog_rtl_unit_test_waves.tcl.template will not work. You must either write your own waves script or use the SVUnit waves template: @rules_verilog//vendors/cadence:verilog_rtl_unit_test_svunit_waves.tcl.template.   | <a href="https://bazel.build/docs/build-ref.html#labels">Label</a> | optional | @rules_verilog//vendors/cadence:verilog_rtl_unit_test_waves.tcl.template |
 | <a id="verilog_rtl_unit_test-wave_viewer_command"></a>wave_viewer_command |  Allows custom override of waveform viewer command in the event of wrapping via modulefiles. Example override in project's .bazelrc:   build --@rules_verilog//:verilog_rtl_wave_viewer_command="runmod xrun --"   | <a href="https://bazel.build/docs/build-ref.html#labels">Label</a> | optional | @rules_verilog//:verilog_rtl_wave_viewer_command |
-
-
-<a id="verilog_test"></a>
-
-## verilog_test
-
-<pre>
-verilog_test(<a href="#verilog_test-name">name</a>, <a href="#verilog_test-data">data</a>, <a href="#verilog_test-deps">deps</a>, <a href="#verilog_test-post_flist_args">post_flist_args</a>, <a href="#verilog_test-pre_flist_args">pre_flist_args</a>, <a href="#verilog_test-shells">shells</a>, <a href="#verilog_test-tool">tool</a>)
-</pre>
-
-Provides a way to run a test against a set of libs.
-
-**ATTRIBUTES**
-
-
-| Name  | Description | Type | Mandatory | Default |
-| :------------- | :------------- | :------------- | :------------- | :------------- |
-| <a id="verilog_test-name"></a>name |  A unique name for this target.   | <a href="https://bazel.build/docs/build-ref.html#name">Name</a> | required |  |
-| <a id="verilog_test-data"></a>data |  Non-verilog dependencies   | <a href="https://bazel.build/docs/build-ref.html#labels">List of labels</a> | optional | [] |
-| <a id="verilog_test-deps"></a>deps |  Other verilog libraries this target is dependent upon. All Labels specified here must provide a VerilogInfo provider.   | <a href="https://bazel.build/docs/build-ref.html#labels">List of labels</a> | required |  |
-| <a id="verilog_test-post_flist_args"></a>post_flist_args |  Commands and arguments after flist arguments   | List of strings | optional | [] |
-| <a id="verilog_test-pre_flist_args"></a>pre_flist_args |  Commands and arguments before flist arguments   | List of strings | optional | [] |
-| <a id="verilog_test-shells"></a>shells |  List of verilog_rtl_shell Labels. For each Label, a gumi define will be placed on the command line to use this shell instead of the original module. This requires that the original module was instantiated using \<code>gumi_&lt;module_name&gt; instead of just &lt;module_name&gt;.   | <a href="https://bazel.build/docs/build-ref.html#labels">List of labels</a> | optional | [] |
-| <a id="verilog_test-tool"></a>tool |  Label to a single tool to run. Inserted at before pre_flist_args if set. Do not duplicate in pre_flist_args   | <a href="https://bazel.build/docs/build-ref.html#labels">Label</a> | optional | None |
 
 
 <a id="verilog_tool_encapsulation"></a>

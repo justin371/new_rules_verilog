@@ -3,7 +3,6 @@
 
 load(
     "//verilog/private:verilog.bzl",
-    _verilog_test = "verilog_test",
     _verilog_tool_encapsulation = "verilog_tool_encapsulation",
 )
 load(
@@ -24,7 +23,6 @@ load(
 )
 
 verilog_tool_encapsulation = _verilog_tool_encapsulation
-verilog_test = _verilog_test
 
 verilog_rtl_cdc_test = _verilog_rtl_cdc_test
 verilog_rtl_library = _verilog_rtl_library

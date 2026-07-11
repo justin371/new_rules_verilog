@@ -2,7 +2,7 @@
 """Rules for building DV infrastructure."""
 
 load(":verilog.bzl", "ToolEncapsulationInfo", "VerilogInfo", "flists_to_arguments", "gather_shell_defines", "get_transitive_srcs")
-load("@//deps:gatesim_modes_list.bzl","GATESIM_MODES")
+load("//deps:gatesim_modes_list.bzl", "GATESIM_MODES")
 
 DVTestInfo = provider(fields = {
     "sim_opts": "Simulation :options to carry forward.",
@@ -78,19 +78,6 @@ def _validate_runtime_args(runtime_args, simulator):
                         "Use bazel_runfiles_main/... or an absolute path instead."
                         .format(simulator, arg)
                     )
-
-def _select_simulator_args(ctx, base_attr, legacy_attr, simulator):
-    base_args = getattr(ctx.attr, base_attr)
-    legacy_args = getattr(ctx.attr, legacy_attr)
-    if base_args and legacy_args:
-        fail(
-            "{} sets both '{}' and legacy '{}'. Use '{}' only; each verilog_dv_tb target supports exactly one simulator."
-            .format(ctx.label, base_attr, legacy_attr, base_attr)
-        )
-    if legacy_args:
-        print("{}: '{}' is legacy; use '{}' with simulator = '{}' instead.".format(ctx.label, legacy_attr, base_attr, simulator))
-        return legacy_args
-    return base_args
 
 def _verilog_dv_test_cfg_impl(ctx):
     parent_uvm_testnames = [dep[DVTestInfo].uvm_testname for dep in reversed(ctx.attr.inherits) if hasattr(dep[DVTestInfo], "uvm_testname")]
@@ -283,7 +270,7 @@ def _gatesim_target(label, corner):
     target = value.rsplit("/", 1)[-1]
     return "{}:{}_{}".format(value, target, corner)
 
-def verilog_dv_test_cfg(name = None, tags = None, abstract = None, inherits = None, uvm_testname = None, tb = None, simulator = None, sim_opts = None, no_run = None, sockets = None, pre_run = None, timeout = None, description = None, gls_tb = None, pre_opts = None, post_opts = None):
+def verilog_dv_test_cfg(name = None, tags = None, abstract = None, inherits = None, uvm_testname = None, tb = None, simulator = None, sim_opts = None, no_run = None, sockets = None, pre_run = None, timeout = None, description = None, gls_tb = None, pre_opts = None, post_opts = None, gatesim_modes = GATESIM_MODES):
     sim_opts = dict(sim_opts) if sim_opts != None else {}
     pre_opts = dict(pre_opts) if pre_opts != None else {}
     post_opts = dict(post_opts) if post_opts != None else {}
@@ -345,7 +332,7 @@ def verilog_dv_test_cfg(name = None, tags = None, abstract = None, inherits = No
         params['tags'] = temp_tags
 
         #add suffix for name,tb,inherits according gatesim corner to create post_sim testcase
-        for corner in GATESIM_MODES:
+        for corner in gatesim_modes:
             params['name'] = name + "_" + corner
             if inherits != None:
                 params['inherits'] = [_gatesim_target(inherit, corner) for inherit in inherits]
@@ -511,7 +498,6 @@ def _verilog_dv_tb_impl(ctx):
     #xrun_extra_compile_args.append("-top hdl_top -top hvl_top")    
     selected_compile_args = ctx.attr.extra_compile_args
     if simulator == "VCS":
-        selected_compile_args = _select_simulator_args(ctx, "extra_compile_args", "extra_compile_args_vcs", simulator)
         compile_args.extend(_sanitize_vcs_compile_args(selected_compile_args))
     else:
         compile_args.extend(selected_compile_args)
@@ -547,7 +533,7 @@ def _verilog_dv_tb_impl(ctx):
     )
     if simulator == "VCS":
         runtime_template = ctx.file._default_sim_opts_vcs
-        runtime_args = _select_simulator_args(ctx, "extra_runtime_args", "extra_runtime_args_vcs", simulator)
+        runtime_args = ctx.attr.extra_runtime_args
         _validate_runtime_args(runtime_args, "VCS")
         runtime_dpi = flists_to_arguments(
             ctx.attr.shells + ctx.attr.deps,
@@ -686,15 +672,9 @@ verilog_dv_tb = rule(
         "extra_compile_args": attr.string_list(
             doc = "Additional flags to pass to the selected simulator compile/elaboration step.\n",
         ),
-        "extra_compile_args_vcs": attr.string_list(
-            doc = "Legacy alias for extra_compile_args when simulator = VCS. Do not use in new targets.\n",
-        ),
         "extra_runtime_args": attr.string_list(
             doc = "Additional flags to pass to selected simulator runs. These flags will not be provided to compilation.\n" +
                   "Simulation runs execute from the per-test sim directory, so path-bearing arguments should generally use absolute paths or bazel_runfiles_main/... paths.\n",
-        ),
-        "extra_runtime_args_vcs": attr.string_list(
-            doc = "Legacy alias for extra_runtime_args when simulator = VCS. Do not use in new targets.\n",
         ),
         "extra_runfiles": attr.label_list(
             allow_files = True,
@@ -793,7 +773,6 @@ def _verilog_dv_unit_test_impl(ctx):
     )]
 
 verilog_dv_unit_test = rule(
-    # TODO this could just be a specific use case of verilog_test
     doc = """Compiles and runs a small unit test for DV.
 
     This is typically a unit test for a single verilog_dv_library and its dependencies.
@@ -876,18 +855,4 @@ def _verilog_dv_test_cfg_info_aspect_impl(target, ctx):
 verilog_dv_test_cfg_info_aspect = aspect(
     doc = """Gather information about the tb and tags related to a verilog_dv_test_config for use in simmer.""",
     implementation = _verilog_dv_test_cfg_info_aspect_impl,
-    attr_aspects = ["deps", "tags"],
-)
-
-def _verilog_dv_tb_ccf_aspect_impl(target, ctx):
-    # buildifier: disable=print
-    print("verilog_dv_tb_ccf({})".format([f.path for f in target[DVTBInfo].ccf]))
-
-    # buildifier: enable=print
-    return []
-
-verilog_dv_tb_ccf_aspect = aspect(
-    doc = """Find test to find ccf file mappings simmer.""",
-    implementation = _verilog_dv_tb_ccf_aspect_impl,
-    attr_aspects = ["ccf"],
 )

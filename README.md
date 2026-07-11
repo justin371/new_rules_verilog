@@ -133,7 +133,6 @@ Load rules into your `BUILD` files from [@rules_verilog//verilog:defs.bzl](veril
 ### Generic Verilog
 Load rules into your `BUILD` files from [@rules_verilog//verilog:defs.bzl](verilog/defs.bzl)
 
-- [verilog_test](docs/defs.md#verilog_test)
 
 ### Migration Notes
 - [Simulator migration checklist](docs/simulator_migration_checklist.md)

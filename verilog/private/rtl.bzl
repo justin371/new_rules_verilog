@@ -446,7 +446,6 @@ def _verilog_rtl_unit_test_impl(ctx):
     )]
 
 verilog_rtl_unit_test = rule(
-    # TODO: this could eventually be a specific use case of verilog_test
     doc = """Compile and simulate a verilog_rtl_library.
 
     Allows a designer to write small unit/directed tests which can be included in regression.
@@ -861,11 +860,6 @@ verilog_rtl_cdc_test = rule(
             mandatory = True,
             doc = "Other verilog libraries this target is dependent upon.\n" +
                   "All Labels specified here must provide a VerilogInfo provider.",
-        ),
-        "run_template": attr.label(
-            allow_single_file = True,
-            default = Label("@rules_verilog//vendors/cadence:verilog_rtl_cdc_test.sh.template"),
-            doc = "The template to generate the script to run the cdc test.\n",
         ),
         "preamble_template": attr.label(
             allow_single_file = True,

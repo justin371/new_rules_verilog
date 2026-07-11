@@ -85,15 +85,6 @@ verilog_dv_tb(
 )
 ```
 
-Legacy VCS-only names are still accepted for compatibility:
-
-```python
-extra_compile_args_vcs
-extra_runtime_args_vcs
-```
-
-Do not mix the unified and legacy names in the same target.
-
 ## Argument ownership
 
 Simulator arguments are defined and validated in their own modules:
@@ -106,6 +97,20 @@ Passing a vendor-specific option to the other backend fails before Bazel starts.
 Use `extra_compile_args` only for compile/elaboration flags and
 `extra_runtime_args` only for runtime flags. CLI `--sim-opts` overrides matching
 test-config simulation options.
+
+## Compatibility removals
+
+The following unused or ambiguous interfaces were removed before this workflow
+was merged:
+
+- `verilog_test`; use `verilog_dv_unit_test` or `verilog_rtl_unit_test`.
+- `extra_compile_args_vcs`; use `extra_compile_args` on a VCS testbench.
+- `extra_runtime_args_vcs`; use `extra_runtime_args` on a VCS testbench.
+- the unused CDC `run_template`; use `bash_template`.
+
+Gate-simulation modes now default to the list owned by rules_verilog. Projects
+that need different corners pass `gatesim_modes` explicitly to
+`verilog_dv_test_cfg`; they no longer provide `@//deps:gatesim_modes_list.bzl`.
 
 ## VCS defaults
 
