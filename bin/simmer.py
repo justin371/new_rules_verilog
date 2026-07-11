@@ -24,8 +24,6 @@ dir_path = os.path.dirname(os.path.realpath(__file__))
 ################################################################################
 # rules_verilog lib imports
 from args_parser import parse_args
-from args_parse.vcs import validate_vcs_runtime_options, validate_vcs_switches_for_xcelium
-from args_parse.xcelium import validate_xcelium_runtime_options, validate_xcelium_switches_for_vcs
 from lib.job_lib import Job, JobStatus
 from lib import cmn_logging
 from lib import compile_cache
@@ -119,42 +117,18 @@ def replace_symlink(link_path, target_path):
     os.symlink(target_path, link_path)
 
 
-# --- Simulator Factory Function ---
+SIMULATOR_CLASSES = {
+    "vcs": VcsSimulator,
+    "xrun": XceliumSimulator,
+}
+
+
 def get_simulator(options, rcfg, jinja_env) -> SimulatorInterface:
     """Instantiates and returns the correct simulator object."""
-    sim_name = options.simulator.lower()
-    if sim_name == 'xrun':
-        # Pass options, rcfg, and jinja env to the constructor
-        return XceliumSimulator(options, rcfg, jinja_env)
-    elif sim_name == 'vcs':
-        return VcsSimulator(options, rcfg, jinja_env)
-    # Add elif for other simulators here
-    # elif sim_name == 'questa':
-    #    from lib.simulators.questa import QuestaSimulator
-    #    return QuestaSimulator(options, rcfg, jinja_env)
-    else:
+    simulator_class = SIMULATOR_CLASSES.get(options.simulator.lower())
+    if simulator_class is None:
         raise ValueError(f"Unsupported simulator specified: {options.simulator}")
-
-
-class _ValidationErrorParser:
-
-    def error(self, message):
-        raise ValueError(message)
-
-
-def validate_resolved_simulator_options(options):
-    parser = _ValidationErrorParser()
-    if options.simulator == 'VCS':
-        validate_xcelium_switches_for_vcs(options, parser)
-        validate_vcs_runtime_options(options, parser)
-        return
-
-    if options.simulator == 'XRUN':
-        validate_vcs_switches_for_xcelium(options, parser)
-        validate_xcelium_runtime_options(options, parser)
-        return
-
-    raise ValueError("Unsupported simulator specified: {}".format(options.simulator))
+    return simulator_class(options, rcfg, jinja_env)
 
 
 def resolve_run_simulator(rcfg, options):
@@ -195,16 +169,10 @@ def resolve_run_simulator(rcfg, options):
     options.simulator = resolved_simulator
     rcfg.simulator = resolved_simulator
 
-    try:
-        validate_resolved_simulator_options(options)
-    except ValueError as exc:
-        rcfg.log.critical("%s", exc)
-        sys.exit(1)
-
     return resolved_simulator
 
 
-def get_active_job_limit(options, rcfg):
+def get_active_job_limit(options, rcfg, simulator):
     total_tests = sum(icfg.target for _, (icfgs, _) in rcfg.all_vcomp.items() for icfg in icfgs)
     if total_tests <= 1:
         return 1
@@ -216,12 +184,7 @@ def get_active_job_limit(options, rcfg):
         requested_jobs = options.jobs
     else:
         cpu_count = os.cpu_count() or 1
-        threads_per_sim = 1
-        if options.simulator == "VCS" and options.fgp is not None:
-            threads_per_sim = options.fgp
-        elif options.simulator == "XRUN" and options.mce:
-            threads_per_sim = options.mce_sim_count or cpu_count
-        requested_jobs = max(1, cpu_count // threads_per_sim)
+        requested_jobs = max(1, cpu_count // simulator.get_scheduler_threads_per_test())
     return max(1, min(total_tests, requested_jobs))
 
 
@@ -1044,6 +1007,8 @@ def main(rcfg, options):
     try:
         # Pass the global Jinja environment.
         simulator = get_simulator(options, rcfg, jinja2_env)
+        simulator.validate_resolved_options()
+        simulator.validate_run_options(len(rcfg.all_vcomp))
         rcfg.log.info("Using Simulator: %s", simulator.get_name().upper())
     except ValueError as e:
         rcfg.log.critical(str(e))
@@ -1058,17 +1023,6 @@ def main(rcfg, options):
     vso_init_job = None
     vso_ask_job = None
     vso_finalize_merge_failed = False
-
-    if options.vso and simulator.get_name().upper() != 'VCS':
-        rcfg.log.critical("--vso is currently supported only with VCS.")
-        sys.exit(1)
-    if options.vso and not os.environ.get("VSO_HOME"):
-        rcfg.log.critical("VSO_HOME is not set. Please source the VSO/VCS environment before using --vso.")
-        sys.exit(1)
-    if options.vso and options.vso_buildname and len(rcfg.all_vcomp) > 1:
-        rcfg.log.critical("--vso-buildname can only be used when a single VCS build is selected. "
-                          "Multiple builds would otherwise collapse into the same VSO buildname.")
-        sys.exit(1)
 
     rcfg.all_vcomp = seed_plan.ordered_regression_tests(rcfg.all_vcomp)
     planned_seeds = {}
@@ -1146,7 +1100,7 @@ def main(rcfg, options):
         jm_opts = {
             'idle_print_seconds': options.idle_print_seconds,
             'quit_count': options.quit_count,
-            'active_job_limit': get_active_job_limit(options, rcfg),
+            'active_job_limit': get_active_job_limit(options, rcfg, simulator),
         }
         jm = job_lib.JobManager(jm_opts, log)
 

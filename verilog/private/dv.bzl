@@ -2,6 +2,9 @@
 """Rules for building DV infrastructure."""
 
 load("//deps:gatesim_modes_list.bzl", "GATESIM_MODES")
+load(":simulators/pldm.bzl", "pldm_dv_backend")
+load(":simulators/vcs.bzl", "vcs_dv_backend")
+load(":simulators/xcelium.bzl", "xcelium_dv_backend")
 load(":verilog.bzl", "ToolEncapsulationInfo", "VerilogInfo", "flists_to_arguments", "gather_shell_defines", "get_transitive_srcs", "runfiles_relative_short_path")
 
 DVTestInfo = provider(fields = {
@@ -26,23 +29,12 @@ DVTBInfo = provider(fields = {
     "xcelium_covfile": "Xcelium coverage configuration file.",
 })
 
-def _sanitize_vcs_defines(defines):
-    sanitized = {}
-    for key, value in defines.items():
-        if key in ["CADENCE", "XRUN"]:
-            continue
-        sanitized[key] = value
-    return sanitized
-
-def _sanitize_vcs_compile_args(compile_args):
-    sanitized = []
-    for arg in compile_args:
-        if arg.startswith("+define+CADENCE") or arg.startswith("+define+XRUN"):
-            continue
-        if arg.startswith("-define CADENCE") or arg.startswith("-define XRUN"):
-            continue
-        sanitized.append(arg)
-    return sanitized
+def _dv_backend(simulator):
+    if simulator == "VCS":
+        return vcs_dv_backend
+    if simulator == "XRUN":
+        return xcelium_dv_backend
+    fail("simulator must be one of ['XRUN', 'VCS'], got '{}'".format(simulator))
 
 def _build_test_runtime_options(simulator, uvm_testname, sim_opts, timeout, sockets, tags, pre_run, run_pass_patterns, run_fail_patterns):
     timeout_minutes = None
@@ -86,18 +78,6 @@ def _validate_runtime_args(runtime_args, simulator):
                         "Use bazel_runfiles_main/... or an absolute path instead."
                             .format(simulator, arg),
                     )
-
-def _msie_input_inventory(deps, extra_files):
-    entries = []
-    sources = get_transitive_srcs([], deps, VerilogInfo, "transitive_sources", allow_other_outputs = True)
-    flists = get_transitive_srcs([], deps, VerilogInfo, "transitive_flists", allow_other_outputs = False)
-    for source in sources.to_list():
-        entries.append("source\t{}".format(runfiles_relative_short_path(source)))
-    for flist in flists.to_list():
-        entries.append("filelist\t{}".format(runfiles_relative_short_path(flist)))
-    for extra_file in extra_files:
-        entries.append("runfile\t{}".format(runfiles_relative_short_path(extra_file)))
-    return "\n".join(sorted(depset(entries).to_list())) + "\n"
 
 def _verilog_dv_test_cfg_impl(ctx):
     parent_uvm_testnames = [dep[DVTestInfo].uvm_testname for dep in reversed(ctx.attr.inherits) if hasattr(dep[DVTestInfo], "uvm_testname")]
@@ -501,18 +481,11 @@ verilog_dv_library = rule(
 
 def _verilog_dv_tb_impl(ctx):
     simulator = ctx.attr.simulator
-    if simulator not in ["XRUN", "VCS"]:
-        fail("verilog_dv_tb simulator must be one of ['XRUN', 'VCS'], got '{}'".format(simulator))
+    backend = _dv_backend(simulator)
     if len(ctx.files.ccf) > 1:
         fail("verilog_dv_tb {} accepts only one ccf file".format(ctx.label))
     if ctx.file.xcelium_covfile and ctx.files.ccf:
         fail("verilog_dv_tb {} accepts either xcelium_covfile or legacy ccf, not both".format(ctx.label))
-    if simulator == "VCS" and ctx.files.ccf:
-        fail("verilog_dv_tb {} ccf is Xcelium-only; use VCS -cm options instead".format(ctx.label))
-    if simulator == "VCS" and ctx.file.xcelium_covfile:
-        fail("verilog_dv_tb {} xcelium_covfile cannot be used with VCS".format(ctx.label))
-    if simulator == "XRUN" and ctx.file.vcs_cm_hier:
-        fail("verilog_dv_tb {} vcs_cm_hier cannot be used with Xcelium".format(ctx.label))
     has_msie_primary = len(ctx.attr.msie_primary_deps) > 0
     has_msie_incremental = len(ctx.attr.msie_incremental_deps) > 0
     if has_msie_primary != has_msie_incremental:
@@ -523,10 +496,7 @@ def _verilog_dv_tb_impl(ctx):
         ctx.attr.msie_primary_extra_runfiles or
         ctx.attr.msie_incremental_extra_runfiles
     )
-    if not has_msie_primary and has_msie_extras:
-        fail("verilog_dv_tb {} MSIE extra compile arguments require MSIE dependencies".format(ctx.label))
-    if simulator != "XRUN" and (has_msie_primary or has_msie_extras):
-        fail("verilog_dv_tb {} MSIE attributes are Xcelium-only".format(ctx.label))
+    backend.validate_tb(ctx, has_msie_primary, has_msie_extras)
 
     xcelium_covfile = ctx.file.xcelium_covfile
     if not xcelium_covfile and ctx.files.ccf:
@@ -537,143 +507,47 @@ def _verilog_dv_tb_impl(ctx):
     defines.update(gather_shell_defines(ctx.attr.shells))
 
     top = "tb_top"
-    pldm_ice_extra_compile_args = []
-    pldm_sa_extra_compile_args = []
     compile_args = []
     if len(ctx.attr.verilog_config):
         if len(ctx.attr.verilog_config) > 1:
             fail("verilog_dv_tb {} accepts only one verilog_config entry".format(ctx.label))
         top = ctx.attr.verilog_config.keys()[0]
         cfg = ctx.attr.verilog_config[top]
-        if simulator == "VCS":
-            compile_args.append(cfg)
-        else:
-            compile_args.append("-compcnfg {}".format(cfg))
+        compile_args.append(backend.config_arg(cfg))
 
     #vcs_extra_compile_args.append("-top {}".format(top))
     #xrun_extra_compile_args.append("-top {}".format(top))
     #vcs_extra_compile_args.append("-top hdl_top -top hvl_top")
     #xrun_extra_compile_args.append("-top hdl_top -top hvl_top")
     selected_compile_args = ctx.attr.extra_compile_args
-    if simulator == "VCS":
-        compile_args.extend(_sanitize_vcs_compile_args(selected_compile_args))
-    else:
-        compile_args.extend(selected_compile_args)
-    pldm_ice_extra_compile_args.extend(selected_compile_args)
-    pldm_sa_extra_compile_args.extend(selected_compile_args)
+    compile_args.extend(selected_compile_args)
 
-    if simulator == "VCS":
-        compile_template = ctx.file._compile_args_template_vcs
-        compile_defines = "\n".join(["+define+{}{}".format(key, value) for key, value in _sanitize_vcs_defines(defines).items()])
-        compile_flists = flists_to_arguments(ctx.attr.shells + ctx.attr.deps, VerilogInfo, "transitive_flists", "\n-file")
-    else:
-        compile_template = ctx.file._compile_args_template_xrun
-        compile_defines = "\n".join(["-define {}{}".format(key, value) for key, value in defines.items()])
-        compile_flists = flists_to_arguments(ctx.attr.deps + ctx.attr.shells, VerilogInfo, "transitive_flists", "\n-f")
+    compile_config = backend.compile_config(ctx, defines, compile_args)
 
     ctx.actions.expand_template(
-        template = compile_template,
+        template = compile_config.template,
         output = ctx.outputs.compile_args,
         substitutions = {
-            "{COMPILE_ARGS}": ctx.expand_location("\n".join(compile_args), targets = ctx.attr.extra_runfiles),
-            "{DEFINES}": compile_defines,
-            "{FLISTS}": compile_flists,
+            "{COMPILE_ARGS}": ctx.expand_location("\n".join(compile_config.args), targets = ctx.attr.extra_runfiles),
+            "{DEFINES}": compile_config.defines,
+            "{FLISTS}": compile_config.flists,
         },
     )
-    msie_outputs = []
-    msie_primary_compile_args = None
-    msie_incremental_compile_args = None
-    msie_primary_inputs = None
-    if has_msie_primary:
-        msie_primary_compile_args = ctx.actions.declare_file(ctx.label.name + "_msie_primary_compile_args.f")
-        msie_incremental_compile_args = ctx.actions.declare_file(ctx.label.name + "_msie_incremental_compile_args.f")
-        msie_primary_inputs = ctx.actions.declare_file(ctx.label.name + "_msie_primary_inputs.txt")
-        common_xrun_args = ctx.expand_location("\n".join(compile_args), targets = ctx.attr.extra_runfiles)
-        primary_xrun_args = ctx.expand_location(
-            "\n".join(ctx.attr.msie_primary_extra_compile_args),
-            targets = ctx.attr.extra_runfiles + ctx.attr.msie_primary_extra_runfiles,
-        )
-        incremental_xrun_args = ctx.expand_location(
-            "\n".join(ctx.attr.msie_incremental_extra_compile_args),
-            targets = ctx.attr.extra_runfiles + ctx.attr.msie_incremental_extra_runfiles,
-        )
-        ctx.actions.expand_template(
-            template = ctx.file._compile_args_template_xrun,
-            output = msie_primary_compile_args,
-            substitutions = {
-                "{COMPILE_ARGS}": "\n".join([arg for arg in [common_xrun_args, primary_xrun_args] if arg]),
-                "{DEFINES}": compile_defines,
-                "{FLISTS}": flists_to_arguments(ctx.attr.msie_primary_deps, VerilogInfo, "transitive_flists", "\n-f"),
-            },
-        )
-        ctx.actions.expand_template(
-            template = ctx.file._compile_args_template_xrun,
-            output = msie_incremental_compile_args,
-            substitutions = {
-                "{COMPILE_ARGS}": "\n".join([arg for arg in [common_xrun_args, incremental_xrun_args] if arg]),
-                "{DEFINES}": compile_defines,
-                "{FLISTS}": flists_to_arguments(ctx.attr.msie_incremental_deps, VerilogInfo, "transitive_flists", "\n-f"),
-            },
-        )
-        ctx.actions.write(
-            output = msie_primary_inputs,
-            content = _msie_input_inventory(
-                ctx.attr.msie_primary_deps,
-                ctx.files.extra_runfiles + ctx.files.msie_primary_extra_runfiles,
-            ),
-        )
-        msie_outputs = [msie_primary_compile_args, msie_incremental_compile_args, msie_primary_inputs]
-    ctx.actions.expand_template(
-        template = ctx.file._compile_args_template_pldm_ice,
-        output = ctx.outputs.compile_args_pldm_ice,
-        substitutions = {
-            "{COMPILE_ARGS}": ctx.expand_location("\n".join(pldm_ice_extra_compile_args), targets = ctx.attr.extra_runfiles),
-            "{DEFINES}": "\n".join(["+define+{}{}".format(key, value) for key, value in defines.items()]),
-            "{FLISTS}": flists_to_arguments(ctx.attr.shells + ctx.attr.deps, VerilogInfo, "transitive_flists", "\n-f"),
-        },
-    )
-    if simulator == "VCS":
-        runtime_template = ctx.file._default_sim_opts_vcs
-        runtime_args = ctx.attr.extra_runtime_args
-        _validate_runtime_args(runtime_args, "VCS")
-        runtime_dpi = flists_to_arguments(
-            ctx.attr.shells + ctx.attr.deps,
-            VerilogInfo,
-            "transitive_dpi",
-            "-sv_lib",
-            "\n",
-            "vcs",
-            "bazel_runfiles_main/",
-        )
-    else:
-        runtime_template = ctx.file._default_sim_opts_xrun
-        runtime_args = ctx.attr.extra_runtime_args
-        _validate_runtime_args(runtime_args, "XRUN")
-        runtime_dpi = flists_to_arguments(
-            ctx.attr.shells + ctx.attr.deps,
-            VerilogInfo,
-            "transitive_dpi",
-            "-sv_lib",
-            "\n",
-            None,
-            "bazel_runfiles_main/",
-        )
+
+    # These legacy implicit outputs are declared for every simulator value.
+    pldm_dv_backend.materialize_declared_outputs(ctx, defines, selected_compile_args)
+    extra_compile_outputs = backend.extra_compile_outputs(ctx, defines, selected_compile_args, compile_config)
+
+    runtime_config = backend.runtime_config(ctx)
+    runtime_args = ctx.attr.extra_runtime_args
+    _validate_runtime_args(runtime_args, simulator)
 
     ctx.actions.expand_template(
-        template = runtime_template,
+        template = runtime_config.template,
         output = ctx.outputs.runtime_args,
         substitutions = {
             "{RUNTIME_ARGS}": ctx.expand_location("\n".join(runtime_args), targets = ctx.attr.extra_runfiles),
-            "{DPI_LIBS}": runtime_dpi,
-        },
-    )
-    ctx.actions.expand_template(
-        template = ctx.file._compile_args_template_pldm_sa,
-        output = ctx.outputs.compile_args_pldm_sa,
-        substitutions = {
-            "{COMPILE_ARGS}": ctx.expand_location("\n".join(pldm_sa_extra_compile_args), targets = ctx.attr.extra_runfiles),
-            "{DEFINES}": "\n".join(["-define {}{}".format(key, value) for key, value in defines.items()]),
-            "{FLISTS}": flists_to_arguments(ctx.attr.shells + ctx.attr.deps, VerilogInfo, "transitive_flists", "\n-f"),
+            "{DPI_LIBS}": runtime_config.dpi,
         },
     )
     ctx.actions.write(
@@ -687,9 +561,9 @@ def _verilog_dv_tb_impl(ctx):
             "dut_top": ctx.attr.dut_top,
             "vcs_cm_hier": runfiles_relative_short_path(ctx.file.vcs_cm_hier) if ctx.file.vcs_cm_hier else "",
             "xcelium_covfile": runfiles_relative_short_path(xcelium_covfile) if xcelium_covfile else "",
-            "msie_primary_compile_args": runfiles_relative_short_path(msie_primary_compile_args) if msie_primary_compile_args else "",
-            "msie_incremental_compile_args": runfiles_relative_short_path(msie_incremental_compile_args) if msie_incremental_compile_args else "",
-            "msie_primary_inputs": runfiles_relative_short_path(msie_primary_inputs) if msie_primary_inputs else "",
+            "msie_primary_compile_args": runfiles_relative_short_path(extra_compile_outputs.primary_compile_args) if extra_compile_outputs.primary_compile_args else "",
+            "msie_incremental_compile_args": runfiles_relative_short_path(extra_compile_outputs.incremental_compile_args) if extra_compile_outputs.incremental_compile_args else "",
+            "msie_primary_inputs": runfiles_relative_short_path(extra_compile_outputs.primary_inputs) if extra_compile_outputs.primary_inputs else "",
         }),
     )
 
@@ -709,11 +583,7 @@ def _verilog_dv_tb_impl(ctx):
         ctx.outputs.tb_options,
         ctx.outputs.executable,
     ]
-    if simulator == "XRUN":
-        generated_outputs.extend([
-            ctx.outputs.compile_args_pldm_ice,
-            ctx.outputs.compile_args_pldm_sa,
-        ] + msie_outputs)
+    generated_outputs.extend(extra_compile_outputs.generated_outputs)
     out_deps = depset(generated_outputs)
     all_files = depset([], transitive = [trans_srcs, trans_flists, out_deps])
 
@@ -721,7 +591,7 @@ def _verilog_dv_tb_impl(ctx):
         DefaultInfo(
             files = all_files,
             runfiles = ctx.runfiles(
-                files = ctx.files.ccf + ctx.files.extra_runfiles + ctx.files.msie_primary_extra_runfiles + ctx.files.msie_incremental_extra_runfiles + ([ctx.file.xcelium_covfile] if ctx.file.xcelium_covfile else []) + ([ctx.file.vcs_cm_hier] if ctx.file.vcs_cm_hier else []) + [runtime_template],
+                files = ctx.files.ccf + ctx.files.extra_runfiles + ctx.files.msie_primary_extra_runfiles + ctx.files.msie_incremental_extra_runfiles + ([ctx.file.xcelium_covfile] if ctx.file.xcelium_covfile else []) + ([ctx.file.vcs_cm_hier] if ctx.file.vcs_cm_hier else []) + [runtime_config.template],
                 transitive_files = all_files,
             ),
         ),
@@ -898,6 +768,7 @@ def _verilog_dv_unit_test_impl(ctx):
     flists_list = flists.to_list()
     dpi = get_transitive_srcs([], ctx.attr.deps, VerilogInfo, "transitive_dpi")
     simulator = ctx.attr.simulator
+    backend = _dv_backend(simulator)
     unit_test_template = ctx.file.ut_sim_template
     default_sim_opts = ctx.file.default_sim_opts
     simulator_command = ctx.attr._command_override[ToolEncapsulationInfo].command
@@ -905,23 +776,23 @@ def _verilog_dv_unit_test_impl(ctx):
     dpi_tool = None
     compile_args = ctx.attr.sim_args + ctx.attr.compile_args
     run_args = ctx.attr.run_args
-    if simulator == "VCS":
-        if unit_test_template.short_path == ctx.file._ut_sim_template_xrun_default.short_path:
-            unit_test_template = ctx.file._ut_sim_template_vcs_default
-        if default_sim_opts.short_path == ctx.file._default_sim_opts_xrun_default.short_path:
-            default_sim_opts = ctx.file._default_sim_opts_vcs_default
-        simulator_command = ctx.attr._command_override_vcs[ToolEncapsulationInfo].command
-        filelist_flag = "-file"
-        dpi_tool = "vcs"
+    unit_test_config = backend.unit_test_config(
+        ctx,
+        unit_test_template,
+        default_sim_opts,
+        simulator_command,
+        filelist_flag,
+        dpi_tool,
+    )
 
     ctx.actions.expand_template(
-        template = unit_test_template,
+        template = unit_test_config.unit_test_template,
         output = ctx.outputs.out,
         substitutions = {
-            "{SIMULATOR_COMMAND}": simulator_command,
-            "{DEFAULT_SIM_OPTS}": "{} {}".format(filelist_flag, runfiles_relative_short_path(default_sim_opts)),
-            "{DPI_LIBS}": flists_to_arguments(ctx.attr.deps, VerilogInfo, "transitive_dpi", "-sv_lib", "", dpi_tool),
-            "{FLISTS}": " ".join(["{} {}".format(filelist_flag, runfiles_relative_short_path(f)) for f in flists_list]),
+            "{SIMULATOR_COMMAND}": unit_test_config.simulator_command,
+            "{DEFAULT_SIM_OPTS}": "{} {}".format(unit_test_config.filelist_flag, runfiles_relative_short_path(unit_test_config.default_sim_opts)),
+            "{DPI_LIBS}": flists_to_arguments(ctx.attr.deps, VerilogInfo, "transitive_dpi", "-sv_lib", "", unit_test_config.dpi_tool),
+            "{FLISTS}": " ".join(["{} {}".format(unit_test_config.filelist_flag, runfiles_relative_short_path(f)) for f in flists_list]),
             "{SIM_ARGS}": " ".join(ctx.attr.sim_args),
             "{COMPILE_ARGS}": " ".join(compile_args),
             "{RUN_ARGS}": " ".join(run_args),
@@ -929,7 +800,7 @@ def _verilog_dv_unit_test_impl(ctx):
         is_executable = True,
     )
 
-    runfiles = ctx.runfiles(files = flists_list + srcs_list + dpi.to_list() + [default_sim_opts])
+    runfiles = ctx.runfiles(files = flists_list + srcs_list + dpi.to_list() + [unit_test_config.default_sim_opts])
     return [DefaultInfo(
         runfiles = runfiles,
         executable = ctx.outputs.out,

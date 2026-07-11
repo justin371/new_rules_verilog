@@ -13,8 +13,9 @@ import tempfile
 import jinja2
 
 from lib.coverage_data import aggregate_coverage_metrics, parse_coverage_summary
-
-from .base import SimulatorInterface
+from .base import SimulatorInterface, ValidationErrorParser
+from .options import validate_explicit_switches
+from .xcelium_options import validate_xcelium_runtime_options
 
 log = logging.getLogger(__name__)
 
@@ -81,6 +82,16 @@ class XceliumSimulator(SimulatorInterface):
 
     def get_wave_view_command(self, wave_file_path, job_dir=None):
         return 'runmod xrun -- verisium -64bit -db "{}"'.format(wave_file_path)
+
+    def validate_resolved_options(self):
+        parser = ValidationErrorParser()
+        validate_explicit_switches(self.options.vcs_explicit_switches, "VCS", "Xcelium", parser)
+        validate_xcelium_runtime_options(self.options, parser)
+
+    def get_scheduler_threads_per_test(self):
+        if self.options.mce:
+            return self.options.mce_sim_count or (os.cpu_count() or 1)
+        return 1
 
     def get_bazel_compile_args_file(self, bazel_runfiles_main, relpath, bazel_target):
         if self.options.msie_prim:

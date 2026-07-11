@@ -1,5 +1,9 @@
 import argparse
 
+from lib.simulators.options import validate_explicit_switches
+from lib.simulators.vcs_options import validate_vcs_runtime_options
+from lib.simulators.xcelium_options import validate_xcelium_runtime_options
+
 from .common import (
     PROJ_DIR,
     SIM_PLATFORM,
@@ -11,12 +15,10 @@ from .common import (
     argument_explicitly_requested,
     simulator_explicitly_requested,
 )
-from .vcs import add_vcs_arguments, validate_vcs_runtime_options, validate_vcs_switches_for_xcelium
+from .vcs import add_vcs_arguments
 from .xcelium import (
     add_xcelium_arguments,
     apply_xcelium_postprocess,
-    validate_xcelium_runtime_options,
-    validate_xcelium_switches_for_vcs,
 )
 
 _RERUN_OMITTED_OPTIONS = {
@@ -50,12 +52,12 @@ def reproduction_args(argv):
 
 def validate_simulator_specific_options(options, parser):
     if options.simulator == 'VCS':
-        validate_xcelium_switches_for_vcs(options, parser)
+        validate_explicit_switches(options.xcelium_explicit_switches, "Xcelium", "VCS", parser)
         validate_vcs_runtime_options(options, parser)
         return
 
     if options.simulator == 'XRUN':
-        validate_vcs_switches_for_xcelium(options, parser)
+        validate_explicit_switches(options.vcs_explicit_switches, "VCS", "Xcelium", parser)
         validate_xcelium_runtime_options(options, parser)
 
 
@@ -137,6 +139,33 @@ def parse_args(argv):
             '--vcs-partcomp-jobs',
             '--vcs-partcomp-dir',
             '--vcs-partcomp-sharedlib',
+        ] if argument_explicitly_requested(argv, argument)
+    ]
+    options.vcs_explicit_switches = [
+        argument for argument in [
+            '--cm',
+            '--gui',
+            '--vcs-cm-line',
+            '--vcs-cm-report',
+            '--vcs-cm-hier',
+            '--vcs-profile',
+            '--vcs-partcomp-mode',
+            '--vcs-partcomp-jobs',
+            '--vcs-partcomp-dir',
+            '--vcs-partcomp-sharedlib',
+            '--smartlog',
+            '--vcs-runner',
+            '--dtl',
+            '--fgp',
+            '--vcs-xprop-flowctrl',
+            '--vcs-xprop-mmsopt',
+            '--vcs-xprop-banner',
+            '--vcs-xprop-report',
+            '--vso',
+            '--vso-workdir',
+            '--vso-dbdir',
+            '--vso-buildname',
+            '--vso-target-metric',
         ] if argument_explicitly_requested(argv, argument)
     ]
 

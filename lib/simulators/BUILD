@@ -15,6 +15,8 @@ py_library(
     srcs = ["xcelium.py"],
     deps = [
         ":base",
+        ":options",
+        ":xcelium_options",
         "//lib:coverage_data",
         requirement("jinja2"),
     ],
@@ -25,8 +27,25 @@ py_library(
     srcs = ["vcs.py"],
     deps = [
         ":base",
+        ":options",
+        ":vcs_options",
         "//lib:coverage_data",
     ],
+)
+
+py_library(
+    name = "options",
+    srcs = ["options.py"],
+)
+
+py_library(
+    name = "vcs_options",
+    srcs = ["vcs_options.py"],
+)
+
+py_library(
+    name = "xcelium_options",
+    srcs = ["xcelium_options.py"],
 )
 
 # Add other simulators here (e.g., questa)

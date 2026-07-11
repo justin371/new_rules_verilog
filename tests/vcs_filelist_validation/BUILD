@@ -160,6 +160,9 @@ py_test(
         "//vendors/synopsys:verilog_rtl_lint_test.sh.template",
         "//verilog/private:dv.bzl",
         "//verilog/private:rtl.bzl",
+        "//verilog/private:simulators/pldm.bzl",
+        "//verilog/private:simulators/vcs.bzl",
+        "//verilog/private:simulators/xcelium.bzl",
     ],
     main = "validate_vcs_runtime_contract_test.py",
     deps = [

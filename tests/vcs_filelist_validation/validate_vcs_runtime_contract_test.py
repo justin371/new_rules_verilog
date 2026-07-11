@@ -130,6 +130,41 @@ class VcsRuntimeContractTest(unittest.TestCase):
         with self.assertRaises(SystemExit):
             parse_args(["--jobs", "0"])
 
+    def test_simulator_adapters_report_scheduler_thread_cost(self):
+        vcs_options = parse_args(["--simulator", "VCS", "--fgp", "4"])
+        xrun_options = parse_args(["--simulator", "XRUN", "--mce", "--mce-sim-count", "3"])
+
+        self.assertEqual(4, VcsSimulator(vcs_options, DummyRegressionConfig(), None).get_scheduler_threads_per_test())
+        self.assertEqual(3, XceliumSimulator(xrun_options, DummyRegressionConfig(), None).get_scheduler_threads_per_test())
+
+    def test_vcs_adapter_validates_vso_environment(self):
+        options = parse_args(["--simulator", "VCS", "--vso", "--cm", "line"])
+        simulator = VcsSimulator(options, DummyRegressionConfig(), None)
+
+        with mock.patch.dict(os.environ, {}, clear=True):
+            with self.assertRaisesRegex(ValueError, "VSO_HOME is not set"):
+                simulator.validate_run_options(1)
+
+    def test_simmer_dispatches_backend_validation_and_scheduler_capabilities(self):
+        simmer_source = self._read_repo_file("bin/simmer.py")
+
+        self.assertIn("simulator.validate_resolved_options()", simmer_source)
+        self.assertIn("simulator.validate_run_options(len(rcfg.all_vcomp))", simmer_source)
+        self.assertIn("simulator.get_scheduler_threads_per_test()", simmer_source)
+        self.assertNotIn('options.simulator == "VCS"', simmer_source)
+        self.assertNotIn('options.simulator == "XRUN"', simmer_source)
+
+    def test_simulator_adapters_reject_opposite_backend_switches(self):
+        vcs_options = parse_args(["--simulator", "VCS"])
+        vcs_options.xcelium_explicit_switches = ["--mce"]
+        with self.assertRaisesRegex(ValueError, "Xcelium-only"):
+            VcsSimulator(vcs_options, DummyRegressionConfig(), None).validate_resolved_options()
+
+        xrun_options = parse_args(["--simulator", "XRUN"])
+        xrun_options.vcs_explicit_switches = ["--fgp"]
+        with self.assertRaisesRegex(ValueError, "VCS-only"):
+            XceliumSimulator(xrun_options, DummyRegressionConfig(), None).validate_resolved_options()
+
     def test_iterations_are_preplanned_for_parallel_execution(self):
         simmer_source = self._read_repo_file("bin/simmer.py")
 
@@ -793,10 +828,24 @@ class VcsRuntimeContractTest(unittest.TestCase):
 
     def test_vcs_unit_test_rules_use_simulator_specific_defaults(self):
         dv_bzl = self._read_repo_file("verilog/private/dv.bzl")
+        pldm_backend = self._read_repo_file("verilog/private/simulators/pldm.bzl")
+        vcs_backend = self._read_repo_file("verilog/private/simulators/vcs.bzl")
+        xcelium_backend = self._read_repo_file("verilog/private/simulators/xcelium.bzl")
+        vcs_python = self._read_repo_file("lib/simulators/vcs.py")
+        xcelium_python = self._read_repo_file("lib/simulators/xcelium.py")
         rtl_bzl = self._read_repo_file("verilog/private/rtl.bzl")
 
-        self.assertIn('filelist_flag = "-file"', dv_bzl)
-        self.assertIn("_ut_sim_template_vcs_default", dv_bzl)
+        self.assertIn("vcs_dv_backend", dv_bzl)
+        self.assertIn("xcelium_dv_backend", dv_bzl)
+        self.assertNotIn('filelist_flag = "-file"', dv_bzl)
+        self.assertIn('filelist_flag = "-file"', vcs_backend)
+        self.assertIn("_ut_sim_template_vcs_default", vcs_backend)
+        self.assertNotIn("simulators/xcelium.bzl", vcs_backend)
+        self.assertNotIn("simulators/vcs.bzl", xcelium_backend)
+        self.assertNotIn("xcelium_options", vcs_python)
+        self.assertNotIn("vcs_options", xcelium_python)
+        self.assertIn("compile_args_pldm_ice", pldm_backend)
+        self.assertIn("expand_msie_compile_args", xcelium_backend)
         self.assertIn('filelist_flag = "-file"', rtl_bzl)
         self.assertIn("_ut_sim_waves_template_vcs_default", rtl_bzl)
         self.assertIn('pre_fa.append("  +define+{}{}', rtl_bzl)

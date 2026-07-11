@@ -2,6 +2,12 @@
 import abc
 
 
+class ValidationErrorParser:
+
+    def error(self, message):
+        raise ValueError(message)
+
+
 class SimulatorInterface(abc.ABC):
     """Abstract base class defining the interface for simulators."""
 
@@ -142,6 +148,19 @@ class SimulatorInterface(abc.ABC):
     def cleanup_test_coverage(self, test_job):
         """Remove one failed test's simulator-specific coverage database."""
         return
+
+    def get_scheduler_threads_per_test(self):
+        """Return the effective thread cost of one simulation for job limiting."""
+        return 1
+
+    def validate_resolved_options(self):
+        """Validate options after test cfgs choose the final simulator."""
+        return
+
+    def validate_run_options(self, vcomp_count):
+        """Validate simulator capabilities needed by the selected run."""
+        if getattr(self.options, "vso", False):
+            raise ValueError("--vso is currently supported only with VCS.")
 
     def collect_coverage_data(self, vcomp_jobs):
         """Return dashboard coverage summaries keyed by testbench name."""

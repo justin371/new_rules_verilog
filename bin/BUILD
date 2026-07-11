@@ -70,7 +70,12 @@ py_library(
         "args_parse/xcelium.py",
         "args_parser.py",
     ],
-    deps = ["//lib:parser_actions"],
+    deps = [
+        "//lib:parser_actions",
+        "//lib/simulators:options",
+        "//lib/simulators:vcs_options",
+        "//lib/simulators:xcelium_options",
+    ],
 )
 
 py_binary(
@@ -83,7 +88,12 @@ py_binary(
         "args_parse/xcelium.py",
         "args_parser.py",
     ],
-    deps = ["//lib:parser_actions"],
+    deps = [
+        "//lib:parser_actions",
+        "//lib/simulators:options",
+        "//lib/simulators:vcs_options",
+        "//lib/simulators:xcelium_options",
+    ],
 )
 
 py_binary(

@@ -10,8 +10,9 @@ import shutil
 import subprocess
 
 from lib.coverage_data import aggregate_coverage_metrics, parse_coverage_summary
-
-from .base import SimulatorInterface
+from .base import SimulatorInterface, ValidationErrorParser
+from .options import validate_explicit_switches
+from .vcs_options import validate_vcs_runtime_options
 
 log = logging.getLogger(__name__)
 
@@ -55,6 +56,23 @@ class VcsSimulator(SimulatorInterface):
 
     def get_tool_command(self, tool_name):
         return "{} {}".format(self.get_tool_runner(), tool_name).strip()
+
+    def validate_resolved_options(self):
+        parser = ValidationErrorParser()
+        validate_explicit_switches(self.options.xcelium_explicit_switches, "Xcelium", "VCS", parser)
+        validate_vcs_runtime_options(self.options, parser)
+
+    def validate_run_options(self, vcomp_count):
+        if not self.options.vso:
+            return
+        if not os.environ.get("VSO_HOME"):
+            raise ValueError("VSO_HOME is not set. Please source the VSO/VCS environment before using --vso.")
+        if self.options.vso_buildname and vcomp_count > 1:
+            raise ValueError("--vso-buildname can only be used when a single VCS build is selected. "
+                             "Multiple builds would otherwise collapse into the same VSO buildname.")
+
+    def get_scheduler_threads_per_test(self):
+        return self.options.fgp if self.options.fgp is not None else 1
 
     def use_smartlog(self):
         return self.options.smartlog or self.options.waves is not None or self.options.gui
