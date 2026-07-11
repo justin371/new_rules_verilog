@@ -101,11 +101,10 @@ class XceliumSimulator(SimulatorInterface):
                 ]))
             st = os.stat(merge_sh)
             os.chmod(merge_sh, st.st_mode | stat.S_IEXEC)
-            opts['cov_opts'] += ' -coverage {} '.format(self.options.coverage)
-
-            # --- CCF Aspect (Keep as is for now, might need refactoring if complex) ---
-            # ... (keep the bazel build ccf aspect logic here) ...
-            # ---
+            cov_args = ["-coverage", self.options.coverage]
+            if os.path.isfile(self.options.covfile):
+                cov_args.extend(["-covfile", self.options.covfile])
+            opts['cov_opts'] = shlex.join(cov_args)
 
             self.rcfg.deferred_messages.append("Launch XRUN coverage with {}".format(merge_sh))
 
@@ -139,7 +138,10 @@ class XceliumSimulator(SimulatorInterface):
                 sim_args.extend(["-covworkdir", test_job.vcomper.cov_work_dir])
             else:
                 log.warning(f"Coverage enabled but cov_work_dir not set for vcomp job {test_job.vcomper.name}")
-            sim_args.extend(["-covbaserun", test_job.name])
+            sim_args.extend([
+                "-covbaserun",
+                "{}_sv{}_i{}".format(test_job.name, seed, test_job.iteration),
+            ])
             if 'A' in self.options.coverage or 'U' in self.options.coverage:
                 sim_args.append("+SVFCOV=1")
         # MCE

@@ -4,7 +4,8 @@ from lib import parser_actions
 
 PROJ_DIR = os.environ.get('PROJ_DIR', os.getcwd())
 SIM_PLATFORM = os.environ.get('SIM_PLATFORM', 'XRUN')
-COVFILE = PROJ_DIR + os.environ.get('COVFILE', "coverage.ccf")
+_COVFILE = os.environ.get('COVFILE', "coverage.ccf")
+COVFILE = _COVFILE if os.path.isabs(_COVFILE) else os.path.join(PROJ_DIR, _COVFILE)
 
 
 def add_debug_arguments(parser):

@@ -1,3 +1,5 @@
+import os
+
 from lib import parser_actions
 
 from .common import COVFILE
@@ -124,7 +126,7 @@ def validate_xcelium_switches_for_vcs(options, parser):
         xcelium_only_switches.append('--mce-split-max-size')
     if options.coverage:
         xcelium_only_switches.append('--coverage')
-    if options.covfile != COVFILE:
+    if options.covfile_was_explicit:
         xcelium_only_switches.append('--covfile')
     if options.msie is not None:
         xcelium_only_switches.append('--msie')
@@ -149,6 +151,23 @@ def validate_xcelium_runtime_options(options, parser):
             options.wave_type = 'vwdb'
         if options.wave_type not in ['shm', 'vcd', 'vwdb']:
             parser.error("Xcelium supports only --wave-type shm, vcd, or vwdb. Stopping before Bazel starts.")
+    if options.covfile_was_explicit and not options.coverage:
+        parser.error("--covfile requires --coverage. Stopping before Bazel starts.")
+    if options.coverage and options.covfile_was_explicit and not os.path.isfile(options.covfile):
+        parser.error("The specified Xcelium coverage configuration file does not exist: {}. "
+                     "Stopping before Bazel starts.".format(options.covfile))
+    if options.mce_detail_was_explicit and not options.mce:
+        parser.error("Xcelium MCE detail switches require --mce. Stopping before Bazel starts.")
+    if options.mce_build_count < 0 or options.mce_sim_count < 0:
+        parser.error("Xcelium MCE thread counts must be non-negative. Stopping before Bazel starts.")
+    if options.mce_split_max_size <= 0:
+        parser.error("--mce-split-max-size must be positive. Stopping before Bazel starts.")
+    msie_modes = [options.msie, options.msie_href, options.msie_prim, options.msie_incr]
+    if sum(mode is not None for mode in msie_modes) > 1:
+        parser.error("Use only one of --msie, --msie-href, --msie-prim, or --msie-incr per invocation. "
+                     "Stopping before Bazel starts.")
+    if options.emulator and (options.mce or any(mode is not None for mode in msie_modes)):
+        parser.error("--emulator cannot be combined with MCE or MSIE modes. Stopping before Bazel starts.")
 
 
 def apply_xcelium_postprocess(options):

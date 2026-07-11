@@ -474,6 +474,10 @@ def _verilog_dv_tb_impl(ctx):
     simulator = ctx.attr.simulator
     if simulator not in ["XRUN", "VCS"]:
         fail("verilog_dv_tb simulator must be one of ['XRUN', 'VCS'], got '{}'".format(simulator))
+    if len(ctx.files.ccf) > 1:
+        fail("verilog_dv_tb {} accepts only one ccf file".format(ctx.label))
+    if simulator == "VCS" and ctx.files.ccf:
+        fail("verilog_dv_tb {} ccf is Xcelium-only; use VCS -cm options instead".format(ctx.label))
 
     defines = {}
     defines.update(ctx.attr.defines)
@@ -501,6 +505,8 @@ def _verilog_dv_tb_impl(ctx):
         compile_args.extend(_sanitize_vcs_compile_args(selected_compile_args))
     else:
         compile_args.extend(selected_compile_args)
+        if ctx.files.ccf:
+            compile_args.append("-covfile {}".format(ctx.files.ccf[0].short_path))
     pldm_ice_extra_compile_args.extend(selected_compile_args)
     pldm_sa_extra_compile_args.extend(selected_compile_args)
 

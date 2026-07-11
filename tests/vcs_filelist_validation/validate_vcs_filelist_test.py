@@ -122,6 +122,11 @@ class VcsFilelistValidationTest(unittest.TestCase):
         self.assertFalse(runfile_exists("tests/vcs_filelist_validation/dv_tb_vcs_compile_args_pldm_ice.f"))
         self.assertFalse(runfile_exists("tests/vcs_filelist_validation/dv_tb_vcs_compile_args_pldm_sa.f"))
 
+    def test_xcelium_tb_coverage_file_is_in_compile_args(self):
+        compile_args = read_runfile("tests/vcs_filelist_validation/dv_tb_xrun_ccf_compile_args.f")
+
+        self.assertIn("-covfile tests/vcs_filelist_validation/coverage.ccf", compile_args)
+
     def test_unit_test_scripts_select_the_requested_simulator(self):
         scripts = {
             "tests/vcs_filelist_validation/dv_unit_vcs_run.sh": ["vcs", "-file", "./simv"],

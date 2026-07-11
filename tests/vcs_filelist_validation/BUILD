@@ -37,6 +37,13 @@ verilog_dv_tb(
     simulator = "VCS",
 )
 
+verilog_dv_tb(
+    name = "dv_tb_xrun_ccf",
+    ccf = ["coverage.ccf"],
+    deps = [":unit_test_top"],
+    simulator = "XRUN",
+)
+
 verilog_dv_test_cfg(
     name = "dv_cfg_vcs",
     simulator = "VCS",
@@ -91,6 +98,7 @@ py_test(
         ":dv_tb_vcs",
         ":dv_tb_vcs_compile_args.f",
         ":dv_tb_vcs_runtime_args.f",
+        ":dv_tb_xrun_ccf_compile_args.f",
         ":rtl_lint_vcs",
         ":rtl_lint_vcs_cmds.tcl",
         ":rtl_unit_vcs",
@@ -120,7 +128,9 @@ py_test(
         "//verilog/private:rtl.bzl",
     ],
     deps = [
+        "//bin:lint_parser_hal",
         "//bin:args_parser_lib",
+        "//lib:job_lib",
         "//lib:runtime_options",
         "//lib/simulators:vcs",
         "//lib/simulators:xcelium",

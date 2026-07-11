@@ -150,14 +150,30 @@ function testFunction {
     # Check if PID variable is set and non-empty
     if [ -n "${!SOCKET_PID_VARNAME:-}" ]; then
         local current_pid="${!SOCKET_PID_VARNAME}"
-        echo "Waiting for socket {{ socket_name }} (PID $current_pid) to exit..."
-        # Wait for the specific PID
+        echo "Waiting up to 5 seconds for socket {{ socket_name }} (PID $current_pid) to exit..."
+        local socket_wait_count=0
+        while kill -0 "$current_pid" 2>/dev/null && [ "$socket_wait_count" -lt 5 ]; do
+            sleep 1
+            socket_wait_count=$((socket_wait_count + 1))
+        done
+        if kill -0 "$current_pid" 2>/dev/null; then
+            echo "Stopping socket {{ socket_name }} after simulation."
+            kill "$current_pid" 2>/dev/null || true
+            local socket_term_wait_count=0
+            while kill -0 "$current_pid" 2>/dev/null && [ "$socket_term_wait_count" -lt 5 ]; do
+                sleep 1
+                socket_term_wait_count=$((socket_term_wait_count + 1))
+            done
+            if kill -0 "$current_pid" 2>/dev/null; then
+                kill -KILL "$current_pid" 2>/dev/null || true
+            fi
+        fi
         set +o errexit
-        wait $current_pid
+        wait "$current_pid"
         local socket_exit_code=$?
         set -o errexit
         echo "Socket {{ socket_name }} exited with code: $socket_exit_code"
-        if [ $socket_exit_code -ne 0 ]; then
+        if [ "$socket_exit_code" -ne 0 ] && [ "$socket_exit_code" -ne 137 ] && [ "$socket_exit_code" -ne 143 ]; then
             echo "%E- ERROR: Socket process {{ socket_name }} (PID $current_pid) returned non-zero exit code $socket_exit_code."
             echo "Check log: {{ job.job_dir }}/{{ socket_name }}.log"
             sockets_exit_code=1

@@ -24,9 +24,6 @@ runmod -t xrun -- \
     -debug_opts verisium_pp \
   {% endif -%}
 
-  {% if cov_opts is not none -%}
-    {{ cov_opts }} \
-  {% endif -%}
   {% if options.msie_href -%}
     -primtop {{ options.msie_href }} -genhref {{ options.proj_dir }}/{{ relpath }}/msie/{{ tb_name }}_href.txt \
   {% endif -%}
@@ -49,4 +46,7 @@ runmod -t xrun -- \
   {% endif -%}
 
   -f {{ bazel_compile_args }} \
+  {% if cov_opts -%}
+    {{ cov_opts }} \
+  {% endif -%}
   -l {{ VCOMP_DIR }}/cmp.log

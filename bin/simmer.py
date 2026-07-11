@@ -307,16 +307,7 @@ class VCompJob(Job):
         vcomp_sh_path = os.path.join(self.job_dir, "vcomp.sh")
         compile_template = self.simulator.get_compile_template(self)
 
-        # Determine tb_name (used in some templates) - extract from first test?
-        # This assumes all tests under a vcomp target share the same tb_name base
-        tb_name = "unknown_tb"
-
-        if options.tests:
-            # format like: //path/to/bench:test_name
-            first_test_target = options.tests[0].btiglob if options.tests[0].btiglob else options.tests[0].name
-            tb_name_match = re.match(r'//([^:]+):', first_test_target)
-            if tb_name_match:
-                tb_name = os.path.basename(tb_name_match.group(1))
+        tb_name = bazel_target
 
         template_context = {
             'VCOMP_DIR': self.job_dir,
@@ -543,6 +534,10 @@ class VsoAskJob(Job):
         for test in result["selected_tests"]:
             self.job_lib.manager.add_job(test)
 
+        if self.rcfg.simmer_results_run is not None:
+            self.rcfg.simmer_results_run["planned_tests"] = result["planned_runs"]
+            self.rcfg.simmer_results_run["summary"]["total"] = result["planned_runs"]
+
         self.jobstatus = JobStatus.PASSED
         self.rcfg.deferred_messages.append("VSO.ai ask log: {}".format(self.log_path))
         self.log.info(
@@ -636,8 +631,8 @@ class TestJob(Job):
         # Using the timestamp as the name uniquifier is causing issues when trying to spawn many jobs at once
         # strdate = time.strftime("%Y_%m_%d_%H_%M_%S", time.localtime(time.time()))
         # simname = "%s__%s__%s" % (self.vcomper.name, self.name, strdate)
-        simname = "%s__%s__%s__%d%s" % (self.vcomper.name, self.simulator.get_name(), self.name, seed,
-                                        self.rcfg.options.dir_suffix)
+        simname = "%s__%s__%s__%d__i%d%s" % (self.vcomper.name, self.simulator.get_name(), self.name, seed,
+                                             self.iteration, self.rcfg.options.dir_suffix)
         self.simname = simname
         self.job_dir = os.path.join(self.rcfg.regression_dir, simname)
         self._log_path = os.path.join(self.job_dir, self.LOG_NAME)

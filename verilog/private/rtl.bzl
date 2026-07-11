@@ -804,11 +804,11 @@ def _verilog_rtl_cdc_test_impl(ctx):
         },
     )
 
-    defines = ["+define+LINT+CDC"]
+    defines = ["+define+LINT", "+define+CDC"]
 
-    defines.extend(["+{}{}".format(key, value) for key, value in ctx.attr.defines.items()])
+    defines.extend(["+define+{}{}".format(key, value) for key, value in ctx.attr.defines.items()])
     for key, value in gather_shell_defines(ctx.attr.shells).items():
-        defines.append("+{}{}".format(key, value))
+        defines.append("+define+{}{}".format(key, value))
 
     top_path = ""
     for dep in ctx.attr.deps:
@@ -831,7 +831,7 @@ def _verilog_rtl_cdc_test_impl(ctx):
         template = ctx.file.preamble_template,
         output = ctx.outputs.preamble_cmds,
         substitutions = {
-            "{DEFINES}": "".join(defines),
+            "{DEFINES}": " ".join(defines),
             "{FLISTS}": " ".join(["-f {}".format(f.short_path) for f in trans_flists.to_list()]),
             "{TOP_PATH}": top_path,
             "{INST_TOP}": ctx.attr.top,

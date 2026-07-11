@@ -95,6 +95,15 @@ def parse_args(argv):
     options.simulator_was_explicit = simulator_explicitly_requested(argv)
     options.xprop_was_explicit = argument_explicitly_requested(argv, '--xprop')
     options.timeout_was_explicit = argument_explicitly_requested(argv, '--timeout')
+    options.covfile_was_explicit = argument_explicitly_requested(argv, '--covfile')
+    options.mce_detail_was_explicit = any(
+        argument_explicitly_requested(argv, argument) for argument in [
+            '--mce-build-count',
+            '--mce-build-cfg',
+            '--mce-sim-count',
+            '--mce-sim-cfg',
+            '--mce-split-max-size',
+        ])
 
     options.reproduce_args = reproduction_args(argv)
 

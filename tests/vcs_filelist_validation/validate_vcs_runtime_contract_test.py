@@ -11,10 +11,15 @@ import jinja2
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 BIN_DIR = REPO_ROOT / "bin"
+LIB_DIR = REPO_ROOT / "lib"
 if str(BIN_DIR) not in sys.path:
     sys.path.insert(0, str(BIN_DIR))
+if str(LIB_DIR) not in sys.path:
+    sys.path.insert(0, str(LIB_DIR))
 
 from args_parser import parse_args
+from lint_parser_hal import HalLintLog
+from lib.job_lib import JobStatus
 from lib.runtime_options import format_sim_opts_dict
 from lib.simulators.vcs import VcsSimulator
 from lib.simulators.xcelium import XceliumSimulator
@@ -218,12 +223,14 @@ class VcsRuntimeContractTest(unittest.TestCase):
         self.assertNotIn('time eval "{{ simulation_command }}"', sim)
         self.assertIn("time {{ simulation_command }}", sim)
         self.assertIn('kill "${{ socket_name|upper }}_PID"', sim)
+        self.assertIn('kill -KILL "$current_pid"', sim)
         self.assertIn("{POST_FLIST_ARGS} \\", svunit)
         self.assertIn('"${remaining_args[@]}"', svunit)
         self.assertIn("completed without cdc_run/jg.log", cdc)
         for template in lint_templates:
             self.assertIn("set -Eeuo pipefail", template)
             self.assertIn('"$@"', template)
+        self.assertIn('"${PYTHON:-python3}" ./{LINT_PARSER}', lint_templates[1])
 
     def test_vcs_compile_template_defaults_to_incremental_compile(self):
         template = self._read_repo_file("bin/templates/vcs_compile_template.sh.j2")
@@ -258,6 +265,72 @@ class VcsRuntimeContractTest(unittest.TestCase):
         vcomp = DummyVcompJob()
         Path(vcomp.bench_dir, "fox_xprop.txt").touch()
         self.assertIn("fox_xprop.txt", simulator.generate_compile_options(vcomp)["xprop_cmd"])
+
+    def test_xcelium_coverage_uses_explicit_ccf_and_unique_base_runs(self):
+        with tempfile.NamedTemporaryFile() as covfile:
+            options = parse_args([
+                "-t",
+                "unit:test",
+                "--simulator",
+                "XRUN",
+                "--coverage",
+                "A",
+                "--covfile",
+                covfile.name,
+            ])
+            simulator = XceliumSimulator(options, DummyRegressionConfig(), None)
+            compile_args = shlex.split(simulator.generate_compile_options(DummyVcompJob())["cov_opts"])
+
+        self.assertIn("-coverage", compile_args)
+        self.assertIn("-covfile", compile_args)
+        self.assertIn(covfile.name, compile_args)
+
+        test_job = SimpleNamespace(
+            iteration=2,
+            name="same_test",
+            vcomper=SimpleNamespace(cov_work_dir="/tmp/cov", name="unit_vcomp"),
+        )
+        sim_args = shlex.split(simulator.generate_sim_options(test_job, 42))
+        self.assertEqual("same_test_sv42_i2", sim_args[sim_args.index("-covbaserun") + 1])
+
+    def test_xcelium_coverage_and_mce_details_are_validated(self):
+        with self.assertRaises(SystemExit):
+            parse_args(["--simulator", "XRUN", "--covfile", "/missing/coverage.ccf"])
+        with self.assertRaises(SystemExit):
+            parse_args([
+                "--simulator",
+                "XRUN",
+                "--coverage",
+                "A",
+                "--covfile",
+                "/missing/coverage.ccf",
+            ])
+        with self.assertRaises(SystemExit):
+            parse_args(["--simulator", "XRUN", "--mce-sim-count", "4"])
+
+    def test_hal_empty_direct_waiver_does_not_match_every_message(self):
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".xml") as logfile:
+            logfile.write("<messages></messages>")
+            logfile.flush()
+
+            self.assertIsNone(HalLintLog(logfile.name, None).waiver_direct_regex)
+            self.assertIsNone(HalLintLog(logfile.name, "").waiver_direct_regex)
+
+    def test_vso_unselected_tests_are_skipped(self):
+        options = parse_args(["--simulator", "VCS", "--vso", "--cm", "line"])
+        simulator = VcsSimulator(options, DummyRegressionConfig(), None)
+        icfg = SimpleNamespace(target=1, vso_assignments=[])
+        test = SimpleNamespace(
+            jobstatus=JobStatus.NOT_STARTED,
+            target="//unit:test",
+            vcomper=SimpleNamespace(name="unit_vcomp"),
+        )
+
+        with tempfile.NamedTemporaryFile(mode="w") as ask_log:
+            result = simulator.apply_vso_ask_results({"//unit:tb": ([icfg], [test])}, ask_log.name)
+
+        self.assertEqual(0, result["planned_runs"])
+        self.assertEqual(JobStatus.SKIPPED, test.jobstatus)
 
     def test_vcs_warning_parser_accepts_message_ids(self):
         options = parse_args(["-t", "unit:test", "--simulator", "VCS"])
@@ -358,6 +431,8 @@ class VcsRuntimeContractTest(unittest.TestCase):
         self.assertIn('filelist_flag = "-file"', rtl_bzl)
         self.assertIn("_ut_sim_waves_template_vcs_default", rtl_bzl)
         self.assertIn('pre_fa.append("  +define+{}{}', rtl_bzl)
+        self.assertIn('defines.extend(["+define+{}{}', rtl_bzl)
+        self.assertNotIn('defines.extend(["+{}{}', rtl_bzl)
         self.assertIn("params['inherits'] = [_gatesim_target(inherit, corner) for inherit in inherits]", dv_bzl)
 
 

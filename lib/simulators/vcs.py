@@ -286,7 +286,7 @@ class VcsSimulator(SimulatorInterface):
             for icfg, test in zip(icfgs, tests):
                 icfg.target = len(icfg.vso_assignments)
                 if icfg.target == 0:
-                    test.jobstatus = test.jobstatus.BYPASSED
+                    test.jobstatus = test.jobstatus.SKIPPED
                 else:
                     selected_templates += 1
                     selected_tests.append(test)
