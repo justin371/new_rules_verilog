@@ -8,6 +8,8 @@
 - VCS RTL unit tests support FSDB generation and Verdi launch.
 - `rerun.sh`, `run_waves.sh` and log-checker lookup are portable across main and external workspaces.
 - VCS coverage uses one `.vdb` path from simulation through URG merge.
+- VCS Partition Compile keeps each writable database under its VCOMP directory
+  and can reuse an explicitly versioned shared baseline.
 - EMU compile outputs are excluded from VCS runfiles and consumed only by Xcelium EMU flow.
 - Generated filelists reject `../`; `external/<repo>/...` is intentionally retained.
 - Regression history keeps code and functional coverage as separate chart series.
@@ -18,6 +20,7 @@
 | --- | --- | --- |
 | VSO.ai | Supported by `--vso`; off by default | VSO license/setup exists and the regression has measurable coverage goals |
 | Dynamic Test Loading | Supported by `--dtl`; batch only | Compile savings exceed the extra static/dynamic flow complexity |
+| Partition Compile shared baseline | Supported by `--vcs-partcomp-sharedlib` | Baseline matches the VCS release, Red Hat platform, sources and compile configuration |
 | Fine-Grained Parallelism | Supported by `--fgp N` | Profiling shows runtime CPU scaling and license capacity is available |
 | Verdi GUI/reverse debug | Supported for one VCS test | Interactive debug is required; never for throughput regressions |
 | Full FSDB probes | Supported | A narrow probe cannot reproduce the issue; high disk cost is accepted |

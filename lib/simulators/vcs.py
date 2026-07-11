@@ -29,6 +29,14 @@ class VcsSimulator(SimulatorInterface):
         'C': '-xprop=tmerge',
     }
 
+    VCS_PARTCOMP_OPTION_BY_MODE = {
+        'adaptive': '-partcomp=adaptive_sched',
+        'auto': '-partcomp',
+        'low': '-partcomp=autopart_low',
+        'high': '-partcomp=autopart_high',
+        'relax': '-partcomp=autopart_relax',
+    }
+
     def get_name(self):
         return "vcs"
 
@@ -336,7 +344,12 @@ class VcsSimulator(SimulatorInterface):
         self.rcfg.deferred_messages.append("VSO.ai finalize/merge log: {}".format(log_path))
 
     def generate_compile_options(self, vcomp_job):
-        opts = {'cov_opts': '', 'xprop_cmd': None, 'additional_defines': []}
+        opts = {
+            'cov_opts': '',
+            'partcomp_opts': self.get_partition_compile_options(vcomp_job),
+            'xprop_cmd': None,
+            'additional_defines': [],
+        }
         additional_vcs_defines = [] # Add VCS specific defines here if any
 
         # Coverage (Functional/Code)
@@ -389,6 +402,32 @@ class VcsSimulator(SimulatorInterface):
             opts['additional_defines'].extend(self.options.rtl_defines)
 
         return opts
+
+    def get_partition_compile_options(self, vcomp_job):
+        jobs = '-fastpartcomp=j{}'.format(self.options.vcs_partcomp_jobs)
+        if self.options.dtl:
+            return shlex.join([
+                '-partcomp',
+                '-dir={}'.format(os.path.join(vcomp_job.job_dir, 'dtl_static')),
+                jobs,
+            ])
+
+        mode_option = self.VCS_PARTCOMP_OPTION_BY_MODE.get(self.options.vcs_partcomp_mode)
+        if mode_option is None:
+            return ''
+
+        partition_dir = self.options.vcs_partcomp_dir or os.path.join(vcomp_job.job_dir, 'partitionlib')
+        if not os.path.isabs(partition_dir):
+            partition_dir = os.path.join(self.rcfg.proj_dir, partition_dir)
+        args = [
+            mode_option,
+            '-partcomp_dir={}'.format(os.path.abspath(partition_dir)),
+            '-partcomp=incr_clean',
+            jobs,
+        ]
+        if self.options.vcs_partcomp_sharedlib is not None:
+            args.append('-partcomp_sharedlib={}'.format(os.path.abspath(self.options.vcs_partcomp_sharedlib)))
+        return shlex.join(args)
 
     def _find_vcs_xprop_config(self, bench_dir, xprop_mode):
         for cfg_name in self.VCS_XPROP_CONFIG_BY_MODE.get(xprop_mode, []):

@@ -27,6 +27,20 @@ def add_vcs_arguments(parser):
                       default=False,
                       action='store_true',
                       help='Enable VCS compile profiling with -pcmakeprof -reportstats.')
+    gvcs.add_argument('--vcs-partcomp-mode',
+                      default='adaptive',
+                      choices=['adaptive', 'auto', 'low', 'high', 'relax', 'disabled'],
+                      help='Select the VCS Partition Compile mode. Defaults to adaptive.')
+    gvcs.add_argument('--vcs-partcomp-jobs',
+                      default=8,
+                      type=int,
+                      help='Maximum parallel Partition Compile processes. Defaults to 8.')
+    gvcs.add_argument('--vcs-partcomp-dir',
+                      default=None,
+                      help='Override the writable VCS partition database directory.')
+    gvcs.add_argument('--vcs-partcomp-sharedlib',
+                      default=None,
+                      help='Reuse an existing VCS partition database as a read-only shared library.')
     gvcs.add_argument('--smartlog',
                       dest='smartlog',
                       default=False,
@@ -92,6 +106,7 @@ def validate_vcs_switches_for_xcelium(options, parser):
         vcs_only_switches.append('--vcs-cm-hier')
     if options.vcs_profile:
         vcs_only_switches.append('--vcs-profile')
+    vcs_only_switches.extend(options.vcs_partcomp_explicit_switches)
     if options.smartlog:
         vcs_only_switches.append('--smartlog')
     if options.vcs_runner is not None:
@@ -152,6 +167,36 @@ def validate_vcs_runtime_options(options, parser):
         parser.error("--fgp must be a positive integer thread count. Stopping before Bazel starts.")
     if options.vcs_runner is not None and not options.vcs_runner.strip():
         parser.error("--vcs-runner must not be empty. Stopping before Bazel starts.")
+    if options.vcs_partcomp_jobs < 1:
+        parser.error("--vcs-partcomp-jobs must be a positive integer. Stopping before Bazel starts.")
+    if options.vcs_partcomp_dir is not None and not options.vcs_partcomp_dir.strip():
+        parser.error("--vcs-partcomp-dir must not be empty. Stopping before Bazel starts.")
+    if options.vcs_partcomp_sharedlib is not None and not options.vcs_partcomp_sharedlib.strip():
+        parser.error("--vcs-partcomp-sharedlib must not be empty. Stopping before Bazel starts.")
+    if options.vcs_partcomp_mode == 'disabled' and any([
+            options.vcs_partcomp_jobs != 8,
+            options.vcs_partcomp_dir is not None,
+            options.vcs_partcomp_sharedlib is not None,
+    ]):
+        parser.error("Partition Compile details require an enabled '--vcs-partcomp-mode'. "
+                     "Stopping before Bazel starts.")
+    if options.vcs_partcomp_sharedlib is not None:
+        sharedlib = os.path.abspath(options.vcs_partcomp_sharedlib)
+        if not os.path.isdir(sharedlib):
+            parser.error("The VCS Partition Compile shared library does not exist: {}. "
+                         "Stopping before Bazel starts.".format(sharedlib))
+        if options.vcs_partcomp_dir is not None and sharedlib == os.path.abspath(options.vcs_partcomp_dir):
+            parser.error("--vcs-partcomp-dir and --vcs-partcomp-sharedlib must use different directories. "
+                         "Stopping before Bazel starts.")
+    if options.dtl and options.vcs_partcomp_mode == 'disabled':
+        parser.error("--dtl requires VCS Partition Compile. Stopping before Bazel starts.")
+    if options.dtl and any([
+            options.vcs_partcomp_mode != 'adaptive',
+            options.vcs_partcomp_dir is not None,
+            options.vcs_partcomp_sharedlib is not None,
+    ]):
+        parser.error("--dtl owns its partition flow; do not combine it with custom VCS Partition Compile settings. "
+                     "Stopping before Bazel starts.")
     if any([
             options.vso_workdir is not None,
             options.vso_dbdir is not None,

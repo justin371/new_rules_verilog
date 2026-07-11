@@ -100,6 +100,22 @@ to be available on `PATH`.
 VCS RTL unit tests accept `--waves`, `--launch`, `--compile-arg <arg>`, and
 `--run-arg <arg>` after Bazel's `--` separator.
 
+### VCS Partition Compile
+
+VCS regressions use Partition Compile by default. The writable partition
+database is `<tb>__VCS_VCOMP/partitionlib`, so stable third-party IP/VIP
+partitions are reused while changed project RTL and testbench partitions are
+rebuilt. Tune parallel compilation after measuring the workstation:
+
+```bash
+simmer -t 'sys_tb:smoke_test@1' --simulator VCS \
+  --vcs-partcomp-jobs 16 --vcs-profile
+```
+
+Use `--vcs-partcomp-mode disabled` to compare against regular incremental
+compilation. Shared partition databases and the full compatibility guidance are
+documented in [VCS and Xcelium workflow](docs/simmer_vcs_xcelium.md#vcs-partition-compile).
+
 ### Regression dashboard
 
 The static HTML dashboard is generated at the end of a `simmer` regression.

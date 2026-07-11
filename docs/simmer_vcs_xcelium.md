@@ -60,6 +60,103 @@ the existing compile output does not match the current inputs.
 
 Use `--recompile` to force a clean VCS compile.
 
+### VCS Partition Compile
+
+VCS Y-2026.03 Partition Compile is enabled by default with adaptive scheduling,
+eight maximum compile processes and redundant-partition cleanup. Simmer passes:
+
+```text
+-partcomp=adaptive_sched
+-partcomp_dir=<tb>__VCS_VCOMP/partitionlib
+-partcomp=incr_clean
+-fastpartcomp=j8
+```
+
+The partition database belongs to one VCOMP directory rather than the shared
+Bazel runfiles tree. A normal internal RTL or testbench edit therefore rebuilds
+only affected partitions while unchanged third-party PCIe, UCIe, Ethernet,
+RISC-V and NoC IP/VIP partitions remain reusable.
+
+Use the default local database for one workspace. Profile and tune parallelism
+with:
+
+```bash
+simmer -t 'sys_tb:smoke_test@1' --simulator VCS \
+  --vcs-partcomp-jobs 16 --vcs-profile
+```
+
+Available modes are `adaptive`, `auto`, `low`, `high`, `relax` and `disabled`:
+
+```bash
+simmer -t 'sys_tb:smoke_test@1' --simulator VCS \
+  --vcs-partcomp-mode disabled --vcs-profile
+```
+
+To create a versioned baseline database for multiple workspaces, use a path
+owned by that exact VCS release, Red Hat platform and compile configuration:
+
+```bash
+simmer -t 'sys_tb:smoke_test@1' --simulator VCS \
+  --vcs-partcomp-dir "$PWD/.vcs-partitions/Y-2026.03/sys_tb-default"
+```
+
+Other workspaces can consume it while writing changed partitions to their local
+VCOMP database:
+
+```bash
+simmer -t 'sys_tb:smoke_test@1' --simulator VCS \
+  --vcs-partcomp-sharedlib /shared/vcs-partitions/Y-2026.03/sys_tb-default
+```
+
+The writable `--vcs-partcomp-dir` and read-only
+`--vcs-partcomp-sharedlib` must differ. Do not reuse a baseline across VCS
+versions, source releases, defines, coverage/debug modes or compile arguments.
+Simmer intentionally does not use `-simcopy_opts=mv`, which would make the
+source shared database unusable. `--recompile` removes the default local
+database because it is under VCOMP, but it does not delete a custom external
+directory.
+
+For effective partitioning, keep third-party components in separate Bazel
+libraries, wrap testbench code in SystemVerilog packages, avoid `$unit` code and
+minimize cross-partition XMRs. Inspect `cmp.log` for `PC_SHARED`, `PC_RECOMPILE`
+and the `-pcmakeprof` timing table. Coverage and Verdi require the referenced
+partition database to remain available.
+
+Start with automatic partitioning. If profiling shows that stable third-party
+code shares a partition with frequently changing project code, add a VCS
+optconfig file such as:
+
+```text
+partition cell PCIE_CONTROLLER;
+partition cell UCIE_CONTROLLER;
+partition package PCIE_VIP.pcie_vip_pkg;
+partition package ETHERNET_VIP.ethernet_vip_pkg;
+```
+
+Use the existing testbench compile-argument interface to keep this VCS-specific
+configuration with the VCS testbench definition:
+
+```python
+filegroup(
+    name = "vcs_partitions",
+    srcs = ["vcs_partitions.cfg"],
+)
+
+verilog_dv_tb(
+    name = "sys_tb",
+    simulator = "VCS",
+    deps = top_deps,
+    extra_compile_args = [
+        "+optconfigfile+$(location :vcs_partitions)",
+    ],
+    extra_runfiles = [":vcs_partitions"],
+)
+```
+
+Manual partitions are a tuning step, not a default requirement. Keep each large
+third-party component separate rather than combining all vendor IP/VIP into one
+partition, so one vendor update does not rebuild the rest.
+
 ## `verilog_dv_tb` attributes
 
 Each `verilog_dv_tb` target should support exactly one simulator. Use
@@ -197,8 +294,8 @@ For quiet normal runs, avoid `--tool-debug`; it prints scheduler polling noise.
 
 ### Large IP/VIP builds
 
-- Keep the VCS VCOMP directory between runs; `-Mupdate`, `-Mdir` and `-Mlib`
-  provide incremental compile reuse.
+- Keep the VCS VCOMP directory between runs; Partition Compile and `-Mupdate`
+  reuse unchanged third-party partitions and incremental compile outputs.
 - Use `--no-compile --no-bazel` only after the existing `simv` has been validated.
 - Keep stable third-party IP/VIP in separate Bazel libraries/filelists so a TB
   edit does not rewrite their generated inputs.

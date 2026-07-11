@@ -17,7 +17,6 @@
 
 -timescale=1ns/1ps
 
--partcomp=adaptive_sched -fastpartcomp=j8
 -Mupdate
 
 # Support MDA of interface/module instances and interface ports

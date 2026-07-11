@@ -287,6 +287,7 @@ class VCompJob(Job):
 
         compile_gen_opts = self.simulator.generate_compile_options(self)
         cov_opts = compile_gen_opts['cov_opts']
+        partcomp_opts = compile_gen_opts.get('partcomp_opts', '')
         xprop_cmd = compile_gen_opts['xprop_cmd']
         additional_defines = compile_gen_opts['additional_defines']
 
@@ -323,6 +324,7 @@ class VCompJob(Job):
         template_context = {
             'VCOMP_DIR': self.job_dir,
             'cov_opts': cov_opts,
+            'partcomp_opts': partcomp_opts,
             'bazel_runfiles_main': self.bazel_runfiles_main,
             'bazel_compile_args': self.bazel_compile_args,
             'debug_mode': debug_mode,

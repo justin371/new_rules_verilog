@@ -104,6 +104,14 @@ def parse_args(argv):
             '--mce-sim-cfg',
             '--mce-split-max-size',
         ])
+    options.vcs_partcomp_explicit_switches = [
+        argument for argument in [
+            '--vcs-partcomp-mode',
+            '--vcs-partcomp-jobs',
+            '--vcs-partcomp-dir',
+            '--vcs-partcomp-sharedlib',
+        ] if argument_explicitly_requested(argv, argument)
+    ]
 
     options.reproduce_args = reproduction_args(argv)
 

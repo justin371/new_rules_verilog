@@ -37,6 +37,7 @@ class DummyVcompJob:
 
     def __init__(self):
         self.bench_dir = tempfile.mkdtemp(prefix="vcs_bench_")
+        self.job_dir = tempfile.mkdtemp(prefix="vcs_vcomp_")
         self.name = "unit_vcomp"
         self.tb_options = {
             "dut_instance": "hdl_top.dut",
@@ -166,10 +167,92 @@ class VcsRuntimeContractTest(unittest.TestCase):
         self.assertTrue(VcsSimulator(smartlog_options, DummyRegressionConfig(), None).use_smartlog())
         self.assertTrue(VcsSimulator(waves_options, DummyRegressionConfig(), None).use_smartlog())
 
+    def test_vcs_partition_compile_defaults_to_vcomp_owned_database(self):
+        options = parse_args(["-t", "unit:test", "--simulator", "VCS"])
+        simulator = VcsSimulator(options, DummyRegressionConfig(), None)
+        vcomp = DummyVcompJob()
+
+        partcomp_args = shlex.split(simulator.generate_compile_options(vcomp)["partcomp_opts"])
+
+        self.assertIn("-partcomp=adaptive_sched", partcomp_args)
+        self.assertIn("-partcomp_dir={}".format(os.path.join(vcomp.job_dir, "partitionlib")), partcomp_args)
+        self.assertIn("-partcomp=incr_clean", partcomp_args)
+        self.assertIn("-fastpartcomp=j8", partcomp_args)
+
+    def test_vcs_partition_compile_supports_external_shared_database(self):
+        sharedlib = tempfile.mkdtemp(prefix="shared partition ")
+        writable = os.path.join(tempfile.mkdtemp(prefix="writable parent "), "partition database")
+        options = parse_args([
+            "-t",
+            "unit:test",
+            "--simulator",
+            "VCS",
+            "--vcs-partcomp-mode",
+            "high",
+            "--vcs-partcomp-jobs",
+            "4",
+            "--vcs-partcomp-dir",
+            writable,
+            "--vcs-partcomp-sharedlib",
+            sharedlib,
+        ])
+        simulator = VcsSimulator(options, DummyRegressionConfig(), None)
+
+        partcomp_args = shlex.split(simulator.generate_compile_options(DummyVcompJob())["partcomp_opts"])
+
+        self.assertIn("-partcomp=autopart_high", partcomp_args)
+        self.assertIn("-partcomp_dir={}".format(writable), partcomp_args)
+        self.assertIn("-partcomp_sharedlib={}".format(sharedlib), partcomp_args)
+        self.assertIn("-fastpartcomp=j4", partcomp_args)
+
+    def test_vcs_partition_compile_rejects_invalid_configuration(self):
+        with self.assertRaises(SystemExit):
+            parse_args(["--simulator", "VCS", "--vcs-partcomp-jobs", "0"])
+        with self.assertRaises(SystemExit):
+            parse_args([
+                "--simulator",
+                "VCS",
+                "--vcs-partcomp-mode",
+                "disabled",
+                "--vcs-partcomp-dir",
+                "/tmp/partcomp",
+            ])
+        sharedlib = tempfile.mkdtemp()
+        with self.assertRaises(SystemExit):
+            parse_args([
+                "--simulator",
+                "VCS",
+                "--vcs-partcomp-dir",
+                sharedlib,
+                "--vcs-partcomp-sharedlib",
+                sharedlib,
+            ])
+
+    def test_vcs_partition_compile_can_be_disabled_for_comparison(self):
+        options = parse_args(["--simulator", "VCS", "--vcs-partcomp-mode", "disabled"])
+        simulator = VcsSimulator(options, DummyRegressionConfig(), None)
+
+        self.assertEqual("", simulator.generate_compile_options(DummyVcompJob())["partcomp_opts"])
+
+    def test_vcs_dtl_uses_required_partition_compile_flow(self):
+        options = parse_args(["-t", "unit:test", "--simulator", "VCS", "--dtl"])
+        simulator = VcsSimulator(options, DummyRegressionConfig(), None)
+        vcomp = DummyVcompJob()
+
+        partcomp_args = shlex.split(simulator.generate_compile_options(vcomp)["partcomp_opts"])
+
+        self.assertEqual("-partcomp", partcomp_args[0])
+        self.assertIn("-dir={}".format(os.path.join(vcomp.job_dir, "dtl_static")), partcomp_args)
+        self.assertIn("-fastpartcomp=j8", partcomp_args)
+
     def test_smartlog_is_vcs_only_and_simmer_profile_is_common(self):
         self.assertTrue(parse_args(["-t", "unit:test", "--simulator", "XRUN", "--simmer-profile"]).simmer_profile)
         with self.assertRaises(SystemExit):
             parse_args(["-t", "unit:test", "--simulator", "XRUN", "--smartlog"])
+        with self.assertRaises(SystemExit):
+            parse_args(["-t", "unit:test", "--simulator", "XRUN", "--vcs-partcomp-jobs", "4"])
+        with self.assertRaises(SystemExit):
+            parse_args(["-t", "unit:test", "--simulator", "XRUN", "--vcs-partcomp-mode", "adaptive"])
 
     def test_tool_specific_arguments_are_rejected_by_the_other_backend(self):
         with self.assertRaises(SystemExit):
@@ -255,11 +338,14 @@ class VcsRuntimeContractTest(unittest.TestCase):
 
     def test_vcs_compile_template_defaults_to_incremental_compile(self):
         template = self._read_repo_file("bin/templates/vcs_compile_template.sh.j2")
+        compile_args = self._read_repo_file("vendors/synopsys/verilog_dv_tb_compile_args.f.template")
 
         self.assertIn("mkdir -p {{ VCOMP_DIR }}/csrc", template)
         self.assertIn("-Mdir={{ VCOMP_DIR }}/csrc", template)
         self.assertIn("-Mlib={{ VCOMP_DIR }}/csrc", template)
-        self.assertIn("-Mupdate", self._read_repo_file("vendors/synopsys/verilog_dv_tb_compile_args.f.template"))
+        self.assertIn("{{ partcomp_opts }}", template)
+        self.assertNotIn("-partcomp", compile_args)
+        self.assertIn("-Mupdate", compile_args)
 
     def test_vcs_no_compile_requires_simv(self):
         options = parse_args(["-t", "unit:test", "--simulator", "VCS"])

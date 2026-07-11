@@ -17,8 +17,10 @@ cd {{ bazel_runfiles_main }}
   {% if options.vcs_profile -%}
     -pcmakeprof -reportstats \
   {% endif -%}
+  {% if partcomp_opts -%}
+    {{ partcomp_opts }} \
+  {% endif -%}
   {% if options.dtl -%}
-    -dir={{ VCOMP_DIR }}/dtl_static \
     -enable_dynamic_tb \
   {% endif -%}
 

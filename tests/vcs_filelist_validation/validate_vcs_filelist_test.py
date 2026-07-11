@@ -113,6 +113,7 @@ class VcsFilelistValidationTest(unittest.TestCase):
                 "-file external/filelist_external_fixture/external_rtl.f",
                 "-file tests/vcs_filelist_validation/unit_test_top.f",
                 "+define+UNIFIED_VCS_COMPILE_ARG",
+                "+optconfigfile+tests/vcs_filelist_validation/vcs_partitions.cfg",
             ],
         }
         content_checks = {

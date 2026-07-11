@@ -12,6 +12,11 @@ load(
 
 package(default_visibility = ["//visibility:public"])
 
+filegroup(
+    name = "vcs_partitions",
+    srcs = ["vcs_partitions.cfg"],
+)
+
 verilog_rtl_library(
     name = "unit_test_top",
     modules = ["unit_test_top.sv"],
@@ -30,7 +35,9 @@ verilog_dv_tb(
     name = "dv_tb_vcs",
     extra_compile_args = [
         "+define+UNIFIED_VCS_COMPILE_ARG",
+        "+optconfigfile+$(location :vcs_partitions)",
     ],
+    extra_runfiles = [":vcs_partitions"],
     extra_runtime_args = [
         "+UNIFIED_VCS_RUNTIME_ARG",
     ],
@@ -118,6 +125,7 @@ py_test(
         ":rtl_lint_vcs_cmds.tcl",
         ":rtl_unit_vcs",
         ":rtl_unit_xrun",
+        ":vcs_partitions",
         "@filelist_external_fixture//:external_rtl",
     ],
     main = "validate_vcs_filelist_test.py",
