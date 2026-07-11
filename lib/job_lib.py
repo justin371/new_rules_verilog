@@ -510,10 +510,10 @@ class JobManager():
     def stop(self):
         """Stop the job runner thread (cpu intenstive). This is really more of a pause than a full stop&exit."""
         self._run_jobs_thread_active = False
-        self.exited_prematurely = True
         self._jobs_added.set()
 
     def kill(self):
+        self.exited_prematurely = True
         self.stop()
         for job in self._active:
             job.job_lib.kill()

@@ -35,6 +35,8 @@ def normalize_test_runtime_options(runtime_options):
         "sockets": dict(runtime_options.get("sockets", {})),
         "tags": list(runtime_options.get("tags", [])),
         "pre_run": pre_run,
+        "run_pass_patterns": list(runtime_options.get("run_pass_patterns", [])),
+        "run_fail_patterns": list(runtime_options.get("run_fail_patterns", [])),
     }
     return normalized
 
@@ -83,6 +85,6 @@ def resolve_test_timeout_hours(runtime_options, default_timeout_hours, cli_timeo
 
     normalized_runtime_options = normalize_test_runtime_options(runtime_options)
     timeout_minutes = normalized_runtime_options.get("timeout_minutes")
-    if timeout_minutes is None or timeout_minutes <= 0:
+    if timeout_minutes is None or timeout_minutes < 0:
         return default_timeout_hours
     return float(timeout_minutes) / 60.0

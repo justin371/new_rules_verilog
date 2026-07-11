@@ -54,7 +54,7 @@ verilog_dv_library(
 
 <pre>
 verilog_dv_tb(<a href="#verilog_dv_tb-name">name</a>, <a href="#verilog_dv_tb-ccf">ccf</a>, <a href="#verilog_dv_tb-defines">defines</a>, <a href="#verilog_dv_tb-deps">deps</a>, <a href="#verilog_dv_tb-extra_compile_args">extra_compile_args</a>, <a href="#verilog_dv_tb-extra_runfiles">extra_runfiles</a>, <a href="#verilog_dv_tb-extra_runtime_args">extra_runtime_args</a>,
-              <a href="#verilog_dv_tb-shells">shells</a>, <a href="#verilog_dv_tb-simulator">simulator</a>, <a href="#verilog_dv_tb-warning_waivers">warning_waivers</a>)
+              <a href="#verilog_dv_tb-run_fail_patterns">run_fail_patterns</a>, <a href="#verilog_dv_tb-run_pass_patterns">run_pass_patterns</a>, <a href="#verilog_dv_tb-shells">shells</a>, <a href="#verilog_dv_tb-simulator">simulator</a>, <a href="#verilog_dv_tb-warning_waivers">warning_waivers</a>)
 </pre>
 
 A DV Testbench.
@@ -85,6 +85,8 @@ A DV Testbench.
 | <a id="verilog_dv_tb-extra_compile_args"></a>extra_compile_args |  Additional flags to pass to the selected simulator compile/elaboration step.   | List of strings | optional | [] |
 | <a id="verilog_dv_tb-extra_runfiles"></a>extra_runfiles |  Additional files that need to be passed as runfiles to bazel. Most commonly used for files referred to by extra_compile_args or extra_runtime_args.   | <a href="https://bazel.build/docs/build-ref.html#labels">List of labels</a> | optional | [] |
 | <a id="verilog_dv_tb-extra_runtime_args"></a>extra_runtime_args |  Additional flags passed only to simulator runs. Runtime path arguments should use absolute paths or `bazel_runfiles_main/...` paths.   | List of strings | optional | [] |
+| <a id="verilog_dv_tb-run_fail_patterns"></a>run_fail_patterns |  Additional regular expressions that identify a failed simulation.   | List of strings | optional | [] |
+| <a id="verilog_dv_tb-run_pass_patterns"></a>run_pass_patterns |  Regular expressions that identify a successful simulation. When set, at least one must match.   | List of strings | optional | [] |
 | <a id="verilog_dv_tb-shells"></a>shells |  List of shells to use. Each label must be a verilog_rtl_shell instance. Each shell thrown will create two defines:  \<code>define gumi_{module} {module}_shell  \</code>define gumi_use_{module}_shell The shell module declaration must be guarded by the gumi_use_{module}_shell define:  \<code>ifdef gumi_use_{module}_shell     module {module}_shell(/*AUTOARGS*/);       ...     endmodule  \</code>endif   | <a href="https://bazel.build/docs/build-ref.html#labels">List of labels</a> | optional | [] |
 | <a id="verilog_dv_tb-simulator"></a>simulator |  Simulator to use for this DV testbench. Supported values are XRUN and VCS. The selected simulator determines which compile/runtime filelists are generated.   | String | optional | `"XRUN"` |
 | <a id="verilog_dv_tb-warning_waivers"></a>warning_waivers |  Waive warnings in the compile. By default, simmer promotes all compile warnings to errors. This list is converted to python regular expressions which are imported by simmer to waive warning. All warnings may be waived by using '\*W'   | List of strings | optional | [] |
@@ -117,7 +119,7 @@ A DV test configuration.
 | <a id="verilog_dv_test_cfg-simulator"></a>simulator |  Simulator to use for this test configuration. Supported values are XRUN and VCS. This attribute is inheritable. If left unspecified, XRUN is used unless the selected tb already fixes the simulator. The resolved simulator must match the associated `verilog_dv_tb`.   | String | optional | `""` |
 | <a id="verilog_dv_test_cfg-sockets"></a>sockets |  Dictionary mapping of socket_name to socket_command. Simmer has the ability to spawn parallel processes to the primary simulation that are connected via sockets. For each entry in the dictionary, simmer will create a separate process and pass a unique temporary file path to both the simulator and the socket_command. The socket name is a short identifier that will be passed as "+SOCKET__&lt;socket_name&gt;=&lt;socket_file&gt;" to the simulator. The socket_file is a path to a unique temporary file in the simulation results directory created by simmer. The socket_command is a bash command that must contain a python string formatter of "{socket_file}". The socket_command will be run from the root of the project tree.   | <a href="https://bazel.build/docs/skylark/lib/dict.html">Dictionary: String -> String</a> | optional | {} |
 | <a id="verilog_dv_test_cfg-tb"></a>tb |  The testbench to run this test on. This label must be a 'verilog_dv_tb' target.This attribute is inheritable. See 'inherits' attribute. Future: Allow tb to be a list of labels to allow a test to run on multiple verilog_dv_tb   | <a href="https://bazel.build/docs/build-ref.html#labels">Label</a> | optional | None |
-| <a id="verilog_dv_test_cfg-timeout"></a>timeout |  Duration in minutes before the test will be killed due to timeout. This option is inheritable.   | Integer | optional | -1 |
+| <a id="verilog_dv_test_cfg-timeout"></a>timeout |  Duration in minutes before the test will be killed due to timeout. This option is inheritable. Use -1 to inherit, 0 to disable, or a positive value to set a timeout.   | Integer | optional | -1 |
 | <a id="verilog_dv_test_cfg-uvm_testname"></a>uvm_testname |  UVM testname eventually passed to simulator via plusarg +UVM_TESTNAME. This attribute is inheritable. See 'inherits' attribute.   | String | optional | "" |
 | <a id="verilog_dv_test_cfg-description"></a>description |  The test simulation scenarios. (e.g. description = """ This is the test description """, )  | String | optional | None |
 
@@ -127,7 +129,7 @@ A DV test configuration.
 ## verilog_dv_unit_test
 
 <pre>
-verilog_dv_unit_test(<a href="#verilog_dv_unit_test-name">name</a>, <a href="#verilog_dv_unit_test-default_sim_opts">default_sim_opts</a>, <a href="#verilog_dv_unit_test-deps">deps</a>, <a href="#verilog_dv_unit_test-sim_args">sim_args</a>, <a href="#verilog_dv_unit_test-simulator">simulator</a>, <a href="#verilog_dv_unit_test-ut_sim_template">ut_sim_template</a>)
+verilog_dv_unit_test(<a href="#verilog_dv_unit_test-name">name</a>, <a href="#verilog_dv_unit_test-compile_args">compile_args</a>, <a href="#verilog_dv_unit_test-default_sim_opts">default_sim_opts</a>, <a href="#verilog_dv_unit_test-deps">deps</a>, <a href="#verilog_dv_unit_test-run_args">run_args</a>, <a href="#verilog_dv_unit_test-sim_args">sim_args</a>, <a href="#verilog_dv_unit_test-simulator">simulator</a>, <a href="#verilog_dv_unit_test-ut_sim_template">ut_sim_template</a>)
 </pre>
 
 Compiles and runs a small unit test for DV.
@@ -146,9 +148,11 @@ Compiles and runs a small unit test for DV.
 | Name  | Description | Type | Mandatory | Default |
 | :------------- | :------------- | :------------- | :------------- | :------------- |
 | <a id="verilog_dv_unit_test-name"></a>name |  A unique name for this target.   | <a href="https://bazel.build/docs/build-ref.html#name">Name</a> | required |  |
+| <a id="verilog_dv_unit_test-compile_args"></a>compile_args |  Additional arguments passed to compilation/elaboration.   | List of strings | optional | [] |
 | <a id="verilog_dv_unit_test-default_sim_opts"></a>default_sim_opts |  Default simulator options to pass to the simulator.   | <a href="https://bazel.build/docs/build-ref.html#labels">Label</a> | optional | @rules_verilog//vendors/cadence:verilog_dv_unit_test_opts.f |
 | <a id="verilog_dv_unit_test-deps"></a>deps |  verilog_dv_library or verilog_rtl_library labels that the testbench is dependent on. Dependency ordering within this label list is not necessary if dependencies are consistently declared in all other rules.   | <a href="https://bazel.build/docs/build-ref.html#labels">List of labels</a> | required |  |
-| <a id="verilog_dv_unit_test-sim_args"></a>sim_args |  Additional arguments to pass on command line to the simulator. Both compile and runtime arguments are allowed because dv_unit_test runs as a single step flow.   | List of strings | optional | [] |
+| <a id="verilog_dv_unit_test-run_args"></a>run_args |  Additional arguments passed only to simulation runtime.   | List of strings | optional | [] |
+| <a id="verilog_dv_unit_test-sim_args"></a>sim_args |  Deprecated compile arguments. Use `compile_args` and `run_args` instead.   | List of strings | optional | [] |
 | <a id="verilog_dv_unit_test-simulator"></a>simulator |  Simulator to use for this one-step unit test. Supported values are XRUN and VCS.   | String | optional | `"XRUN"` |
 | <a id="verilog_dv_unit_test-ut_sim_template"></a>ut_sim_template |  The template to generate the bash script to run the simulation.   | <a href="https://bazel.build/docs/build-ref.html#labels">Label</a> | optional | @rules_verilog//vendors/cadence:verilog_dv_unit_test.sh.template |
 

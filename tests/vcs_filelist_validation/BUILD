@@ -34,6 +34,8 @@ verilog_dv_tb(
     extra_runtime_args = [
         "+UNIFIED_VCS_RUNTIME_ARG",
     ],
+    run_fail_patterns = ["^PROJECT FAIL$"],
+    run_pass_patterns = ["^PROJECT PASS$"],
     simulator = "VCS",
 )
 
@@ -58,9 +60,18 @@ verilog_dv_test_cfg(
     tags = ["manual"],
 )
 
+verilog_dv_test_cfg(
+    name = "dv_cfg_vcs_no_timeout",
+    tags = ["manual"],
+    tb = ":dv_tb_vcs",
+    timeout = 0,
+)
+
 verilog_dv_unit_test(
     name = "dv_unit_vcs",
+    compile_args = ["+UNIT_VCS_COMPILE_ARG"],
     deps = [":unit_test_top"],
+    run_args = ["+UNIT_VCS_RUN_ARG"],
     simulator = "VCS",
     tags = ["manual"],
 )
@@ -93,6 +104,7 @@ py_test(
     data = [
         ":dv_cfg_vcs",
         ":dv_cfg_vcs_inherited",
+        ":dv_cfg_vcs_no_timeout",
         ":dv_unit_vcs",
         ":dv_unit_xrun",
         ":dv_tb_vcs",

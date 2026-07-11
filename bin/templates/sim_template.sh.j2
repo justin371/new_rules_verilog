@@ -203,7 +203,7 @@ function testFunction {
     if [ -f "$check_test_script" ] && [ -f "$log_file_to_check" ]; then
         # echo "Running: $check_test_script $log_file_to_check"
         set +o errexit
-        "$check_test_script" "$log_file_to_check"
+        "$check_test_script" "$log_file_to_check" {{ log_check_args }}
         local parse_exit_code=$?
         set -o errexit
         # echo "Log parsing finished with exit code: $parse_exit_code"

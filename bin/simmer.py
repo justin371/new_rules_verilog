@@ -679,6 +679,11 @@ class TestJob(Job):
         sim_opts += " " + shlex.join(["+UVM_TESTNAME={}".format(runtime_options['uvm_testname'])])
         combined_sim_args = merge_test_runtime_sim_opts(runtime_options, options.sim_opts)
         sim_opts += ' ' + format_sim_opts_dict(combined_sim_args)
+        log_check_args = []
+        for pattern in runtime_options.get("run_pass_patterns", []):
+            log_check_args.extend(["--pass-pattern", pattern])
+        for pattern in runtime_options.get("run_fail_patterns", []):
+            log_check_args.extend(["--fail-pattern", pattern])
 
         pre_run_cmd = shlex.quote(runtime_options['pre_run']) if runtime_options['pre_run'] else ""
 
@@ -825,6 +830,7 @@ class TestJob(Job):
             # Add test_name_seed specifically for VCS template if needed
             'test_name_seed': getattr(self, 'test_name_seed', None),
             'check_test_path': shlex.quote(sim_artifacts.find_bazel_executable(self.rcfg.proj_dir, "check_test")),
+            'log_check_args': shlex.join(log_check_args),
         }
 
         # Render sim.sh

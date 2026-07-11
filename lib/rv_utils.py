@@ -120,14 +120,6 @@ def print_summary(rcfg, vcomp_jobs, jm, trd):
                   '' if vcomp.jobstatus.successful else str(vcomp.log_path), '')
         table_data.append(tb_set)
         trd.append(tb_set)
-        total += 1
-
-        if vcomp.jobstatus == vcomp.jobstatus.PASSED:
-            total_passed += 1
-        elif vcomp.jobstatus == vcomp.jobstatus.FAILED:
-            total_failed += 1
-        else:
-            total_skipped += 1
 
         if rcfg.options.no_run:
             continue
@@ -155,7 +147,10 @@ def print_summary(rcfg, vcomp_jobs, jm, trd):
                     raise exc
 
             test_target = getattr(icfg.jobs[0], "target", "")
-            test_category = "Q1" if any(tag.lower() == "q1" for tag in rcfg.tests_to_tags.get(test_target, [])) else ""
+            test_tags = set(rcfg.tests_to_tags.get(test_target, []))
+            test_category = ",".join(
+                category for category, config in getattr(rcfg, "category_total_cases", {}).items()
+                if test_tags & set(config.get("tags", [])))
             test_set = ("", icfg.jobs[0].name,
                         str(max_job_time), str(len(passed)) if passed else "", str(len(skipped)) if skipped else "",
                         str(len(failed)) if failed else "", str(len(icfg.jobs)), "", test_category)
@@ -416,29 +411,23 @@ def load_category_total_cases(cfg_path: Optional[str] = None) -> Dict[str, Dict]
     :param cfg_path: Path to JSON config file (optional)
     :return: Subsystem configuration dictionary
     """
-    default_cfg = {
-        "ci_gate": {
-            "total": 50,
-            "tags": ["ci_gate", "ci"]
-        },
-        "nightly": {
-            "total": 200,
-            "tags": ["nightly", "nl"]
-        },
-        "weekly": {
-            "total": 20,
-            "tags": ["weekly", "wl"]
-        }
-    }
+    if not cfg_path:
+        raise ValueError("A category configuration path is required")
+    if not os.path.isfile(cfg_path):
+        raise FileNotFoundError(cfg_path)
 
-    if cfg_path and os.path.exists(cfg_path):
-        try:
-            with open(cfg_path, "r", encoding="utf-8") as f:
-                return json.load(f)
-        except json.JSONDecodeError:
-            print(f"Warning: Invalid JSON in subsystem config {cfg_path}, using default")
-            return default_cfg
-    return default_cfg
+    with open(cfg_path, "r", encoding="utf-8") as filep:
+        config = json.load(filep)
+    if not isinstance(config, dict):
+        raise ValueError("Category configuration must be a JSON object: {}".format(cfg_path))
+    for category, values in config.items():
+        if not isinstance(values, dict):
+            raise ValueError("Category '{}' must be an object".format(category))
+        if not isinstance(values.get("total"), int) or values["total"] < 0:
+            raise ValueError("Category '{}' requires a non-negative integer total".format(category))
+        if not isinstance(values.get("tags"), list) or not all(isinstance(tag, str) for tag in values["tags"]):
+            raise ValueError("Category '{}' requires a string-list tags field".format(category))
+    return config
 
 
 def calc_category_stats(rcfg) -> Dict[str, Dict[str, int]]:
@@ -474,7 +463,11 @@ def calc_category_stats(rcfg) -> Dict[str, Dict[str, int]]:
             test_tags = set(rcfg.tests_to_tags.get(test_target, []))
             if not test_tags:
                 continue
-            all_iterations = [job.jobstatus.successful for job in icfg.jobs]
+            completed_iterations = [
+                job for job in icfg.jobs if job.jobstatus in [job.jobstatus.PASSED, job.jobstatus.FAILED]
+            ]
+            if not completed_iterations:
+                continue
 
             for category, stats in category_stats.items():
                 category_tags = set(rcfg.category_total_cases[category]["tags"])
@@ -482,7 +475,8 @@ def calc_category_stats(rcfg) -> Dict[str, Dict[str, int]]:
                     continue
                 stats["test_records"].add(test_target)
                 stats["executed"] += 1
-                if all(all_iterations):
+                if len(completed_iterations) == len(icfg.jobs) and all(job.jobstatus.successful
+                                                                       for job in completed_iterations):
                     stats["passed"] += 1
 
     # Clean up internal tracking field

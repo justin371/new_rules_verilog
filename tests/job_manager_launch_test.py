@@ -142,6 +142,8 @@ class JobManagerLaunchTest(unittest.TestCase):
         finally:
             manager.stop()
 
+        self.assertFalse(manager.exited_prematurely)
+
     def test_pre_run_failure_fails_job_without_killing_scheduler(self):
         log = _Logger()
         rcfg = SimpleNamespace(options=SimpleNamespace(timeout=1), log=log)
@@ -287,6 +289,26 @@ class JobManagerLaunchTest(unittest.TestCase):
 
         self.assertIn(("", "skipped_test", "", "", "1", "", "1", "", ""), trd)
 
+    def test_simulation_summary_does_not_count_compile_job(self):
+        log = _SummaryLogger()
+        vcomp = SimpleNamespace(name="sys_tb", jobstatus=JobStatus.PASSED, log_path="cmp.log")
+        passed = _FakeTimedJob("smoke", JobStatus.PASSED, seconds=1)
+        passed.vcomper = vcomp
+        passed.target = "//pkg/tests:smoke"
+        icfg = SimpleNamespace(target=1, jobs=[passed])
+        rcfg = SimpleNamespace(
+            all_vcomp={"//pkg:sys_tb": ([icfg], [passed])},
+            options=SimpleNamespace(no_run=False, report=False, nt=False),
+            tests_to_tags={},
+            category_total_cases={},
+            log=log,
+        )
+
+        rv_utils.print_summary(rcfg, {"//pkg:sys_tb": vcomp}, SimpleNamespace(exited_prematurely=False), [])
+
+        simulation_summary = next(message for message in log.messages if message.startswith("Simulation Summary"))
+        self.assertRegex(simulation_summary, r"\b1\s+0\s+0\s+1\b")
+
     def test_category_stats_use_full_target_and_preserve_numeric_test_names(self):
         matching = _FakeTimedJob("reset_1", JobStatus.PASSED)
         matching.target = "//block_a/tests:reset_1"
@@ -309,6 +331,25 @@ class JobManagerLaunchTest(unittest.TestCase):
         )
 
         self.assertEqual({"smoke": {"total": 1, "executed": 1, "passed": 1}}, rv_utils.calc_category_stats(rcfg))
+
+    def test_category_stats_do_not_count_skipped_test_as_executed(self):
+        skipped = _FakeTimedJob("smoke", JobStatus.SKIPPED)
+        skipped.target = "//block/tests:smoke"
+        rcfg = SimpleNamespace(
+            all_vcomp={"//block:tb": ([SimpleNamespace(jobs=[skipped])], [skipped])},
+            category_total_cases={"smoke": {"total": 1, "tags": ["smoke"]}},
+            options=SimpleNamespace(no_run=False),
+            tests_to_tags={skipped.target: ["smoke"]},
+        )
+
+        self.assertEqual({"smoke": {"total": 1, "executed": 0, "passed": 0}}, rv_utils.calc_category_stats(rcfg))
+
+    def test_missing_category_config_does_not_fabricate_totals(self):
+        with tempfile.TemporaryDirectory() as temporary_dir:
+            missing = os.path.join(temporary_dir, "missing.json")
+
+            with self.assertRaises(FileNotFoundError):
+                rv_utils.load_category_total_cases(missing)
 
     def test_report_header_tolerates_missing_tags_and_normalizes_git_suffix(self):
         rcfg = SimpleNamespace(

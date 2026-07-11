@@ -17,6 +17,8 @@ DVTestInfo = provider(fields = {
 
 DVTBInfo = provider(fields = {
     "ccf": "Coverage config file.",
+    "run_fail_patterns": "Project-specific simulation failure regexes.",
+    "run_pass_patterns": "Project-specific simulation pass regexes.",
     "simulator": "Simulator selected for this DV testbench.",
 })
 
@@ -38,9 +40,9 @@ def _sanitize_vcs_compile_args(compile_args):
         sanitized.append(arg)
     return sanitized
 
-def _build_test_runtime_options(simulator, uvm_testname, sim_opts, timeout, sockets, tags, pre_run):
+def _build_test_runtime_options(simulator, uvm_testname, sim_opts, timeout, sockets, tags, pre_run, run_pass_patterns, run_fail_patterns):
     timeout_minutes = None
-    if timeout and timeout > 0:
+    if timeout != None and timeout >= 0:
         timeout_minutes = timeout
     return {
         "schema_version": 1,
@@ -53,6 +55,8 @@ def _build_test_runtime_options(simulator, uvm_testname, sim_opts, timeout, sock
         "sockets": sockets,
         "tags": tags,
         "pre_run": pre_run if pre_run else "",
+        "run_pass_patterns": run_pass_patterns,
+        "run_fail_patterns": run_fail_patterns,
     }
 
 def _validate_runtime_args(runtime_args, simulator):
@@ -120,8 +124,12 @@ def _verilog_dv_test_cfg_impl(ctx):
         fail("verilog_dv_test_cfg {} requires tb directly or through inherits".format(ctx.label))
 
     tb_simulator = None
+    run_pass_patterns = []
+    run_fail_patterns = []
     if tb and DVTBInfo in tb:
         tb_simulator = tb[DVTBInfo].simulator
+        run_pass_patterns = tb[DVTBInfo].run_pass_patterns
+        run_fail_patterns = tb[DVTBInfo].run_fail_patterns
 
     simulator = None
     if ctx.attr.simulator:
@@ -172,6 +180,8 @@ def _verilog_dv_test_cfg_impl(ctx):
         sockets = ctx.attr.sockets,
         tags = ctx.attr.tags,
         pre_run = pre_run,
+        run_pass_patterns = run_pass_patterns,
+        run_fail_patterns = run_fail_patterns,
     )
     out = ctx.outputs.dynamic_args
     ctx.actions.write(
@@ -618,6 +628,8 @@ def _verilog_dv_tb_impl(ctx):
         ),
         DVTBInfo(
             ccf = ctx.files.ccf,
+            run_fail_patterns = ctx.attr.run_fail_patterns,
+            run_pass_patterns = ctx.attr.run_pass_patterns,
             simulator = simulator,
         ),
     ]
@@ -687,6 +699,12 @@ verilog_dv_tb = rule(
             doc = "Additional files that need to be passed as runfiles to bazel. Most commonly used for files referred to by extra_compile_args or extra_runtime_args.\n" +
                   "Prefer passing labels here and referencing their runfiles-root-relative paths from generated filelists.",
         ),
+        "run_pass_patterns": attr.string_list(
+            doc = "Regexes that identify a successful simulation. When set, at least one must match.",
+        ),
+        "run_fail_patterns": attr.string_list(
+            doc = "Additional regexes that identify a failed simulation.",
+        ),
         "verilog_config": attr.string_dict(
             doc = "Key/value pair where the key represents the name of the config object,\n" +
                   "and the value represents a relative pointer to the config .v file.",
@@ -745,6 +763,8 @@ def _verilog_dv_unit_test_impl(ctx):
     simulator_command = ctx.attr._command_override[ToolEncapsulationInfo].command
     filelist_flag = "-f"
     dpi_tool = None
+    compile_args = ctx.attr.sim_args + ctx.attr.compile_args
+    run_args = ctx.attr.run_args
     if simulator == "VCS":
         if unit_test_template.short_path == ctx.file._ut_sim_template_xrun_default.short_path:
             unit_test_template = ctx.file._ut_sim_template_vcs_default
@@ -763,6 +783,8 @@ def _verilog_dv_unit_test_impl(ctx):
             "{DPI_LIBS}": flists_to_arguments(ctx.attr.deps, VerilogInfo, "transitive_dpi", "-sv_lib", "", dpi_tool),
             "{FLISTS}": " ".join(["{} {}".format(filelist_flag, f.short_path) for f in flists_list]),
             "{SIM_ARGS}": " ".join(ctx.attr.sim_args),
+            "{COMPILE_ARGS}": " ".join(compile_args),
+            "{RUN_ARGS}": " ".join(run_args),
         },
         is_executable = True,
     )
@@ -807,8 +829,13 @@ verilog_dv_unit_test = rule(
             # TODO remove this and just make it part of the template?
         ),
         "sim_args": attr.string_list(
-            doc = "Additional arguments to pass on command line to the simulator.\n" +
-                  "Both compile and runtime arguments are allowed because dv_unit_test runs as a single step flow.",
+            doc = "Deprecated compile arguments. Use compile_args and run_args instead.",
+        ),
+        "compile_args": attr.string_list(
+            doc = "Additional arguments passed to compilation/elaboration.",
+        ),
+        "run_args": attr.string_list(
+            doc = "Additional arguments passed only to simulation runtime.",
         ),
         "_command_override": attr.label(
             default = Label("@rules_verilog//:verilog_dv_unit_test_command"),

@@ -77,12 +77,18 @@ class VcsFilelistValidationTest(unittest.TestCase):
 
         self.assertEqual("VCS", dynamic_args["simulator"])
         self.assertEqual("dv_cfg_vcs", dynamic_args["uvm_testname"])
+        self.assertEqual(["^PROJECT PASS$"], dynamic_args["run_pass_patterns"])
+        self.assertEqual(["^PROJECT FAIL$"], dynamic_args["run_fail_patterns"])
 
         inherited_args = ast.literal_eval(
             read_runfile("tests/vcs_filelist_validation/dv_cfg_vcs_inherited_dynamic_args.py", ))
         self.assertEqual("VCS", inherited_args["simulator"])
         self.assertEqual("dv_cfg_vcs", inherited_args["uvm_testname"])
         self.assertEqual(17, inherited_args["timeout_minutes"])
+
+        no_timeout_args = ast.literal_eval(
+            read_runfile("tests/vcs_filelist_validation/dv_cfg_vcs_no_timeout_dynamic_args.py", ))
+        self.assertEqual(0, no_timeout_args["timeout_minutes"])
 
     def test_vcs_outputs_use_dash_file(self):
         filelist_checks = {
@@ -211,6 +217,9 @@ with open(os.environ["TOOL_LOG"], "a", encoding="utf-8") as log_file:
             self.assertTrue(any(record["tool"] == "vcs" for record in records))
             self.assertTrue(any("+compile_only" in record["args"] for record in records if record["tool"] == "vcs"))
             self.assertTrue(any("+run_only" in record["args"] for record in records if record["tool"] == "simv"))
+            self.assertTrue(
+                any("+UNIT_VCS_COMPILE_ARG" in record["args"] for record in records if record["tool"] == "vcs"))
+            self.assertTrue(any("+UNIT_VCS_RUN_ARG" in record["args"] for record in records if record["tool"] == "simv"))
             for record in records:
                 self.assertFalse(any(not argument.strip() for argument in record["args"]), record)
 

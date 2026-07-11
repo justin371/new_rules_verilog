@@ -20,7 +20,7 @@ if str(LIB_DIR) not in sys.path:
 from args_parser import parse_args
 from lint_parser_hal import HalLintLog
 from lib.job_lib import JobStatus
-from lib.runtime_options import format_sim_opts_dict
+from lib.runtime_options import format_sim_opts_dict, resolve_test_timeout_hours
 from lib.simulators.vcs import VcsSimulator
 from lib.simulators.xcelium import XceliumSimulator
 
@@ -41,6 +41,9 @@ class DummyVcompJob:
 
 
 class VcsRuntimeContractTest(unittest.TestCase):
+
+    def test_zero_test_timeout_disables_job_timeout(self):
+        self.assertEqual(0, resolve_test_timeout_hours({"timeout_minutes": 0}, 12.0, False))
 
     def _read_repo_file(self, relative_path):
         test_workspace = os.environ.get("TEST_WORKSPACE", "__main__")

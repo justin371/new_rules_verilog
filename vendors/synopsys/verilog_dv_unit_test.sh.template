@@ -19,7 +19,7 @@ trap _unit_test_on_exit EXIT
     {DPI_LIBS} \
     {DEFAULT_SIM_OPTS} \
     {FLISTS} \
-    {SIM_ARGS} \
+    {COMPILE_ARGS} \
     -o ./simv
 
-./simv "$@"
+./simv {RUN_ARGS} "$@"
