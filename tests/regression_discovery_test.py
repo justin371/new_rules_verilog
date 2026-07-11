@@ -67,7 +67,7 @@ class RegressionDiscoveryTest(unittest.TestCase):
         config.max_test_name_length = 20
         return config
 
-    def test_cache_freshness_tracks_build_and_bzl_files(self):
+    def test_cache_manifest_tracks_content_changes_and_deleted_files(self):
         proj_dir = Path(tempfile.mkdtemp())
         build_file = proj_dir / "benches" / "soc_tb" / "BUILD"
         build_file.parent.mkdir(parents=True)
@@ -81,18 +81,17 @@ class RegressionDiscoveryTest(unittest.TestCase):
         for filename in ("all_vcomp.json", "tests_to_tags.json", "tests_to_simulator.json"):
             path = cache_dir / filename
             path.write_text("{}", encoding="utf-8")
-            path.touch()
-
-        cache_time = max(build_file.stat().st_mtime, bazel_version.stat().st_mtime) + 10
-        for filename in ("all_vcomp.json", "tests_to_tags.json", "tests_to_simulator.json"):
-            path = cache_dir / filename
-            path.touch()
-            os.utime(path, (cache_time, cache_time))
+        config._write_discovery_manifest()
 
         self.assertTrue(config._discovery_cache_is_fresh())
 
-        newer_time = cache_time + 10
-        os.utime(bazel_version, (newer_time, newer_time))
+        original_mtime = bazel_version.stat().st_mtime
+        bazel_version.write_text("8.0.0\n", encoding="utf-8")
+        os.utime(bazel_version, (original_mtime, original_mtime))
+        self.assertFalse(config._discovery_cache_is_fresh())
+
+        config._write_discovery_manifest()
+        build_file.unlink()
         self.assertFalse(config._discovery_cache_is_fresh())
 
     @mock.patch("lib.regression.os.walk", side_effect=AssertionError("walk should not run"))
@@ -251,6 +250,7 @@ class RegressionDiscoveryTest(unittest.TestCase):
                 },
         }.items():
             (cache_dir / filename).write_text(json.dumps(payload), encoding="utf-8")
+        self._config(proj_dir)._write_discovery_manifest()
 
         options = self._options(proj_dir)
         options.no_bazel = True

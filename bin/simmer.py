@@ -32,9 +32,12 @@ from lib import compile_cache
 from lib import job_lib
 from lib import regression
 from lib import rv_utils
+from lib import seed_plan
 from lib import sim_artifacts
 from lib import simmer_results
 from lib.runtime_options import (
+    append_uvm_control_options,
+    format_log_check_args,
     format_sim_opts_dict,
     merge_test_runtime_sim_opts,
     resolve_test_timeout_hours,
@@ -714,11 +717,7 @@ class TestJob(Job):
         sim_opts += " " + shlex.join(["+UVM_TESTNAME={}".format(runtime_options['uvm_testname'])])
         combined_sim_args = merge_test_runtime_sim_opts(runtime_options, options.sim_opts)
         sim_opts += ' ' + format_sim_opts_dict(combined_sim_args)
-        log_check_args = []
-        for pattern in runtime_options.get("run_pass_patterns", []):
-            log_check_args.extend(["--pass-pattern", pattern])
-        for pattern in runtime_options.get("run_fail_patterns", []):
-            log_check_args.extend(["--fail-pattern", pattern])
+        log_check_args = format_log_check_args(runtime_options)
 
         pre_run_cmd = shlex.quote(runtime_options['pre_run']) if runtime_options['pre_run'] else ""
 
@@ -761,39 +760,7 @@ class TestJob(Job):
                 with open(nwaves_tcl_path, 'w') as filep:
                     filep.write("\n".join(tcl_commands))
 
-        if options.uvm_set_int:
-            sim_opts += " " + shlex.join(["+uvm_set_config_int={}".format(value) for value in options.uvm_set_int])
-        if options.uvm_set_str:
-            sim_opts += " " + shlex.join(["+uvm_set_config_string={}".format(value) for value in options.uvm_set_str])
-        if options.sim_opts_file:
-            with open(options.sim_opts_file, 'r') as sim_opts_file:
-                for line in sim_opts_file:
-                    sim_opts += " " + shlex.join(shlex.split(line, comments=True))
-
-        if options.verbosity:
-            if 'UVM_VERBOSITY' not in sim_opts:
-                sim_opts += ' +UVM_VERBOSITY=' + options.verbosity
-                if options.verbosity == 'UVM_DEBUG':
-                    sim_opts += " +UVM_TR_RECORD +UVM_LOG_RECORD "
-            else:
-                sim_opts = re.sub(r' \+UVM_VERBOSITY=[A-Z_]+', ' +UVM_VERBOSITY=' + options.verbosity, sim_opts)
-        else:
-            if 'UVM_VERBOSITY' not in sim_opts:
-                sim_opts += ' +UVM_VERBOSITY=UVM_MEDIUM'
-        if options.uvm_config_db_trace:
-            sim_opts += ' +UVM_CONFIG_DB_TRACE'
-        if options.uvm_resource_db_trace:
-            sim_opts += ' +UVM_RESOURCE_DB_TRACE'
-        if options.uvm_max_quit_count:
-            sim_opts += ' +UVM_MAX_QUIT_COUNT={}'.format(options.uvm_max_quit_count)
-        if options.uvm_set_verbosity:
-            sim_opts += " " + shlex.join(["+uvm_set_verbosity={}".format(value) for value in options.uvm_set_verbosity])
-        if options.uvm_set_config_int:
-            sim_opts += " " + shlex.join(
-                ["+uvm_set_config_int={}".format(value) for value in options.uvm_set_config_int])
-        if options.uvm_set_config_string:
-            sim_opts += " " + shlex.join(
-                ["+uvm_set_config_string={}".format(value) for value in options.uvm_set_config_string])
+        sim_opts = append_uvm_control_options(sim_opts, options)
         if options.gui:
             sim_opts += self.simulator.get_gui_command_options()
 
@@ -865,7 +832,7 @@ class TestJob(Job):
             # Add test_name_seed specifically for VCS template if needed
             'test_name_seed': getattr(self, 'test_name_seed', None),
             'check_test_path': shlex.quote(sim_artifacts.find_bazel_executable(self.rcfg.proj_dir, "check_test")),
-            'log_check_args': shlex.join(log_check_args),
+            'log_check_args': log_check_args,
         }
 
         # Render sim.sh
@@ -1084,7 +1051,10 @@ def main(rcfg, options):
                           "Multiple builds would otherwise collapse into the same VSO buildname.")
         sys.exit(1)
 
-    seed_rng = random.Random(options.python_seed)
+    rcfg.all_vcomp = seed_plan.ordered_regression_tests(rcfg.all_vcomp)
+    planned_seeds = {}
+    if not options.vso and options.seed is None:
+        planned_seeds = seed_plan.plan_test_seeds(rcfg.all_vcomp, options.python_seed)
     if options.python_seed is not None:
         log.info("Set python random seed to %s", options.python_seed)
 
@@ -1107,7 +1077,7 @@ def main(rcfg, options):
             for iteration in planned_iterations:
                 planned_seed = None
                 if not options.vso and options.seed is None:
-                    planned_seed = seed_rng.randint(0, (1 << 31) - 1)
+                    planned_seed = planned_seeds[(vcomp, test, iteration)]
                 t = TestJob(rcfg,
                             test,
                             vcomper=vcomper,

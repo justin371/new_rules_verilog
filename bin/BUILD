@@ -52,6 +52,7 @@ py_binary(
         "//lib:regression_report",
         "//lib:runtime_options",
         "//lib:rv_utils",
+        "//lib:seed_plan",
         "//lib:sim_artifacts",
         "//lib:simmer_results",
         "//lib/simulators",

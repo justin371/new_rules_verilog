@@ -4,6 +4,7 @@
 # standard lib imports
 import ast
 import fnmatch
+import hashlib
 import os
 import re
 import subprocess
@@ -23,6 +24,7 @@ DISCOVERY_CACHE_FILES = (
     "all_vcomp.json",
     "tests_to_tags.json",
     "tests_to_simulator.json",
+    "discovery_manifest.json",
 )
 DISCOVERY_ROOT_FILES = {
     ".bazelrc",
@@ -202,6 +204,21 @@ class RegressionConfig():
     def _have_discovery_cache(self):
         return all(os.path.exists(self._cache_path(filename)) for filename in DISCOVERY_CACHE_FILES)
 
+    def _discovery_dependency_manifest(self):
+        files = []
+        for path in sorted(set(self._iter_discovery_dependency_paths())):
+            relative_path = os.path.relpath(path, self.proj_dir).replace(os.sep, "/")
+            try:
+                with open(path, "rb") as filep:
+                    digest = hashlib.sha256(filep.read()).hexdigest()
+            except OSError:
+                digest = "missing"
+            files.append({"path": relative_path, "sha256": digest})
+        return {"schema_version": 1, "files": files}
+
+    def _write_discovery_manifest(self):
+        self.dict_to_json(self._discovery_dependency_manifest(), "discovery_manifest.json")
+
     def _iter_discovery_dependency_paths(self):
         result = subprocess.run(
             ["git", "ls-files", "--cached", "--others", "--exclude-standard"],
@@ -232,12 +249,15 @@ class RegressionConfig():
     def _discovery_cache_is_fresh(self):
         if not self._have_discovery_cache():
             return False
-
-        oldest_cache_mtime = min(os.path.getmtime(self._cache_path(filename)) for filename in DISCOVERY_CACHE_FILES)
-        for dependency_path in self._iter_discovery_dependency_paths():
-            if os.path.getmtime(dependency_path) > oldest_cache_mtime:
-                self.log.debug("Discovery cache invalidated by %s", dependency_path)
-                return False
+        try:
+            with open(self._cache_path("discovery_manifest.json"), "r", encoding="utf-8") as filep:
+                cached_manifest = json.load(filep)
+        except (OSError, ValueError, json.JSONDecodeError):
+            return False
+        current_manifest = self._discovery_dependency_manifest()
+        if cached_manifest != current_manifest:
+            self.log.debug("Discovery cache dependency manifest changed")
+            return False
         return True
 
     def _should_use_cached_discovery(self):
@@ -418,6 +438,7 @@ class RegressionConfig():
         self.dict_to_json(self.all_vcomp, "all_vcomp.json")
         self.dict_to_json(self.tests_to_tags, "tests_to_tags.json")
         self.dict_to_json(self.tests_to_simulator, "tests_to_simulator.json")
+        self._write_discovery_manifest()
 
     def test_discovery_match(self):
         """

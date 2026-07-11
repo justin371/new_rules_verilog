@@ -90,6 +90,18 @@ py_test(
 )
 
 py_test(
+    name = "runtime_options_test",
+    srcs = ["runtime_options_test.py"],
+    deps = ["//lib:runtime_options"],
+)
+
+py_test(
+    name = "seed_plan_test",
+    srcs = ["seed_plan_test.py"],
+    deps = ["//lib:seed_plan"],
+)
+
+py_test(
     name = "sim_artifacts_test",
     srcs = ["sim_artifacts_test.py"],
     deps = ["//lib:sim_artifacts"],

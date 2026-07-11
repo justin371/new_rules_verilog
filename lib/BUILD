@@ -62,6 +62,11 @@ py_library(
 )
 
 py_library(
+    name = "seed_plan",
+    srcs = ["seed_plan.py"],
+)
+
+py_library(
     name = "sim_artifacts",
     srcs = ["sim_artifacts.py"],
 )
