@@ -227,6 +227,14 @@ removed before merge, so the dashboard represents successful tests from the
 current regression rather than accumulated leftovers. Missing metrics are
 reported as `N/A`.
 
+Dashboard aggregation matches OpenTitan's DVSim 1.34.1 rule. Code Coverage is
+the mean of available Line/Statement, Branch, Condition/Expression, Toggle and
+FSM values; Block is excluded. Total Coverage is then the mean of available
+Code Coverage, Assertion Coverage and Functional CoverGroup Coverage values.
+Missing components do not contribute to the denominator. Simulator-provided
+`SCORE`/`Overall` remains available as the raw `cov_vendor_score` history field
+and does not replace either calculated average.
+
 ## Filelist paths
 
 Generated filelists use Bazel runfiles-root-relative paths. Main-workspace files

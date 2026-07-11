@@ -20,14 +20,17 @@ def _safe_int(value):
         return 0
 
 
-def _coverage_metric(coverage, section, metric="Overall"):
-    value = coverage.get(section, {}).get(metric)
+def _coverage_value(value):
     if value in (None, ""):
         return None
     try:
         return float(str(value).rstrip("%"))
     except (TypeError, ValueError):
         return None
+
+
+def _coverage_metric(coverage, section, metric="Overall"):
+    return _coverage_value(coverage.get(section, {}).get(metric))
 
 
 def _slug(value):
@@ -72,10 +75,11 @@ def create_template_environment(template_dir):
 
 
 def regression_history_series(regressions, timestamps):
-    """Return pass, code-coverage, and functional-coverage chart series."""
+    """Return pass and coverage chart series."""
     entries = [regressions[timestamp] for timestamp in timestamps if timestamp in regressions]
     return (
         [entry.get("passrate", 0) for entry in entries],
+        [entry.get("cov_total") for entry in entries],
         [entry.get("cov_code", 0) for entry in entries],
         [entry.get("cov_func", 0) for entry in entries],
     )
@@ -314,8 +318,10 @@ class RegressionReport:
                 "failed": failed,
                 "total": total,
                 "passrate": round(passed / total * 100, 2) if total else 0.0,
+                "cov_total": _coverage_value(coverage.get("total")),
                 "cov_code": _coverage_metric(coverage, "cc"),
                 "cov_func": _coverage_metric(coverage, "cf"),
+                "cov_vendor_score": _coverage_value(coverage.get("vendor_score")),
                 "logs": logs_list,
             }
 
@@ -327,7 +333,8 @@ class RegressionReport:
                 regressions = {}
             regressions[self.header["time"]] = regression_summary
             remain_list = self._prune_history(bench_path, regressions)
-            passrate_list, cov_code_list, cov_func_list = regression_history_series(regressions, remain_list)
+            passrate_list, cov_total_list, cov_code_list, cov_func_list = regression_history_series(
+                regressions, remain_list)
             history = [dict(regressions[timestamp], timestamp=timestamp) for timestamp in reversed(remain_list)]
 
             rendered_html = self.REGRESSION_REPORT_TEMPLATE.render(
@@ -338,6 +345,7 @@ class RegressionReport:
                 history=history,
                 latest_summary=regression_summary,
                 passrate_list=passrate_list,
+                cov_total_list=cov_total_list,
                 cov_code_list=cov_code_list,
                 cov_func_list=cov_func_list,
                 project=self.project_info,

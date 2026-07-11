@@ -131,6 +131,15 @@ defaults do not match the design hierarchy. Failed tests and stale databases
 are excluded from the current-run coverage merge; unavailable metrics display
 as `N/A` rather than a false zero.
 
+Coverage totals follow the two-level average used by OpenTitan's pinned DVSim
+1.34.1. Code Coverage is the arithmetic mean of the available Line/Statement,
+Branch, Condition/Expression, Toggle and FSM metrics; Block is shown when
+reported but is not part of that average. Total Coverage is the arithmetic mean
+of the available Code Coverage, Assertion Coverage and Functional CoverGroup
+Coverage values. Missing values are omitted from each denominator. A simulator
+`SCORE`/`Overall` value is retained as `cov_vendor_score` in `regressions.json`
+for reference, but is not used as Code Coverage or Total Coverage.
+
 The dashboard entry point and drill-down pages are written under:
 
 ```text

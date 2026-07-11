@@ -73,6 +73,7 @@ class RegressionReportTest(unittest.TestCase):
         self.assertIn("%3C/script%3E.html", report_html)
         self.assertNotIn("</script>", report_html)
         self.assertIn("Regression Dashboard", report_html)
+        self.assertIn("Total Coverage", report_html)
         self.assertIn("Code Coverage", report_html)
         self.assertIn("heat-good", report_html)
         self.assertNotIn("_static", report_html)
@@ -82,18 +83,20 @@ class RegressionReportTest(unittest.TestCase):
         regressions = {
             "20260710_120000": {
                 "passrate": 90.0,
+                "cov_total": 78.0,
                 "cov_code": 81.0,
                 "cov_func": 72.0
             },
             "20260711_120000": {
                 "passrate": 95.0,
+                "cov_total": 82.0,
                 "cov_code": 84.0,
                 "cov_func": 76.0
             },
         }
 
         self.assertEqual(
-            ([90.0, 95.0], [81.0, 84.0], [72.0, 76.0]),
+            ([90.0, 95.0], [78.0, 82.0], [81.0, 84.0], [72.0, 76.0]),
             regression_history_series(regressions, list(regressions)),
         )
 
@@ -115,14 +118,27 @@ class RegressionReportTest(unittest.TestCase):
                 ("", "empty_test", "", "", "", "", "0", "", ""),
             ]
 
-            report.run(header, trd, {"bench": {"cc": {"Overall": "75%"}}}, {})
+            report.run(
+                header,
+                trd,
+                {"bench": {
+                    "total": "80%",
+                    "vendor_score": "82%",
+                    "cc": {
+                        "Overall": "75%"
+                    },
+                }},
+                {},
+            )
 
             bench_path = Path(temporary_dir) / "regression_report" / "project" / "bench"
             regressions = json.loads((bench_path / "regressions.json").read_text(encoding="utf-8"))
             summary = regressions[header["time"]]
             self.assertEqual(0.0, summary["passrate"])
+            self.assertEqual(80.0, summary["cov_total"])
             self.assertEqual(75.0, summary["cov_code"])
             self.assertIsNone(summary["cov_func"])
+            self.assertEqual(82.0, summary["cov_vendor_score"])
             self.assertTrue((bench_path / "index.html").is_file())
             report_html = (bench_path / "index.html").read_text(encoding="utf-8")
             self.assertGreaterEqual(report_html.count("N/A"), 2)

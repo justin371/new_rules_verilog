@@ -9,7 +9,7 @@ import shlex
 import shutil
 import subprocess
 
-from lib.coverage_data import parse_coverage_summary
+from lib.coverage_data import aggregate_coverage_metrics, parse_coverage_summary
 
 from .base import SimulatorInterface
 
@@ -541,21 +541,12 @@ class VcsSimulator(SimulatorInterface):
 
     def collect_coverage_data(self, vcomp_jobs):
         if not self.options.cm:
-            return {vcomp.split(":")[-1]: {"cc": {}, "cf": {}} for vcomp in vcomp_jobs}
+            return {vcomp.split(":")[-1]: aggregate_coverage_metrics({}) for vcomp in vcomp_jobs}
         coverage = {}
         for vcomp, job in vcomp_jobs.items():
             report_dir = getattr(job, "coverage_report_dir", None)
             metrics = parse_coverage_summary(os.path.join(report_dir, "dashboard.txt")) if report_dir else {}
-            code_metrics = {key: value for key, value in metrics.items() if key not in ("CoverGroup", )}
-            functional_metrics = {}
-            if "CoverGroup" in metrics:
-                functional_metrics = {
-                    "Overall": metrics["CoverGroup"],
-                    "CoverGroup": metrics["CoverGroup"],
-                }
-            if "Assertion" in metrics:
-                functional_metrics["Assertion"] = metrics["Assertion"]
-            coverage[vcomp.split(":")[-1]] = {"cc": code_metrics, "cf": functional_metrics}
+            coverage[vcomp.split(":")[-1]] = aggregate_coverage_metrics(metrics)
         return coverage
 
     def get_log_parsing_info(self):

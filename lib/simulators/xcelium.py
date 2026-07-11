@@ -9,7 +9,7 @@ import subprocess
 
 import jinja2
 
-from lib.coverage_data import parse_coverage_summary
+from lib.coverage_data import aggregate_coverage_metrics, parse_coverage_summary
 
 from .base import SimulatorInterface
 
@@ -273,12 +273,12 @@ class XceliumSimulator(SimulatorInterface):
     def collect_coverage_data(self, vcomp_jobs):
         coverage = {}
         if not self.options.coverage:
-            return {vcomp.split(":")[-1]: {"cc": {}, "cf": {}} for vcomp in vcomp_jobs}
+            return {vcomp.split(":")[-1]: aggregate_coverage_metrics({}) for vcomp in vcomp_jobs}
         for vcomp, job in vcomp_jobs.items():
             report_tcl = getattr(job, "coverage_report_tcl", None)
             merged_coverage_dir = getattr(job, "merged_coverage_dir", None)
             if not report_tcl or not merged_coverage_dir or not os.path.exists(merged_coverage_dir):
-                coverage[vcomp.split(":")[-1]] = {"cc": {}, "cf": {}}
+                coverage[vcomp.split(":")[-1]] = aggregate_coverage_metrics({})
                 continue
             try:
                 result = subprocess.run(
@@ -288,24 +288,17 @@ class XceliumSimulator(SimulatorInterface):
                 )
             except OSError as exc:
                 log.error("IMC report generation could not start for %s: %s", job, exc)
-                coverage[vcomp.split(":")[-1]] = {"cc": {}, "cf": {}}
+                coverage[vcomp.split(":")[-1]] = aggregate_coverage_metrics({})
                 continue
             if result.returncode != 0:
                 log.error("IMC report generation failed:\n%s", result.stderr)
-                code_metrics = {}
-                functional_metrics = {}
+                metrics = {}
             else:
-                code_metrics = parse_coverage_summary(job.coverage_code_report)
+                metrics = parse_coverage_summary(job.coverage_code_report)
                 functional = parse_coverage_summary(job.coverage_functional_report)
-                functional_metrics = {}
                 if "CoverGroup" in functional:
-                    functional_metrics = {
-                        "Overall": functional["CoverGroup"],
-                        "CoverGroup": functional["CoverGroup"],
-                    }
-                if "Assertion" in code_metrics:
-                    functional_metrics["Assertion"] = code_metrics["Assertion"]
-            coverage[vcomp.split(":")[-1]] = {"cc": code_metrics, "cf": functional_metrics}
+                    metrics["CoverGroup"] = functional["CoverGroup"]
+            coverage[vcomp.split(":")[-1]] = aggregate_coverage_metrics(metrics)
         return coverage
 
     def get_log_parsing_info(self):

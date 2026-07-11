@@ -341,7 +341,12 @@ class VcsRuntimeContractTest(unittest.TestCase):
             capture_output=True,
             text=True,
         )
-        self.assertEqual({"sys_tb": {"cc": {}, "cf": {}}}, coverage)
+        self.assertEqual({"sys_tb": {
+            "total": None,
+            "vendor_score": None,
+            "cc": {},
+            "cf": {},
+        }}, coverage)
 
     def test_xcelium_missing_merged_coverage_returns_empty_metrics(self):
         options = parse_args(["--simulator", "XRUN", "--coverage", "A"])
@@ -352,7 +357,43 @@ class VcsRuntimeContractTest(unittest.TestCase):
             coverage = simulator.collect_coverage_data({"//pkg:sys_tb": job})
 
         run.assert_not_called()
-        self.assertEqual({"sys_tb": {"cc": {}, "cf": {}}}, coverage)
+        self.assertEqual({"sys_tb": {
+            "total": None,
+            "vendor_score": None,
+            "cc": {},
+            "cf": {},
+        }}, coverage)
+
+    def test_xcelium_dashboard_combines_code_and_functional_reports(self):
+        options = parse_args(["--simulator", "XRUN", "--coverage", "A"])
+        simulator = XceliumSimulator(options, DummyRegressionConfig(), None)
+        report_dir = Path(tempfile.mkdtemp())
+        code_report = report_dir / "coverage_code.txt"
+        functional_report = report_dir / "coverage_functional.txt"
+        code_report.write_text(
+            "Metric Overall Block Statement Branch Expression FSM Toggle Assertion\n"
+            "Cumulative 82.00 1.00 80.00 60.00 70.00 100.00 90.00 95.00\n",
+            encoding="utf-8",
+        )
+        functional_report.write_text(
+            "Metric Overall CoverGroup\n"
+            "Cumulative 76.00 76.00\n",
+            encoding="utf-8",
+        )
+        job = SimpleNamespace(
+            coverage_report_tcl=str(report_dir / "imc_report.tcl"),
+            coverage_code_report=str(code_report),
+            coverage_functional_report=str(functional_report),
+            merged_coverage_dir=str(report_dir),
+        )
+
+        with mock.patch("lib.simulators.xcelium.subprocess.run", return_value=SimpleNamespace(returncode=0)):
+            coverage = simulator.collect_coverage_data({"//pkg:sys_tb": job})["sys_tb"]
+
+        self.assertEqual("80.00%", coverage["cc"]["Overall"])
+        self.assertEqual("83.67%", coverage["total"])
+        self.assertEqual("82.00%", coverage["vendor_score"])
+        self.assertEqual("76.00%", coverage["cf"]["Overall"])
 
     def test_xcelium_coverage_and_mce_details_are_validated(self):
         with self.assertRaises(SystemExit):
@@ -477,7 +518,9 @@ class VcsRuntimeContractTest(unittest.TestCase):
         coverage = simulator.collect_coverage_data(
             {"//pkg:sys_tb": SimpleNamespace(coverage_report_dir=str(report_dir))})
 
-        self.assertEqual("87.50%", coverage["sys_tb"]["cc"]["Overall"])
+        self.assertEqual("85.00%", coverage["sys_tb"]["cc"]["Overall"])
+        self.assertEqual("85.33%", coverage["sys_tb"]["total"])
+        self.assertEqual("87.50%", coverage["sys_tb"]["vendor_score"])
         self.assertEqual("76.00%", coverage["sys_tb"]["cf"]["Overall"])
 
     def test_rerun_preserves_original_options_without_forcing_waves(self):

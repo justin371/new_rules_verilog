@@ -17,6 +17,7 @@ _METRIC_NAMES = {
     "LINE": "Line",
     "OVERALL": "Overall",
     "SCORE": "Overall",
+    "STATEMENT": "Line",
     "TGL": "Toggle",
     "TOGGLE": "Toggle",
 }
@@ -44,3 +45,61 @@ def parse_coverage_summary(path):
                 continue
             return {header: value if value.endswith("%") else value + "%" for header, value in zip(headers, values)}
     return {}
+
+
+def _percentage(value):
+    try:
+        return float(str(value).rstrip("%"))
+    except (TypeError, ValueError):
+        return None
+
+
+def _average(values):
+    values = [value for value in values if value is not None]
+    return sum(values) / len(values) if values else None
+
+
+def _format_percentage(value):
+    return "{:.2f}%".format(value) if value is not None else None
+
+
+def aggregate_coverage_metrics(metrics):
+    """Apply the OpenTitan DVSim coverage averages to canonical metrics."""
+    condition = _percentage(metrics.get("Condition"))
+    if condition is None:
+        condition = _percentage(metrics.get("Expression"))
+
+    code_average = _average([
+        _percentage(metrics.get("Line")),
+        _percentage(metrics.get("Branch")),
+        condition,
+        _percentage(metrics.get("Toggle")),
+        _percentage(metrics.get("FSM")),
+    ])
+    assertion = _percentage(metrics.get("Assertion"))
+    functional = _percentage(metrics.get("CoverGroup"))
+    total = _average([code_average, assertion, functional])
+
+    code_metrics = {
+        key: value
+        for key, value in metrics.items()
+        if key in ("Block", "Line", "Branch", "Condition", "Expression", "Toggle", "FSM")
+    }
+    if code_average is not None:
+        code_metrics = {"Overall": _format_percentage(code_average), **code_metrics}
+
+    functional_metrics = {}
+    if functional is not None:
+        functional_metrics.update({
+            "Overall": _format_percentage(functional),
+            "CoverGroup": _format_percentage(functional),
+        })
+    if assertion is not None:
+        functional_metrics["Assertion"] = _format_percentage(assertion)
+
+    return {
+        "total": _format_percentage(total),
+        "vendor_score": metrics.get("Overall"),
+        "cc": code_metrics,
+        "cf": functional_metrics,
+    }
