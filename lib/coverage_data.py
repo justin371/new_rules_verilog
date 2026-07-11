@@ -3,7 +3,6 @@
 import os
 import re
 
-
 _METRIC_NAMES = {
     "ASSERT": "Assertion",
     "ASSERTION": "Assertion",
@@ -43,8 +42,5 @@ def parse_coverage_summary(path):
             values = [token for token in _tokens(value_line) if _PERCENT_RE.match(token)]
             if len(values) < len(headers):
                 continue
-            return {
-                header: value if value.endswith("%") else value + "%"
-                for header, value in zip(headers, values)
-            }
+            return {header: value if value.endswith("%") else value + "%" for header, value in zip(headers, values)}
     return {}

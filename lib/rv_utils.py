@@ -11,6 +11,8 @@ from typing import Dict, Optional
 from urllib.parse import urlparse
 
 LOGGER_INDENT = 8
+
+
 class DatetimePrinter():
     """Utility class for tracking and printing time intervals"""
 
@@ -143,9 +145,8 @@ def print_summary(rcfg, vcomp_jobs, jm, trd):
 
             test_target = getattr(icfg.jobs[0], "target", "")
             test_tags = set(rcfg.tests_to_tags.get(test_target, []))
-            test_category = ",".join(
-                category for category, config in getattr(rcfg, "category_total_cases", {}).items()
-                if test_tags & set(config.get("tags", [])))
+            test_category = ",".join(category for category, config in getattr(rcfg, "category_total_cases", {}).items()
+                                     if test_tags & set(config.get("tags", [])))
             test_set = ("", icfg.jobs[0].name,
                         str(max_job_time), str(len(passed)) if passed else "", str(len(skipped)) if skipped else "",
                         str(len(failed)) if failed else "", str(len(icfg.jobs)), "", test_category)

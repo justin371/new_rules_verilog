@@ -6,7 +6,6 @@ import os
 import subprocess
 import tempfile
 
-
 FINGERPRINT_FILE = ".compile_fingerprint.json"
 
 

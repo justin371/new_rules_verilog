@@ -546,6 +546,7 @@ class BazelTBJob(Job):
     def __repr__(self):
         return 'Bazel("{}")'.format(self.bazel_target)
 
+
 class BazelTestCfgJob(Job):
     """Build all selected test configs for one vcomp in a single Bazel invocation."""
 

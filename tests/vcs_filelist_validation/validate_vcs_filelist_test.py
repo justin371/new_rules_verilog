@@ -236,7 +236,8 @@ with open(os.environ["TOOL_LOG"], "a", encoding="utf-8") as log_file:
             self.assertTrue(any("+run_only" in record["args"] for record in records if record["tool"] == "simv"))
             self.assertTrue(
                 any("+UNIT_VCS_COMPILE_ARG" in record["args"] for record in records if record["tool"] == "vcs"))
-            self.assertTrue(any("+UNIT_VCS_RUN_ARG" in record["args"] for record in records if record["tool"] == "simv"))
+            self.assertTrue(any("+UNIT_VCS_RUN_ARG" in record["args"] for record in records
+                                if record["tool"] == "simv"))
             for record in records:
                 self.assertFalse(any(not argument.strip() for argument in record["args"]), record)
 

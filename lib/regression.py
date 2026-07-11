@@ -213,16 +213,20 @@ class RegressionConfig():
         if result.returncode == 0:
             for relative_path in result.stdout.splitlines():
                 filename = os.path.basename(relative_path)
-                if filename in ("BUILD", "BUILD.bazel") or filename.endswith(".bzl") or relative_path in DISCOVERY_ROOT_FILES:
+                if filename in ("BUILD",
+                                "BUILD.bazel") or filename.endswith(".bzl") or relative_path in DISCOVERY_ROOT_FILES:
                     yield os.path.join(self.proj_dir, os.path.normpath(relative_path))
             return
 
         for root, dirs, files in os.walk(self.proj_dir):
-            dirs[:] = [directory for directory in dirs if directory not in (".git", ".simmer") and
-                        not directory.startswith("bazel-")]
+            dirs[:] = [
+                directory for directory in dirs
+                if directory not in (".git", ".simmer") and not directory.startswith("bazel-")
+            ]
             for filename in files:
                 relative_path = os.path.relpath(os.path.join(root, filename), self.proj_dir)
-                if filename in ("BUILD", "BUILD.bazel") or filename.endswith(".bzl") or relative_path in DISCOVERY_ROOT_FILES:
+                if filename in ("BUILD",
+                                "BUILD.bazel") or filename.endswith(".bzl") or relative_path in DISCOVERY_ROOT_FILES:
                     yield os.path.join(root, filename)
 
     def _discovery_cache_is_fresh(self):

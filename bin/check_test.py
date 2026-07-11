@@ -199,7 +199,10 @@ def main():
                         help='Maximum logfile size (MB). Default 0 (no limit)')
     parser.add_argument("--error-limit", type=int, default=25, help='Stop parsing logfile at this number of errors')
     parser.add_argument("--pass-pattern", action="append", default=[], help="Require this project pass regex")
-    parser.add_argument("--fail-pattern", action="append", default=[], help="Treat this project failure regex as an error")
+    parser.add_argument("--fail-pattern",
+                        action="append",
+                        default=[],
+                        help="Treat this project failure regex as an error")
     options = parser.parse_args()
 
     project_pass_regex = compile_patterns(options.pass_pattern) if options.pass_pattern else None
@@ -236,8 +239,8 @@ def main():
                         error_lines.append(line)
                         if len(error_lines) >= options.error_limit:
                             break
-                    elif not found_finish and (
-                            project_pass_regex.search(line) if project_pass_regex is not None else finish_regex.search(line)):
+                    elif not found_finish and (project_pass_regex.search(line)
+                                               if project_pass_regex is not None else finish_regex.search(line)):
                         found_finish = True
                     elif "SVSEED" in line or "random seed used" in line:
                         seed_lines.append(line)

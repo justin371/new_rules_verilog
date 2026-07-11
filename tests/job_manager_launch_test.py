@@ -327,7 +327,10 @@ class JobManagerLaunchTest(unittest.TestCase):
         skipped.target = "//block/tests:smoke"
         rcfg = SimpleNamespace(
             all_vcomp={"//block:tb": ([SimpleNamespace(jobs=[skipped])], [skipped])},
-            category_total_cases={"smoke": {"total": 1, "tags": ["smoke"]}},
+            category_total_cases={"smoke": {
+                "total": 1,
+                "tags": ["smoke"]
+            }},
             options=SimpleNamespace(no_run=False),
             tests_to_tags={skipped.target: ["smoke"]},
         )

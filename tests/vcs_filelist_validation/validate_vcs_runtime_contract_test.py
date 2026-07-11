@@ -452,7 +452,8 @@ class VcsRuntimeContractTest(unittest.TestCase):
             encoding="utf-8",
         )
 
-        coverage = simulator.collect_coverage_data({"//pkg:sys_tb": SimpleNamespace(coverage_report_dir=str(report_dir))})
+        coverage = simulator.collect_coverage_data(
+            {"//pkg:sys_tb": SimpleNamespace(coverage_report_dir=str(report_dir))})
 
         self.assertEqual("87.50%", coverage["sys_tb"]["cc"]["Overall"])
         self.assertEqual("76.00%", coverage["sys_tb"]["cf"]["Overall"])

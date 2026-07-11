@@ -542,10 +542,7 @@ class VcsSimulator(SimulatorInterface):
         for vcomp, job in vcomp_jobs.items():
             report_dir = getattr(job, "coverage_report_dir", None)
             metrics = parse_coverage_summary(os.path.join(report_dir, "dashboard.txt")) if report_dir else {}
-            code_metrics = {
-                key: value for key, value in metrics.items()
-                if key not in ("CoverGroup", )
-            }
+            code_metrics = {key: value for key, value in metrics.items() if key not in ("CoverGroup", )}
             functional_metrics = {}
             if "CoverGroup" in metrics:
                 functional_metrics = {

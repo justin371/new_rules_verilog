@@ -6,6 +6,7 @@ from bin import check_test
 
 
 class CheckTestFastPathTest(unittest.TestCase):
+
     def setUp(self):
         check_test.active_signatures = list(check_test.default_error_signatures)
         check_test.compile_error_regex()

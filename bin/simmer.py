@@ -579,8 +579,15 @@ class TestJob(Job):
     def execution_mode(self):
         return "parallel"
 
-    def __init__(self, rcfg, target, vcomper: VCompJob, icfg, btcj, simulator: SimulatorInterface,
-                 iteration=None, planned_seed=None): # Add simulator
+    def __init__(self,
+                 rcfg,
+                 target,
+                 vcomper: VCompJob,
+                 icfg,
+                 btcj,
+                 simulator: SimulatorInterface,
+                 iteration=None,
+                 planned_seed=None): # Add simulator
         self.target = target
         name = target.split(":")[1]
 
@@ -1101,8 +1108,14 @@ def main(rcfg, options):
                 planned_seed = None
                 if not options.vso and options.seed is None:
                     planned_seed = seed_rng.randint(0, (1 << 31) - 1)
-                t = TestJob(rcfg, test, vcomper=vcomper, icfg=icfg, btcj=btcj, simulator=simulator,
-                            iteration=iteration, planned_seed=planned_seed)
+                t = TestJob(rcfg,
+                            test,
+                            vcomper=vcomper,
+                            icfg=icfg,
+                            btcj=btcj,
+                            simulator=simulator,
+                            iteration=iteration,
+                            planned_seed=planned_seed)
                 tests.append(t)
                 t.add_dependency(btcj)
 
