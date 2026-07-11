@@ -7,7 +7,6 @@ import tempfile
 import unittest
 from pathlib import Path
 
-
 FILELIST_FLAG_RE = re.compile(r"(?m)(^|\s)-file\s+\S+")
 LEGACY_FILELIST_FLAG_RE = re.compile(r"(?m)(^|\s)-f\s+\S+")
 
@@ -17,7 +16,7 @@ def find_runfile(relative_path):
     manifest_file = os.environ.get("RUNFILES_MANIFEST_FILE")
     manifest_key = "{}/{}".format(test_workspace, relative_path.replace("\\", "/"))
     if manifest_file:
-        for line in Path(manifest_file).read_text(encoding = "utf-8").splitlines():
+        for line in Path(manifest_file).read_text(encoding="utf-8").splitlines():
             if line.startswith(manifest_key + " "):
                 return Path(line.split(" ", 1)[1])
 
@@ -37,17 +36,15 @@ def find_runfile(relative_path):
     if len(matches) == 1:
         return matches[0]
     if len(matches) > 1:
-        raise AssertionError(
-            "Ambiguous runfile lookup for {}: {}".format(
-                relative_path,
-                [str(match) for match in matches],
-            )
-        )
+        raise AssertionError("Ambiguous runfile lookup for {}: {}".format(
+            relative_path,
+            [str(match) for match in matches],
+        ))
     raise AssertionError("Missing runfile: {}".format(path))
 
 
 def read_runfile(relative_path):
-    return find_runfile(relative_path).read_text(encoding = "utf-8")
+    return find_runfile(relative_path).read_text(encoding="utf-8")
 
 
 def runfile_exists(relative_path):
@@ -74,17 +71,15 @@ def assert_lacks_legacy_filelist_flag(contents, relative_path):
 
 
 class VcsFilelistValidationTest(unittest.TestCase):
+
     def test_dv_test_cfg_keeps_its_public_runtime_contract(self):
-        dynamic_args = ast.literal_eval(read_runfile(
-            "tests/vcs_filelist_validation/dv_cfg_vcs_dynamic_args.py",
-        ))
+        dynamic_args = ast.literal_eval(read_runfile("tests/vcs_filelist_validation/dv_cfg_vcs_dynamic_args.py", ))
 
         self.assertEqual("VCS", dynamic_args["simulator"])
         self.assertEqual("dv_cfg_vcs", dynamic_args["uvm_testname"])
 
-        inherited_args = ast.literal_eval(read_runfile(
-            "tests/vcs_filelist_validation/dv_cfg_vcs_inherited_dynamic_args.py",
-        ))
+        inherited_args = ast.literal_eval(
+            read_runfile("tests/vcs_filelist_validation/dv_cfg_vcs_inherited_dynamic_args.py", ))
         self.assertEqual("VCS", inherited_args["simulator"])
         self.assertEqual("dv_cfg_vcs", inherited_args["uvm_testname"])
         self.assertEqual(17, inherited_args["timeout_minutes"])
@@ -186,7 +181,11 @@ with open(os.environ["TOOL_LOG"], "a", encoding="utf-8") as log_file:
                 "tests/vcs_filelist_validation/dv_unit_vcs_run.sh": [],
                 "tests/vcs_filelist_validation/dv_unit_xrun_run.sh": [],
                 "tests/vcs_filelist_validation/rtl_unit_vcs": [
-                    "--waves", "--compile-arg", "+compile_only", "--run-arg", "+run_only",
+                    "--waves",
+                    "--compile-arg",
+                    "+compile_only",
+                    "--run-arg",
+                    "+run_only",
                 ],
                 "tests/vcs_filelist_validation/rtl_unit_xrun": ["--waves"],
             }

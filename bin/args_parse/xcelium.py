@@ -50,9 +50,10 @@ def add_xcelium_arguments(parser):
                        default=500000,
                        help=("Size of spilt to be used for mce sim. "
                              "used with --mce"))
-    gxrun.add_argument('--coverage',
-                       action=parser_actions.CovAction,
-                       help=f'Enable Code Coverage for xcelium only.\n{parser_actions.CovAction.format_options(indent=0)}')
+    gxrun.add_argument(
+        '--coverage',
+        action=parser_actions.CovAction,
+        help=f'Enable Code Coverage for xcelium only.\n{parser_actions.CovAction.format_options(indent=0)}')
     gxrun.add_argument('--covfile', default=COVFILE, help='Path to Coverage configuration file')
     gxrun.add_argument('--msie',
                        type=str,
@@ -86,15 +87,17 @@ def add_xcelium_arguments(parser):
                        nargs='?',
                        default=None,
                        help='Compile incr, need define prim top, default is tb_top')
-    gxrun.add_argument('--emulator',
-                       type=str,
-                       default='',
-                       choices=['pldm_sa', 'pldm_sim', 'sim', 'clean'],
-                       help=('Declares the platform to use for compile and emulation.\n'
-                             'pldm_sa: clean the database, run palladium synthesis, tb compilation, then run the cases\n'
-                             'pldm_sim: kept the synthesis database, run palladium tb compilation, then run the cases\n'
-                             'sim: without palladium synthesis, compile the emualtion env with simulator, then run the cases with simulator\n'
-                             'clean: clean the synthesis database\n'))
+    gxrun.add_argument(
+        '--emulator',
+        type=str,
+        default='',
+        choices=['pldm_sa', 'pldm_sim', 'sim', 'clean'],
+        help=
+        ('Declares the platform to use for compile and emulation.\n'
+         'pldm_sa: clean the database, run palladium synthesis, tb compilation, then run the cases\n'
+         'pldm_sim: kept the synthesis database, run palladium tb compilation, then run the cases\n'
+         'sim: without palladium synthesis, compile the emualtion env with simulator, then run the cases with simulator\n'
+         'clean: clean the synthesis database\n'))
 
 
 def validate_xcelium_switches_for_vcs(options, parser):
@@ -134,9 +137,8 @@ def validate_xcelium_switches_for_vcs(options, parser):
     if options.emulator:
         xcelium_only_switches.append('--emulator')
     if xcelium_only_switches:
-        parser.error(
-            "The following switches are Xcelium-only and cannot be used with VCS: {}. "
-            "Stopping before Bazel starts.".format(", ".join(xcelium_only_switches)))
+        parser.error("The following switches are Xcelium-only and cannot be used with VCS: {}. "
+                     "Stopping before Bazel starts.".format(", ".join(xcelium_only_switches)))
 
 
 def validate_xcelium_runtime_options(options, parser):

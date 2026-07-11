@@ -19,6 +19,7 @@ from lib.simulators.xcelium import XceliumSimulator
 
 
 class DummyRegressionConfig:
+
     def __init__(self):
         self.regression_dir = tempfile.mkdtemp(prefix="vcs_runtime_contract_")
         self.proj_dir = os.getcwd()
@@ -26,23 +27,25 @@ class DummyRegressionConfig:
 
 
 class DummyVcompJob:
+
     def __init__(self):
         self.bench_dir = tempfile.mkdtemp(prefix="vcs_bench_")
         self.name = "unit_vcomp"
 
 
 class VcsRuntimeContractTest(unittest.TestCase):
+
     def _read_repo_file(self, relative_path):
         test_workspace = os.environ.get("TEST_WORKSPACE", "__main__")
         manifest_file = os.environ.get("RUNFILES_MANIFEST_FILE")
         manifest_key = "{}/{}".format(test_workspace, relative_path.replace("\\", "/"))
         if manifest_file:
-            for line in Path(manifest_file).read_text(encoding = "utf-8").splitlines():
+            for line in Path(manifest_file).read_text(encoding="utf-8").splitlines():
                 if line.startswith(manifest_key + " "):
-                    return Path(line.split(" ", 1)[1]).read_text(encoding = "utf-8")
+                    return Path(line.split(" ", 1)[1]).read_text(encoding="utf-8")
 
         test_srcdir = os.environ["TEST_SRCDIR"]
-        return (Path(test_srcdir) / test_workspace / relative_path).read_text(encoding = "utf-8")
+        return (Path(test_srcdir) / test_workspace / relative_path).read_text(encoding="utf-8")
 
     def setUp(self):
         self._original_vcs_runner = os.environ.pop("RV_VCS_RUNNER", None)
@@ -257,8 +260,14 @@ class VcsRuntimeContractTest(unittest.TestCase):
 
     def test_vcs_coverage_uses_one_vdb_path_for_simulation_and_merge(self):
         options = parse_args([
-            "-t", "unit:test", "--simulator", "VCS", "--cm", "line",
-            "--vcs-runner", "site-vcs --",
+            "-t",
+            "unit:test",
+            "--simulator",
+            "VCS",
+            "--cm",
+            "line",
+            "--vcs-runner",
+            "site-vcs --",
         ])
         simulator = VcsSimulator(options, DummyRegressionConfig(), None)
         vcomp = DummyVcompJob()

@@ -12,6 +12,7 @@ from .base import SimulatorInterface
 
 log = logging.getLogger(__name__)
 
+
 class XceliumSimulator(SimulatorInterface):
     """Implementation for Cadence XRUN simulator (including EMU variant)."""
 
@@ -29,16 +30,12 @@ class XceliumSimulator(SimulatorInterface):
                     log.debug("Using EMU compile template from EMU_JINJA2_PATH")
                     return template
                 except jinja2.TemplateNotFound:
-                    raise RuntimeError(
-                        "{} EMU template xrun_emu_compile_template.sh.j2 was not found in {}".format(
-                            vcomp_job,
-                            emu_template_path,
-                        )
-                    )
+                    raise RuntimeError("{} EMU template xrun_emu_compile_template.sh.j2 was not found in {}".format(
+                        vcomp_job,
+                        emu_template_path,
+                    ))
             else:
-                raise RuntimeError(
-                    "{} requires EMU_JINJA2_PATH with xrun_emu_compile_template.sh.j2".format(vcomp_job)
-                )
+                raise RuntimeError("{} requires EMU_JINJA2_PATH with xrun_emu_compile_template.sh.j2".format(vcomp_job))
         else:
             log.debug("Using standard XRUN compile template")
             return self.env.get_template('xrun_compile_template.sh.j2')
@@ -97,7 +94,8 @@ class XceliumSimulator(SimulatorInterface):
             merge_sh = os.path.join(vcomp_job.cov_work_dir, "merge.sh")
             with open(merge_sh, 'w') as filep:
                 filep.write("".join([
-                    "#!/usr/bin/env bash\n", "" if self.options.report else "runmod xrun -- imc -exec {} -verbose\n".format(merge_exec_tcl),
+                    "#!/usr/bin/env bash\n",
+                    "" if self.options.report else "runmod xrun -- imc -exec {} -verbose\n".format(merge_exec_tcl),
                     "runmod xrun -- imc -load {}\n".format(merged_output)
                 ]))
             st = os.stat(merge_sh)

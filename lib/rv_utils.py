@@ -37,10 +37,10 @@ class IterationCfg():
     """Configuration class for test iterations"""
 
     def __init__(self, target):
-        self.target = target  # Total number of iterations to spawn
-        self.spawn_count = 1  # Current count of spawned iterations
-        self.jobs = []  # List of jobs associated with this iteration config
-        self.vso_assignments = []  # Optional VSO ask-all planned runs for this test template
+        self.target = target # Total number of iterations to spawn
+        self.spawn_count = 1 # Current count of spawned iterations
+        self.jobs = [] # List of jobs associated with this iteration config
+        self.vso_assignments = [] # Optional VSO ask-all planned runs for this test template
 
     def inc(self, job):
         """Increment spawn count and add a job to the iteration"""
@@ -114,8 +114,9 @@ def print_summary(rcfg, vcomp_jobs, jm, trd):
     for i, (vcomp_name, (icfgs, test_list)) in enumerate(rcfg.all_vcomp.items()):
         vcomp = vcomp_jobs[vcomp_name]
         tb_set = (vcomp.name, "vcomp", '', '1' if vcomp.jobstatus.successful else '',
-            '1' if vcomp.jobstatus == vcomp.jobstatus.SKIPPED else '', '1' if not vcomp.jobstatus.successful else '', '1',
-            '' if vcomp.jobstatus.successful else str(vcomp.log_path))
+                  '1' if vcomp.jobstatus == vcomp.jobstatus.SKIPPED else '',
+                  '1' if not vcomp.jobstatus.successful else '', '1',
+                  '' if vcomp.jobstatus.successful else str(vcomp.log_path))
         table_data.append(tb_set)
         trd.append(tb_set)
         total += 1
@@ -152,8 +153,9 @@ def print_summary(rcfg, vcomp_jobs, jm, trd):
                 if not jm.exited_prematurely:
                     raise exc
 
-            test_set = ("", icfg.jobs[0].name, str(max_job_time), str(len(passed)) if passed else "", str(len(skipped)) if skipped else "",
-                str(len(failed)) if failed else "", str(len(icfg.jobs)), "")
+            test_set = ("", icfg.jobs[0].name,
+                        str(max_job_time), str(len(passed)) if passed else "", str(len(skipped)) if skipped else "",
+                        str(len(failed)) if failed else "", str(len(icfg.jobs)), "")
             table_data.append(test_set)
             trd.append(test_set)
 
@@ -302,7 +304,8 @@ def get_report_header(rcfg):
         tag_info = subprocess.check_output(['git', 'describe', '--tags'], text=True).strip()
         commit_id = subprocess.check_output(['git', 'rev-parse', 'HEAD'], text=True).strip()
         short_revision = subprocess.check_output(['git', 'rev-parse', '--short', 'HEAD'], text=True).strip()
-        repo_url = subprocess.check_output(['git', 'remote', 'get-url', 'origin'], text=True).strip().replace(":", "/").replace("git@", "https://")
+        repo_url = subprocess.check_output(['git', 'remote', 'get-url', 'origin'],
+                                           text=True).strip().replace(":", "/").replace("git@", "https://")
         match = re.search(r"/([^/]+)\.git$", repo_url)
         if match:
             header['project_name'] = match.group(1)
@@ -370,7 +373,7 @@ def get_coverage_data(rcfg, vcomp_jobs):
                             for row in rows[1:]:
                                 cells = [td.get_text(strip=True).replace('\u00a0', '') for td in row.find_all('td')]
                                 if 'Cumulative' in cells:
-                                    cov[vcomp_name]['cc'] =  dict(zip(header, cells))
+                                    cov[vcomp_name]['cc'] = dict(zip(header, cells))
 
             result = subprocess.run(['grep', '-rl', env_pattern, report_dir], capture_output=True, text=True)
             grep_files = result.stdout.splitlines()
@@ -389,12 +392,11 @@ def get_coverage_data(rcfg, vcomp_jobs):
                             for row in rows[1:]:
                                 cells = [td.get_text(strip=True).replace('\u00a0', '') for td in row.find_all('td')]
                                 if 'Cumulative' in cells:
-                                    cov[vcomp_name]['cf'] =  dict(zip(header, cells))
+                                    cov[vcomp_name]['cf'] = dict(zip(header, cells))
 
             cc_filtered = {
                 k.split(' ')[0]: process_value(v)
-                for k, v in cov[vcomp_name].get('cc', {}).items()
-                if 'Average' in k and 'CoverGroup' not in k
+                for k, v in cov[vcomp_name].get('cc', {}).items() if 'Average' in k and 'CoverGroup' not in k
             }
             cf_filtered = {
                 k.split(' ')[0]: process_value(v)
@@ -454,8 +456,9 @@ def calc_category_stats(rcfg) -> Dict[str, Dict[str, int]]:
             "total": config["total"],
             "executed": 0,
             "passed": 0,
-            "test_records": set()  # Track unique tests to avoid duplicate counting
-        } for category, config in rcfg.category_total_cases.items()
+            "test_records": set() # Track unique tests to avoid duplicate counting
+        }
+        for category, config in rcfg.category_total_cases.items()
     }
 
     if rcfg.options.no_run:
@@ -480,19 +483,19 @@ def calc_category_stats(rcfg) -> Dict[str, Dict[str, int]]:
                 test_tags = set()
                 for test_key, tags in rcfg.tests_to_tags.items():
                     if ':' in test_key:
-                        key_test_name = test_key.split(':', 1)[1]  # Only split on first ':'
+                        key_test_name = test_key.split(':', 1)[1] # Only split on first ':'
                         if key_test_name == test_base_name:
                             test_tags = set(tags)
-                            break  # Exact match found
+                            break # Exact match found
 
                 if not test_tags:
-                    continue  # Skip tests with no tags
+                    continue # Skip tests with no tags
 
                 # Initialize entry if not exists
                 if test_base_name not in test_aggregator:
                     test_aggregator[test_base_name] = {
                         "tags": test_tags,
-                        "iterations_successful": []  # Track success status of each iteration
+                        "iterations_successful": [] # Track success status of each iteration
                     }
 
                 # Record success status of current iteration
@@ -508,12 +511,12 @@ def calc_category_stats(rcfg) -> Dict[str, Dict[str, int]]:
                 for category, stats in category_stats.items():
                     category_tags = set(rcfg.category_total_cases[category]["tags"])
                     if not (test_tags & category_tags):
-                        continue  # No tag overlap, skip
+                        continue # No tag overlap, skip
 
                     # Count as executed only once per unique test
                     if test_name not in stats["test_records"]:
                         stats["test_records"].add(test_name)
-                        stats["executed"] += 1  # 1 execution regardless of iteration count
+                        stats["executed"] += 1 # 1 execution regardless of iteration count
 
                         # Strict mode: Passed only if ALL iterations are successful
                         if all(all_iterations):
@@ -526,21 +529,15 @@ def calc_category_stats(rcfg) -> Dict[str, Dict[str, int]]:
     return category_stats
 
 
-def print_category_summary(
-    category_stats: Dict[str, Dict[str, int]],
-    log,
-    LOGGER_INDENT: int = 8
-):
+def print_category_summary(category_stats: Dict[str, Dict[str, int]], log, LOGGER_INDENT: int = 8):
     """
     Print summary statistics for subsystems
     :param subsys_stats: Statistics from calc_subsys_stats
     :param log: Logger object
     :param LOGGER_INDENT: Indentation for formatting
     """
-    table_data = [
-        ("Category", "Total Cases", "Executed", "Completion", "Passed", "Pass Rate"),
-        ("-" * 10, "-" * 11, "-" * 8, "-" * 10, "-" * 6, "-" * 9)
-    ]
+    table_data = [("Category", "Total Cases", "Executed", "Completion", "Passed", "Pass Rate"),
+                  ("-" * 10, "-" * 11, "-" * 8, "-" * 10, "-" * 6, "-" * 9)]
 
     for category, stats in category_stats.items():
         total = stats["total"]
@@ -550,20 +547,11 @@ def print_category_summary(
         completion_rate = f"{(executed / total) * 100:.1f}%" if total > 0 else "N/A"
         pass_rate = f"{(passed / executed) * 100:.1f}%" if executed > 0 else "N/A"
 
-        table_data.append((
-            category,
-            str(total),
-            str(executed),
-            completion_rate,
-            str(passed),
-            pass_rate
-        ))
+        table_data.append((category, str(total), str(executed), completion_rate, str(passed), pass_rate))
 
     columns = list(zip(*table_data))
     column_widths = [max(len(cell) for cell in col) for col in columns]
-    formatter = " " * LOGGER_INDENT + "  ".join(
-        [f"{{:{cw}s}}" for cw in column_widths]
-    )
+    formatter = " " * LOGGER_INDENT + "  ".join([f"{{:{cw}s}}" for cw in column_widths])
 
     log.summary("\n===== Category Test Statistics =====")
     for row in table_data:

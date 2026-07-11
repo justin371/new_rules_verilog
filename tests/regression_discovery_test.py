@@ -10,6 +10,7 @@ from lib.regression import RegressionConfig
 
 
 class _Log:
+
     def debug(self, *_args, **_kwargs):
         pass
 
@@ -29,6 +30,7 @@ class _Log:
 
 
 class _Timer:
+
     def __init__(self, _log):
         pass
 
@@ -40,6 +42,7 @@ class _Timer:
 
 
 class RegressionDiscoveryTest(unittest.TestCase):
+
     def _options(self, proj_dir):
         return SimpleNamespace(
             proj_dir=str(proj_dir),
@@ -131,10 +134,8 @@ class RegressionDiscoveryTest(unittest.TestCase):
             if cmd[:2] == ["bazel", "cquery"]:
                 return 0, "//benches/soc_tb/tests:dma_single_transfer (abc1234)\n", ""
             if cmd[:2] == ["bazel", "build"]:
-                return 0, "", (
-                    "verilog_dv_test_cfg_info(@//benches/soc_tb/tests:dma_single_transfer, "
-                    "@//benches/soc_tb:soc_tb, ['smoke'], VCS)\n"
-                )
+                return 0, "", ("verilog_dv_test_cfg_info(@//benches/soc_tb/tests:dma_single_transfer, "
+                               "@//benches/soc_tb:soc_tb, ['smoke'], VCS)\n")
             raise AssertionError("Unexpected command: {!r}".format(cmd))
 
         config._run_command = fake_run_command
@@ -162,7 +163,9 @@ class RegressionDiscoveryTest(unittest.TestCase):
             config.tests_to_simulator,
         )
         self.assertEqual(
-            {"//benches/soc_tb:soc_tb": {"//benches/soc_tb/tests:dma_single_transfer": 0}},
+            {"//benches/soc_tb:soc_tb": {
+                "//benches/soc_tb/tests:dma_single_transfer": 0
+            }},
             config.all_vcomp,
         )
 
@@ -185,7 +188,8 @@ class RegressionDiscoveryTest(unittest.TestCase):
                     "name": "Repository rule @third_party_ip",
                     "dur": 1_250_000,
                 }],
-            }), encoding="utf-8")
+            }),
+                                          encoding="utf-8")
             return SimpleNamespace(returncode=0, stdout="ok", stderr="")
 
         run.side_effect = create_profile
@@ -213,9 +217,17 @@ class RegressionDiscoveryTest(unittest.TestCase):
         proj_dir = Path(tempfile.mkdtemp())
         results_dir = proj_dir / "results"
         for filename, payload in {
-            "all_vcomp.json": {"//benches/soc_tb:soc_tb": {"//benches/soc_tb/tests:dma_single_transfer": 1}},
-            "tests_to_tags.json": {"//benches/soc_tb/tests:dma_single_transfer": []},
-            "tests_to_simulator.json": {"//benches/soc_tb/tests:dma_single_transfer": "VCS"},
+                "all_vcomp.json": {
+                    "//benches/soc_tb:soc_tb": {
+                        "//benches/soc_tb/tests:dma_single_transfer": 1
+                    }
+                },
+                "tests_to_tags.json": {
+                    "//benches/soc_tb/tests:dma_single_transfer": []
+                },
+                "tests_to_simulator.json": {
+                    "//benches/soc_tb/tests:dma_single_transfer": "VCS"
+                },
         }.items():
             (proj_dir / filename).write_text(json.dumps(payload), encoding="utf-8")
 

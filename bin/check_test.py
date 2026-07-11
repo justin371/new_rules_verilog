@@ -15,19 +15,34 @@ from collections import deque
 # Error signatures from log files
 # Note: These are treated as Regex patterns.
 default_error_signatures = [
-    r'%E-', r'%F-', r'%W-', r'#E',
-    r"\*ERROR\*", r"\*FAILED\*",
-    r"SVA_CHECKER_ERROR", r"Assertion FAILURE", r"Solver failed",
+    r'%E-',
+    r'%F-',
+    r'%W-',
+    r'#E',
+    r"\*ERROR\*",
+    r"\*FAILED\*",
+    r"SVA_CHECKER_ERROR",
+    r"Assertion FAILURE",
+    r"Solver failed",
     r"VIRL_MEM_ERR",
-    r"Warning-.FCIBR", r"Warning-.FCPSBU", r"Warning-.STASKW_CO",
-    r"Warning-.SVART-NAFRLTS", r"Warning-.FCIELIE",
+    r"Warning-.FCIBR",
+    r"Warning-.FCPSBU",
+    r"Warning-.STASKW_CO",
+    r"Warning-.SVART-NAFRLTS",
+    r"Warning-.FCIELIE",
     r"Warning:.*AxiPC.sv",
-    r"Error!!", r"Error:", r"ERROR..FAILURE", r"FATAL..FAILURE",
+    r"Error!!",
+    r"Error:",
+    r"ERROR..FAILURE",
+    r"FATAL..FAILURE",
     r"Error-",
-    r"UVM_ERROR [@/]", r"UVM_FATAL [@/]",
-    r"UVM_ERROR .*[@/]", r"UVM_FATAL .*[@/]",
+    r"UVM_ERROR [@/]",
+    r"UVM_FATAL [@/]",
+    r"UVM_ERROR .*[@/]",
+    r"UVM_FATAL .*[@/]",
     r"WARNING.FAILURE",
-    r" \*E,", r" \*F,",
+    r" \*E,",
+    r" \*F,",
     r"VIRL_MEM_WARNING",
     r": Assertion .* failed\.",
     r"UVM_WARNING .*uvm_reg_map.*RegModel.*In map .*overlaps with address of existing register",
@@ -42,10 +57,7 @@ default_error_signatures = [
 
 # Signatures indicating a successful test completion
 finish_signatures = [
-    r"#I Final Report",
-    r"finish at simulation time",
-    r"Simulation complete via",
-    r"--- UVM Report Summary ---"
+    r"#I Final Report", r"finish at simulation time", r"Simulation complete via", r"--- UVM Report Summary ---"
 ]
 
 # Compile static regexes once
@@ -58,16 +70,18 @@ disable_regex = re.compile(r".*TEST_CHECK_DISABLE: (.*)")
 err_regex = None
 active_signatures = list(default_error_signatures)
 
+
 def compile_error_regex():
     """Compiles the list of error signatures into a single regex object."""
     global err_regex
     if not active_signatures:
         # Match nothing if list is empty
-        err_regex = re.compile(r"(?!x)x") 
+        err_regex = re.compile(r"(?!x)x")
     else:
         # Use non-capturing groups for performance
         pattern = r"(?:" + ")|(?:".join(active_signatures) + r")"
         err_regex = re.compile(pattern)
+
 
 def update_signatures(line):
     """
@@ -83,7 +97,7 @@ def update_signatures(line):
                 active_signatures.append(new_sig)
                 compile_error_regex()
                 return True
-                
+
     elif "TEST_CHECK_DISABLE" in line:
         match = disable_regex.match(line)
         if match:
@@ -92,8 +106,9 @@ def update_signatures(line):
                 active_signatures.remove(rem_sig)
                 compile_error_regex()
                 return True
-                
+
     return False
+
 
 def get_file_tail(filepath, n_lines=25):
     """Returns the last n_lines of a file using a deque."""
@@ -106,6 +121,7 @@ def get_file_tail(filepath, n_lines=25):
 
 def scan_static_log(filepath, error_limit):
     """Scan logs without dynamic signature directives using mmap."""
+
     def decode_line(line):
         return line.decode('utf-8', errors='replace').replace('\r\n', '\n')
 
@@ -155,22 +171,24 @@ def scan_static_log(filepath, error_limit):
             found_finish = any(data.find(signature.encode('utf-8')) != -1 for signature in finish_signatures)
             return error_lines, seed_lines, run_time_lines, found_finish
 
+
 def main():
     # 1. Initialize Regex
     compile_error_regex()
-    
+
     # 2. Parse Arguments
     parser = argparse.ArgumentParser(description="Check a simulation logfile for errors.")
     parser.add_argument("logfile", help="Logfile to parse")
-    parser.add_argument("--file-size-limit", type=float, default=0,
+    parser.add_argument("--file-size-limit",
+                        type=float,
+                        default=0,
                         help='Maximum logfile size (MB). Default 0 (no limit)')
-    parser.add_argument("--error-limit", type=int, default=25, 
-                        help='Stop parsing logfile at this number of errors')
+    parser.add_argument("--error-limit", type=int, default=25, help='Stop parsing logfile at this number of errors')
     options = parser.parse_args()
 
     logfile = options.logfile
     output_base = os.path.basename(logfile)
-    
+
     # 3. Check File Size (MB)
     if options.file_size_limit > 0:
         size_mb = os.path.getsize(logfile) / (1024 * 1024.0)
@@ -223,7 +241,7 @@ def main():
             err_log.writelines(run_time_lines)
             err_log.write('******Did not find finish encountered!!!\n\n')
             err_log.write(f'{platform.node()}\n')
-            
+
             # Use Python to get tail instead of subprocess (faster/safer)
             tail_lines = get_file_tail(logfile, 25)
             err_log.writelines(tail_lines)
@@ -237,6 +255,7 @@ def main():
             pass_log.writelines(seed_lines)
             pass_log.writelines(run_time_lines)
         sys.exit(0)
+
 
 if __name__ == '__main__':
     main()

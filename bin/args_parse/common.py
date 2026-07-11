@@ -211,10 +211,7 @@ def add_flow_control_arguments(parser):
                         default=False,
                         action='store_true',
                         help='skip bazel build, can not use if any BUILD changes')
-    gflowc.add_argument('--report',
-                        default=False,
-                        action='store_true',
-                        help='report regression result, default is No')
+    gflowc.add_argument('--report', default=False, action='store_true', help='report regression result, default is No')
 
 
 def add_basic_arguments(parser):

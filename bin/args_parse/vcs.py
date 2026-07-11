@@ -5,10 +5,7 @@ from lib import parser_actions
 
 def add_vcs_arguments(parser):
     gvcs = parser.add_argument_group("VCS arguments")
-    gvcs.add_argument('--gui',
-                      default=False,
-                      action='store_true',
-                      help='Run a single VCS simulation in the Verdi GUI.')
+    gvcs.add_argument('--gui', default=False, action='store_true', help='Run a single VCS simulation in the Verdi GUI.')
     gvcs.add_argument('--cm',
                       action=parser_actions.CMAction,
                       help=f'Enable Code Coverage for vcs only.\n{parser_actions.CMAction.format_options(indent=0)}')
@@ -39,7 +36,7 @@ def add_vcs_arguments(parser):
                       type=str,
                       default=None,
                       help='Override the command prefix used to launch VCS, simv, and Verdi. '
-                           'Defaults to RV_VCS_RUNNER or "runmod vcs --".')
+                      'Defaults to RV_VCS_RUNNER or "runmod vcs --".')
     gvcs.add_argument('--dtl',
                       default=False,
                       action='store_true',
@@ -56,14 +53,8 @@ def add_vcs_arguments(parser):
                       default=False,
                       action='store_true',
                       help='Add VCS compile-time -xprop=mmsopt.')
-    gvcs.add_argument('--vcs-xprop-banner',
-                      default=False,
-                      action='store_true',
-                      help='Add VCS runtime -xprop=banner.')
-    gvcs.add_argument('--vcs-xprop-report',
-                      default=False,
-                      action='store_true',
-                      help='Add VCS runtime -report=xprop.')
+    gvcs.add_argument('--vcs-xprop-banner', default=False, action='store_true', help='Add VCS runtime -xprop=banner.')
+    gvcs.add_argument('--vcs-xprop-report', default=False, action='store_true', help='Add VCS runtime -report=xprop.')
     gvcs.add_argument('--vso',
                       default=False,
                       action='store_true',
@@ -80,10 +71,11 @@ def add_vcs_arguments(parser):
                       type=str,
                       default=None,
                       help='Override the VSO.ai buildname used for VCS compile metadata.')
-    gvcs.add_argument('--vso-target-metric',
-                      type=str,
-                      default=None,
-                      help='Override the VSO.ai target metric list used during init (for example: line,fsm,tgl,assert).')
+    gvcs.add_argument(
+        '--vso-target-metric',
+        type=str,
+        default=None,
+        help='Override the VSO.ai target metric list used during init (for example: line,fsm,tgl,assert).')
 
 
 def validate_vcs_switches_for_xcelium(options, parser):
@@ -127,54 +119,47 @@ def validate_vcs_switches_for_xcelium(options, parser):
     if options.vso_target_metric is not None:
         vcs_only_switches.append('--vso-target-metric')
     if vcs_only_switches:
-        parser.error(
-            "The following switches are VCS-only and cannot be used with Xcelium: {}. "
-            "Stopping before Bazel starts.".format(", ".join(vcs_only_switches)))
+        parser.error("The following switches are VCS-only and cannot be used with Xcelium: {}. "
+                     "Stopping before Bazel starts.".format(", ".join(vcs_only_switches)))
 
 
 def validate_vcs_runtime_options(options, parser):
     if any([
-        options.vcs_cm_line is not None,
-        options.vcs_cm_report is not None,
-        options.vcs_cm_hier is not None,
+            options.vcs_cm_line is not None,
+            options.vcs_cm_report is not None,
+            options.vcs_cm_hier is not None,
     ]) and not options.cm:
-        parser.error(
-            "VCS coverage detail switches require '--cm'. "
-            "Stopping before Bazel starts.")
+        parser.error("VCS coverage detail switches require '--cm'. "
+                     "Stopping before Bazel starts.")
     if options.vcs_cm_line is not None and 'line' not in options.cm and 'A' not in options.cm:
-        parser.error(
-            "--vcs-cm-line requires line coverage in '--cm' (for example '--cm line' or '--cm A'). "
-            "Stopping before Bazel starts.")
+        parser.error("--vcs-cm-line requires line coverage in '--cm' (for example '--cm line' or '--cm A'). "
+                     "Stopping before Bazel starts.")
     if options.vcs_cm_report is not None and 'line' not in options.cm and 'A' not in options.cm:
-        parser.error(
-            "--vcs-cm-report=svpackages requires line coverage in '--cm' "
-            "(for example '--cm line' or '--cm A'). Stopping before Bazel starts.")
+        parser.error("--vcs-cm-report=svpackages requires line coverage in '--cm' "
+                     "(for example '--cm line' or '--cm A'). Stopping before Bazel starts.")
     if options.vcs_cm_hier is not None and not os.path.exists(options.vcs_cm_hier):
-        parser.error(
-            "The specified VCS coverage hierarchy file does not exist: {}. "
-            "Stopping before Bazel starts.".format(options.vcs_cm_hier))
+        parser.error("The specified VCS coverage hierarchy file does not exist: {}. "
+                     "Stopping before Bazel starts.".format(options.vcs_cm_hier))
     if not options.xprop and any([
-        options.vcs_xprop_flowctrl,
-        options.vcs_xprop_mmsopt,
-        options.vcs_xprop_banner,
-        options.vcs_xprop_report,
+            options.vcs_xprop_flowctrl,
+            options.vcs_xprop_mmsopt,
+            options.vcs_xprop_banner,
+            options.vcs_xprop_report,
     ]):
-        parser.error(
-            "VCS xprop helper switches require XPROP to be enabled. "
-            "Do not combine them with '--xprop D'. Stopping before Bazel starts.")
+        parser.error("VCS xprop helper switches require XPROP to be enabled. "
+                     "Do not combine them with '--xprop D'. Stopping before Bazel starts.")
     if options.fgp is not None and options.fgp < 1:
         parser.error("--fgp must be a positive integer thread count. Stopping before Bazel starts.")
     if options.vcs_runner is not None and not options.vcs_runner.strip():
         parser.error("--vcs-runner must not be empty. Stopping before Bazel starts.")
     if any([
-        options.vso_workdir is not None,
-        options.vso_dbdir is not None,
-        options.vso_buildname is not None,
-        options.vso_target_metric is not None,
+            options.vso_workdir is not None,
+            options.vso_dbdir is not None,
+            options.vso_buildname is not None,
+            options.vso_target_metric is not None,
     ]) and not options.vso:
-        parser.error(
-            "VSO.ai detail switches require '--vso'. "
-            "Stopping before Bazel starts.")
+        parser.error("VSO.ai detail switches require '--vso'. "
+                     "Stopping before Bazel starts.")
     if options.vso_workdir is not None and not options.vso_workdir.strip():
         parser.error("--vso-workdir must not be empty. Stopping before Bazel starts.")
     if options.vso_dbdir is not None and not options.vso_dbdir.strip():
@@ -184,21 +169,17 @@ def validate_vcs_runtime_options(options, parser):
     if options.vso_target_metric is not None and not options.vso_target_metric.strip():
         parser.error("--vso-target-metric must not be empty. Stopping before Bazel starts.")
     if options.vso and options.vso_target_metric is None and not options.cm:
-        parser.error(
-            "VSO.ai init requires coverage targeting information. "
-            "Please pass '--cm ...' or '--vso-target-metric ...'. Stopping before Bazel starts."
-        )
+        parser.error("VSO.ai init requires coverage targeting information. "
+                     "Please pass '--cm ...' or '--vso-target-metric ...'. Stopping before Bazel starts.")
     if options.vso and options.vso_target_metric is None and options.cm is not None:
         supported_vso_metrics = {'line', 'fsm', 'tgl', 'assert', 'A'}
         if not any(token in supported_vso_metrics for token in options.cm.split('+')):
-            parser.error(
-                "Could not derive a VSO.ai target metric from '--cm {}'. "
-                "Please pass '--vso-target-metric ...' explicitly. Stopping before Bazel starts.".format(options.cm)
-            )
+            parser.error("Could not derive a VSO.ai target metric from '--cm {}'. "
+                         "Please pass '--vso-target-metric ...' explicitly. Stopping before Bazel starts.".format(
+                             options.cm))
     if options.dtl and options.gui:
-        parser.error(
-            "--dtl currently supports batch/UCLI flow only; --gui is not yet supported. "
-            "Stopping before Bazel starts.")
+        parser.error("--dtl currently supports batch/UCLI flow only; --gui is not yet supported. "
+                     "Stopping before Bazel starts.")
     if options.waves is not None:
         if options.wave_type is None:
             options.wave_type = 'fsdb'

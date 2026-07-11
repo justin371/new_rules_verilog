@@ -33,12 +33,12 @@ class RegressionConfig():
         self.options = options
         self.log = log
 
-        self.tests_to_tags = {}  # Mapping of tests to their tags
-        self.tests_to_simulator = {}  # Mapping of tests to their simulator
-        self.max_bench_name_length = 20  # Max length for bench name formatting
-        self.max_test_name_length = 20   # Max length for test name formatting
+        self.tests_to_tags = {} # Mapping of tests to their tags
+        self.tests_to_simulator = {} # Mapping of tests to their simulator
+        self.max_bench_name_length = 20 # Max length for bench name formatting
+        self.max_test_name_length = 20 # Max length for test name formatting
 
-        self.suppress_output = False  # Flag to suppress test output
+        self.suppress_output = False # Flag to suppress test output
 
         self.proj_dir = self.options.proj_dir
         self.regression_dir = rv_utils.calc_simresults_location(self.proj_dir)
@@ -47,11 +47,11 @@ class RegressionConfig():
         if not os.path.exists(self.regression_dir):
             os.mkdir(self.regression_dir)
 
-        self.invocation_dir = os.getcwd()  # Directory where regression was started
+        self.invocation_dir = os.getcwd() # Directory where regression was started
         self.profile_events = []
         self._bazel_profile_index = 0
-        self.deferred_messages = []  # Messages to be printed at completion
-        self.current_time = 0        # Timestamp for regression
+        self.deferred_messages = [] # Messages to be printed at completion
+        self.current_time = 0 # Timestamp for regression
 
         # Subsystem configuration (with tag associations)
         self.category_total_cases = {}
@@ -148,17 +148,10 @@ class RegressionConfig():
         :param sim: Simulator name
         :return: Formatted test name string
         """
-        max_sim_len = 5  # Max length for simulator abbreviation
+        max_sim_len = 5 # Max length for simulator abbreviation
         sim_short = sim[:max_sim_len]
-        return "{:{}s}  {:{}s}  {:-4d}  {:{}s}".format(
-            b,
-            self.max_bench_name_length,
-            t,
-            self.max_test_name_length,
-            i,
-            sim_short,
-            max_sim_len
-        )
+        return "{:{}s}  {:{}s}  {:-4d}  {:{}s}".format(b, self.max_bench_name_length, t, self.max_test_name_length, i,
+                                                       sim_short, max_sim_len)
 
     def dict_to_json(self, d, j):
         """
@@ -217,10 +210,7 @@ class RegressionConfig():
             return
 
         for root, dirs, files in os.walk(self.proj_dir):
-            dirs[:] = [
-                directory for directory in dirs
-                if directory != ".git" and not directory.startswith("bazel-")
-            ]
+            dirs[:] = [directory for directory in dirs if directory != ".git" and not directory.startswith("bazel-")]
             for filename in files:
                 if filename in ("BUILD", "BUILD.bazel") or filename.endswith(".bzl"):
                     yield os.path.join(root, filename)
@@ -278,8 +268,7 @@ class RegressionConfig():
             'filter(":{regex}$", kind(dv_tb, //{benches}/...))'.format(
                 regex=self._bench_glob_to_regex(bench_glob),
                 benches=BENCHES_REL_DIR,
-            )
-            for bench_glob in bench_globs
+            ) for bench_glob in bench_globs
         ]
         return " union ".join("({})".format(query) for query in queries)
 
@@ -355,14 +344,11 @@ class RegressionConfig():
             self.tests_to_simulator = {}
             return
 
-        combined_test_query = " union ".join(
-            "({})".format(self._build_test_cfg_query(vcomp)) for vcomp in sorted(self.all_vcomp)
-        )
+        combined_test_query = " union ".join("({})".format(self._build_test_cfg_query(vcomp))
+                                             for vcomp in sorted(self.all_vcomp))
 
         dtp.reset()
-        returncode, stdout, stderr = self._run_command(
-            ["bazel", "cquery", combined_test_query],
-        )
+        returncode, stdout, stderr = self._run_command(["bazel", "cquery", combined_test_query], )
         dtp.stop_and_print()
         if returncode:
             self.log.critical("bazel test discovery failed:\n%s", stderr)
@@ -372,15 +358,13 @@ class RegressionConfig():
         text = []
         if query_results:
             dtp.reset()
-            returncode, stdout, stderr = self._run_command(
-                [
-                    "bazel",
-                    "build",
-                    *query_results,
-                    "--aspects",
-                    "@rules_verilog//verilog/private:dv.bzl%verilog_dv_test_cfg_info_aspect",
-                ]
-            )
+            returncode, stdout, stderr = self._run_command([
+                "bazel",
+                "build",
+                *query_results,
+                "--aspects",
+                "@rules_verilog//verilog/private:dv.bzl%verilog_dv_test_cfg_info_aspect",
+            ])
             dtp.stop_and_print()
             if returncode:
                 self.log.critical("bazel test discovery failed:\n%s", stderr)
@@ -395,10 +379,8 @@ class RegressionConfig():
         ]
         ttv = [match for match in ttv if match]
 
-        matching_tests = [
-            (mt.group('test'), mt.group('vcomp'), ast.literal_eval(mt.group('tags')), mt.group('simulator'))
-            for mt in ttv
-        ]
+        matching_tests = [(mt.group('test'), mt.group('vcomp'), ast.literal_eval(mt.group('tags')),
+                           mt.group('simulator')) for mt in ttv]
         self.tests_to_tags = {test_name: tags for test_name, _, tags, _ in matching_tests}
         self.tests_to_simulator = {test_name: simulator for test_name, _, _, simulator in matching_tests}
         for test_name, vcomp, _, _ in matching_tests:

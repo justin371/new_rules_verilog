@@ -104,10 +104,8 @@ class VcsSimulator(SimulatorInterface):
             return self.options.vso_target_metric
 
         if not self.options.cm:
-            raise ValueError(
-                "VSO.ai init requires coverage targeting information. "
-                "Please pass '--cm ...' or '--vso-target-metric ...'."
-            )
+            raise ValueError("VSO.ai init requires coverage targeting information. "
+                             "Please pass '--cm ...' or '--vso-target-metric ...'.")
 
         tokens = set(self.options.cm.split('+'))
         ordered_metrics = ['line', 'fsm', 'tgl', 'assert']
@@ -116,18 +114,14 @@ class VcsSimulator(SimulatorInterface):
 
         metrics = [metric for metric in ordered_metrics if metric in tokens]
         if not metrics:
-            raise ValueError(
-                "Could not derive a VSO.ai target metric from '--cm {}'. "
-                "Please pass '--vso-target-metric ...' explicitly.".format(self.options.cm)
-            )
+            raise ValueError("Could not derive a VSO.ai target metric from '--cm {}'. "
+                             "Please pass '--vso-target-metric ...' explicitly.".format(self.options.cm))
         return ",".join(metrics)
 
     def _run_vso_driver(self, args, log_path, step_name):
         driver_path = self._get_vso_driver_path()
         with open(log_path, 'w', encoding='utf-8') as log_fp:
-            log_fp.write("Command: {}\n\n".format(
-                " ".join(shlex.quote(part) for part in [driver_path] + args)
-            ))
+            log_fp.write("Command: {}\n\n".format(" ".join(shlex.quote(part) for part in [driver_path] + args)))
             result = subprocess.run(
                 [driver_path] + args,
                 cwd=self.rcfg.regression_dir,
@@ -137,11 +131,8 @@ class VcsSimulator(SimulatorInterface):
                 text=True,
             )
         if result.returncode != 0:
-            raise RuntimeError(
-                "VSO.ai {} failed with return code {}. See {}.".format(
-                    step_name, result.returncode, log_path
-                )
-            )
+            raise RuntimeError("VSO.ai {} failed with return code {}. See {}.".format(
+                step_name, result.returncode, log_path))
 
     def write_vso_regression_config(self, all_vcomp):
         config_path = os.path.join(self._get_vso_artifact_dir(), "vso_regr_config.yaml")
@@ -217,11 +208,16 @@ class VcsSimulator(SimulatorInterface):
         simv_path_list = self.write_vso_simv_path_list(vcomp_jobs)
         args = [
             "--init",
-            "--dbdir", dbdir,
-            "--workdir", workdir,
-            "--regr_config", config_path,
-            "--target_metric", self.get_vso_target_metric(),
-            "--simv_path_list", simv_path_list,
+            "--dbdir",
+            dbdir,
+            "--workdir",
+            workdir,
+            "--regr_config",
+            config_path,
+            "--target_metric",
+            self.get_vso_target_metric(),
+            "--simv_path_list",
+            simv_path_list,
         ]
         log_path = os.path.join(self._get_vso_artifact_dir(), "vso_init.log")
         return args, log_path
@@ -230,9 +226,12 @@ class VcsSimulator(SimulatorInterface):
         workdir = self._get_vso_workdir()
         os.makedirs(workdir, exist_ok=True)
         args = [
-            "--ask", "all",
-            "--workdir", workdir,
-            "--fmt", "csv",
+            "--ask",
+            "all",
+            "--workdir",
+            workdir,
+            "--fmt",
+            "csv",
         ]
         log_path = os.path.join(self._get_vso_artifact_dir(), "vso_ask.log")
         return args, log_path
@@ -270,9 +269,7 @@ class VcsSimulator(SimulatorInterface):
                     continue
                 key = (record["BUILD"], record["TEST"])
                 if key not in by_key:
-                    raise RuntimeError(
-                        "VSO.ai ask returned unknown build/test pair {} from {}.".format(key, log_path)
-                    )
+                    raise RuntimeError("VSO.ai ask returned unknown build/test pair {} from {}.".format(key, log_path))
                 icfg, _ = by_key[key]
                 icfg.vso_assignments.append({
                     "run_id": record.get("RUN_ID"),
@@ -305,8 +302,10 @@ class VcsSimulator(SimulatorInterface):
         os.makedirs(workdir, exist_ok=True)
         run_id = getattr(test_job, "vso_run_id", None) or test_job.simname
         args = [
-            "--tell", run_id,
-            "--workdir", workdir,
+            "--tell",
+            run_id,
+            "--workdir",
+            workdir,
         ]
         if test_job.jobstatus != test_job.jobstatus.PASSED:
             args.extend(["--failed", self.get_vso_failure_signature(test_job)])
@@ -321,8 +320,10 @@ class VcsSimulator(SimulatorInterface):
         args = [
             "--finalize",
             "--merge",
-            "--workdir", workdir,
-            "--dbdir", dbdir,
+            "--workdir",
+            workdir,
+            "--dbdir",
+            dbdir,
         ]
         fails_csv_path, row_count = self.write_vso_fails_csv(all_vcomp)
         if row_count > 0:
@@ -484,13 +485,14 @@ class VcsSimulator(SimulatorInterface):
         merge_template = self.env.get_template('vcs_cov_merge_template.sh.j2')
 
         with open(merge_sh, 'w') as filep:
-            filep.write(merge_template.render(
-                cov_db_path=cov_db_path,
-                merged_db_path=merged_db_path,
-                report_dir=report_dir,
-                urg_command=self.get_tool_command("urg"),
-                verdi_command=self.get_tool_command("verdi"),
-            ))
+            filep.write(
+                merge_template.render(
+                    cov_db_path=cov_db_path,
+                    merged_db_path=merged_db_path,
+                    report_dir=report_dir,
+                    urg_command=self.get_tool_command("urg"),
+                    verdi_command=self.get_tool_command("verdi"),
+                ))
         st = os.stat(merge_sh)
         os.chmod(merge_sh, st.st_mode | stat.S_IEXEC)
         vcomp_job.coverage_merge_script = merge_sh
@@ -518,8 +520,7 @@ class VcsSimulator(SimulatorInterface):
         simv_path = os.path.join(vcomp_job.job_dir, "simv")
         if not os.path.exists(simv_path):
             raise FileNotFoundError(
-                "VCS --no-compile requires an existing elaborated executable at '{}'".format(simv_path)
-            )
+                "VCS --no-compile requires an existing elaborated executable at '{}'".format(simv_path))
 
     # --- Method to implement for generating the simulation command ---
     def get_sim_command(self, test_job, sim_opts, vcomp_job_dir, log_path, user_args_list=None):

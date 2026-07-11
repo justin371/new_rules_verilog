@@ -6,6 +6,7 @@ from lib import sim_artifacts
 
 
 class SimArtifactsTest(unittest.TestCase):
+
     def test_runfiles_path_is_stable_from_per_test_directory(self):
         root = "/tmp/build/tb.runfiles/__main__"
         path = root + "/external/vendor/ip.f"

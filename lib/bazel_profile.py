@@ -3,7 +3,6 @@
 import json
 import re
 
-
 _REPOSITORY_RE = re.compile(r"(?:@@?|external[/\\])([A-Za-z0-9._+~-]+)")
 _REPOSITORY_NAME_RE = re.compile(r"repository(?: rule)?[=: ]+([A-Za-z0-9._+~-]+)", re.IGNORECASE)
 
@@ -34,10 +33,8 @@ def repository_timings(profile_path):
             continue
 
         args = event.get("args", {})
-        searchable = " ".join(
-            [str(event.get("cat", "")), str(event.get("name", ""))]
-            + ["{}={}".format(key, value) for key, value in args.items()]
-        )
+        searchable = " ".join([str(event.get("cat", "")), str(event.get("name", ""))] +
+                              ["{}={}".format(key, value) for key, value in args.items()])
         if "repos" not in searchable.lower() and "external/" not in searchable:
             continue
 

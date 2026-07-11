@@ -39,7 +39,7 @@ class RegressionReport():
 
     def __init__(self, rcfg, template_env, webroot_dir):
         self.rcfg = rcfg
-        self.env = template_env  # template loader
+        self.env = template_env # template loader
         self.webroot_dir = webroot_dir
 
         # common path
@@ -49,7 +49,8 @@ class RegressionReport():
         # template filep load
         self.HOME_TEMPLATE = self.env.get_template("regression_report_templates/home_template.html.j2")
         self.BENCHS_TEMPLATE = self.env.get_template("regression_report_templates/benchs_template.html.j2")
-        self.REGRESSION_REPORT_TEMPLATE = self.env.get_template('regression_report_templates/regression_report_template.html.j2')
+        self.REGRESSION_REPORT_TEMPLATE = self.env.get_template(
+            'regression_report_templates/regression_report_template.html.j2')
         self.LOGS_TEMPLATE = self.env.get_template('regression_report_templates/logs_template.html.j2')
 
         # result info
@@ -104,10 +105,11 @@ class RegressionReport():
             failed = sum([int(entry[5]) for entry in t if entry[5] != ""])
             passed -= 1 # skip compile
             total = passed + skipped + failed
-            self.trd[b].append(["Total", "", "",
-                                "" if passed == 0 else str(passed), "" if skipped == 0 else str(skipped),
-                                "" if failed == 0 else str(failed), "" if total == 0 else str(total),
-                                f"{passed / total * 100:.2f}" if total else "0.00", "", ""])
+            self.trd[b].append([
+                "Total", "", "", "" if passed == 0 else str(passed), "" if skipped == 0 else str(skipped),
+                "" if failed == 0 else str(failed), "" if total == 0 else str(total),
+                f"{passed / total * 100:.2f}" if total else "0.00", "", ""
+            ])
 
     def process_category_stats(self):
         """
@@ -176,9 +178,7 @@ class RegressionReport():
         #    json.dump(self.project_info, f, ensure_ascii=False, indent=4)
 
         # Render
-        rendered_html = self.HOME_TEMPLATE.render(
-            project=self.project_info,
-        )
+        rendered_html = self.HOME_TEMPLATE.render(project=self.project_info, )
 
         # Write html
         with open(html_file_path, 'w', encoding='utf-8') as f:
@@ -294,8 +294,8 @@ class RegressionReport():
                         log_files = regressions[removed_key]['logs']
                         for log_file in log_files:
                             for log in log_file:
-                                if os.path.exists(log):  # files exist
-                                    os.remove(log)  # delete files
+                                if os.path.exists(log): # files exist
+                                    os.remove(log) # delete files
                         # Update regressions
                         del regressions[removed_key]
             else:
@@ -316,8 +316,7 @@ class RegressionReport():
                 project=self.project_info,
                 cc_info=c['cc'] if c != {} else {},
                 cf_info=c['cf'] if c != {} else {},
-                processed_category_stats=self.processed_category_stats
-            )
+                processed_category_stats=self.processed_category_stats)
 
             # Write html
             with open(html_file_path, 'w', encoding='utf-8') as f:

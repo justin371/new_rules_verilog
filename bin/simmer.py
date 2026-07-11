@@ -56,6 +56,7 @@ report_jinja2_env = regression_report.create_template_environment(os.path.join(d
 RERUN_TEMPLATE = jinja2_env.get_template('rerun_template.sh.j2')
 RUN_WAVE_TEMPLATE = jinja2_env.get_template('run_waves_template.sh.j2')
 
+
 def get_bazel_bin():
     result = subprocess.run(["bazel", "info", "bazel-bin"], capture_output=True, text=True)
     if result.returncode != 0:
@@ -76,12 +77,10 @@ def load_warning_waivers(path):
         waiver_patterns = []
         for item in tree.body.elts:
             if isinstance(item, ast.Call) and isinstance(item.func, ast.Attribute):
-                is_re_compile = (
-                    isinstance(item.func.value, ast.Name) and
-                    item.func.value.id == 're' and
-                    item.func.attr == 'compile'
-                )
-                has_string_arg = item.args and isinstance(item.args[0], ast.Constant) and isinstance(item.args[0].value, str)
+                is_re_compile = (isinstance(item.func.value, ast.Name) and item.func.value.id == 're'
+                                 and item.func.attr == 'compile')
+                has_string_arg = item.args and isinstance(item.args[0], ast.Constant) and isinstance(
+                    item.args[0].value, str)
                 if is_re_compile and has_string_arg:
                     waiver_patterns.append(item.args[0].value)
                     continue
@@ -187,11 +186,7 @@ def resolve_run_simulator(rcfg, options):
 
 
 def get_active_job_limit(options, rcfg):
-    total_tests = sum(
-        icfg.target
-        for _, (icfgs, _) in rcfg.all_vcomp.items()
-        for icfg in icfgs
-    )
+    total_tests = sum(icfg.target for _, (icfgs, _) in rcfg.all_vcomp.items() for icfg in icfgs)
     if total_tests <= 1:
         return 1
 
@@ -406,11 +401,9 @@ class VCompJob(Job):
                             warnings_found += 1
                             warning_line_stripped = warning_line.strip()
                             if warning_line_stripped and not any(
-                                waiver.search(warning_line_stripped) for waiver in warning_waivers
-                            ):
+                                    waiver.search(warning_line_stripped) for waiver in warning_waivers):
                                 unwaived_count += 1
-                                log.warning("%s had unwaived warning: %s", self,
-                                            warning_line_stripped)
+                                log.warning("%s had unwaived warning: %s", self, warning_line_stripped)
                                 if first_unwaived_warning is None:
                                     first_unwaived_warning = warning_line_stripped
                                 if self.jobstatus == JobStatus.PASSED:
@@ -481,9 +474,8 @@ class VsoInitJob(Job):
         self.log_path = log_path
         driver_path = self.simulator._get_vso_driver_path()
         command_parts = [driver_path] + args
-        self.main_cmdline = " ".join(shlex.quote(part) for part in command_parts) + " > {} 2>&1".format(
-            shlex.quote(log_path)
-        )
+        self.main_cmdline = " ".join(shlex.quote(part)
+                                     for part in command_parts) + " > {} 2>&1".format(shlex.quote(log_path))
         self.log.debug(" > %s", self.main_cmdline)
 
     def post_run(self):
@@ -514,9 +506,8 @@ class VsoAskJob(Job):
         self.log_path = log_path
         driver_path = self.simulator._get_vso_driver_path()
         command_parts = [driver_path] + args
-        self.main_cmdline = " ".join(shlex.quote(part) for part in command_parts) + " > {} 2>&1".format(
-            shlex.quote(log_path)
-        )
+        self.main_cmdline = " ".join(shlex.quote(part)
+                                     for part in command_parts) + " > {} 2>&1".format(shlex.quote(log_path))
         self.log.debug(" > %s", self.main_cmdline)
 
     def post_run(self):
@@ -620,9 +611,8 @@ class TestJob(Job):
             try:
                 seed = int(str(self.vso_seed), 0)
             except ValueError as exc:
-                raise RuntimeError(
-                    "VSO.ai returned a non-integer seed {!r} for {}.".format(self.vso_seed, self.target)
-                ) from exc
+                raise RuntimeError("VSO.ai returned a non-integer seed {!r} for {}.".format(self.vso_seed,
+                                                                                            self.target)) from exc
         elif seed is None:
             seed = random.randint(0, (1 << 31) - 1) # xrun treats the seed as a signed integer
         self.seed = seed
@@ -652,12 +642,11 @@ class TestJob(Job):
         runtime_options = self.btcj.dynamic_args(self.target)
         dynamic_simulator = runtime_options['simulator']
         if dynamic_simulator != self.simulator.get_name().upper():
-            raise ValueError(
-                "Test cfg {} resolved simulator {} but simmer is running with {}.".format(
-                    self.target,
-                    dynamic_simulator,
-                    self.simulator.get_name().upper(),
-                ))
+            raise ValueError("Test cfg {} resolved simulator {} but simmer is running with {}.".format(
+                self.target,
+                dynamic_simulator,
+                self.simulator.get_name().upper(),
+            ))
         self.timeout = resolve_test_timeout_hours(
             runtime_options,
             options.timeout,
@@ -759,8 +748,7 @@ class TestJob(Job):
         bazel_runtime_args_file = self.vcomper.bazel_runtime_args # Get path from vcomper
         if os.path.exists(bazel_runtime_args_file):
             sim_opts += " -f {} ".format(
-                sim_artifacts.runfiles_path(bazel_runtime_args_file, self.vcomper.bazel_runfiles_main)
-            )
+                sim_artifacts.runfiles_path(bazel_runtime_args_file, self.vcomper.bazel_runfiles_main))
         else:
             log.warning(f"Runtime args file not found: {bazel_runtime_args_file}")
 
@@ -829,11 +817,13 @@ class TestJob(Job):
         log.debug('Created %s', testscript_path)
 
         # Render rerun.sh
-        sim_artifacts.write_executable_script(rerun_script_path, rerun_template.render(
-            rerun_target=shlex.quote(self.target),
-            seed=seed,
-            reproduce_args=shlex.join(options.reproduce_args),
-        ))
+        sim_artifacts.write_executable_script(
+            rerun_script_path,
+            rerun_template.render(
+                rerun_target=shlex.quote(self.target),
+                seed=seed,
+                reproduce_args=shlex.join(options.reproduce_args),
+            ))
         log.debug('Created %s', rerun_script_path)
 
         # Create a symlink back the vcomp directory for easy reference
@@ -1030,10 +1020,8 @@ def main(rcfg, options):
         rcfg.log.critical("VSO_HOME is not set. Please source the VSO/VCS environment before using --vso.")
         sys.exit(1)
     if options.vso and options.vso_buildname and len(rcfg.all_vcomp) > 1:
-        rcfg.log.critical(
-            "--vso-buildname can only be used when a single VCS build is selected. "
-            "Multiple builds would otherwise collapse into the same VSO buildname."
-        )
+        rcfg.log.critical("--vso-buildname can only be used when a single VCS build is selected. "
+                          "Multiple builds would otherwise collapse into the same VSO buildname.")
         sys.exit(1)
 
     for vcomp, test_list in rcfg.all_vcomp.items():
@@ -1159,8 +1147,7 @@ def main(rcfg, options):
         log.critical("Exiting due to keyboard interrupt")
 
     if options.vso and not options.no_run and vso_init_job is not None and vso_init_job.jobstatus.successful and (
-        vso_ask_job is None or vso_ask_job.jobstatus.successful
-    ):
+            vso_ask_job is None or vso_ask_job.jobstatus.successful):
         try:
             simulator.run_vso_finalize_merge(rcfg.all_vcomp)
         except Exception as exc:
@@ -1221,7 +1208,9 @@ def main(rcfg, options):
         #num_failed = sum(1 for j in test_jobs_list if j.jobstatus and not j.jobstatus.successful)
         #failures[bench] = num_failed
         if options.report:
-            log.info("Report at: http://dv-sh.rd.lgt.ai/regression_report/{0}/{1}".format(report_header['project_name'], bench.split(":")[1]))
+            log.info("Report at: http://dv-sh.rd.lgt.ai/regression_report/{0}/{1}".format(
+                report_header['project_name'],
+                bench.split(":")[1]))
 
     for message in getattr(rcfg, "deferred_messages", []):
         log.info(message)
@@ -1241,6 +1230,7 @@ def main(rcfg, options):
     else:
         log.info("All tests passed.")
         sys.exit(0)
+
 
 if __name__ == '__main__':
     options = parse_args(sys.argv[1:])
