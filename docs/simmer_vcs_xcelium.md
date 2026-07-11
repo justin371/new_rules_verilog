@@ -54,6 +54,10 @@ simmer -t <bench>:<test> --simulator VCS --no-compile
 simmer -t <bench>:<test> --simulator VCS --no-compile --no-bazel
 ```
 
+`--no-compile` validates a fingerprint of tracked/untracked source state, the
+rendered compile script and compile arguments. It fails before simulation when
+the existing compile output does not match the current inputs.
+
 Use `--recompile` to force a clean VCS compile.
 
 ## `verilog_dv_tb` attributes
@@ -159,7 +163,7 @@ disable, flush and close ordering.
 
 ## Xcelium defaults
 
-Xcelium behavior is unchanged:
+Xcelium batch defaults are:
 
 - default simulator remains XRUN
 - batch mode only
@@ -217,6 +221,11 @@ Run report generation only when the regression database is complete. Keep raw
 per-test coverage until the merge succeeds; merged databases and HTML reports
 can then be archived while per-test databases are removed according to project
 retention policy.
+
+Each run clears stale test coverage before execution. Failed-test databases are
+removed before merge, so the dashboard represents successful tests from the
+current regression rather than accumulated leftovers. Missing metrics are
+reported as `N/A`.
 
 ## Filelist paths
 

@@ -125,6 +125,12 @@ simmer -t 'sys_tb:*@10' --simulator XRUN --coverage A \
   --report --report-dir "$PWD/report-output"
 ```
 
+Configure coverage files on the matching testbench target: use `vcs_cm_hier`
+for VCS or `xcelium_covfile` for Xcelium, plus `dut_top`/`dut_instance` when the
+defaults do not match the design hierarchy. Failed tests and stale databases
+are excluded from the current-run coverage merge; unavailable metrics display
+as `N/A` rather than a false zero.
+
 The dashboard entry point and drill-down pages are written under:
 
 ```text
