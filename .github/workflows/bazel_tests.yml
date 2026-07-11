@@ -46,3 +46,26 @@ jobs:
 
       - name: check-generated-docs
         run: ./tests/doc_test.sh
+
+  redhat-smoke:
+    name: Red Hat-compatible smoke
+    runs-on: ubuntu-latest
+    container: rockylinux:9
+    env:
+      USE_BAZEL_VERSION: "7.7.1"
+    steps:
+      - name: install-system-dependencies
+        run: dnf install -y gcc gcc-c++ git gzip python3.12 tar unzip which zip
+
+      - name: checkout
+        uses: actions/checkout@v4
+
+      - name: install-bazelisk
+        uses: vsco/bazelisk-action@170327f90b7b6c4364a97741d6e64f888d76bcb5
+        with:
+          version: '1.7.5'
+          bazel-install-path: './.local/bin'
+          os: 'linux'
+
+      - name: run-redhat-smoke
+        run: ./tests/redhat_smoke.sh
