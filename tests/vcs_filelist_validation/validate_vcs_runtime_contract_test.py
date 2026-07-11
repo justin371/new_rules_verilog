@@ -324,10 +324,12 @@ class VcsRuntimeContractTest(unittest.TestCase):
     def test_xcelium_coverage_report_command_preserves_paths_with_spaces(self):
         options = parse_args(["--simulator", "XRUN", "--coverage", "A"])
         simulator = XceliumSimulator(options, DummyRegressionConfig(), None)
+        merged_coverage_dir = tempfile.mkdtemp(prefix="merged coverage ")
         job = SimpleNamespace(
             coverage_report_tcl="/tmp/path with spaces/imc_report.tcl",
             coverage_code_report="/tmp/code.txt",
             coverage_functional_report="/tmp/functional.txt",
+            merged_coverage_dir=merged_coverage_dir,
         )
         failed = SimpleNamespace(returncode=1, stderr="failed")
 
@@ -339,6 +341,17 @@ class VcsRuntimeContractTest(unittest.TestCase):
             capture_output=True,
             text=True,
         )
+        self.assertEqual({"sys_tb": {"cc": {}, "cf": {}}}, coverage)
+
+    def test_xcelium_missing_merged_coverage_returns_empty_metrics(self):
+        options = parse_args(["--simulator", "XRUN", "--coverage", "A"])
+        simulator = XceliumSimulator(options, DummyRegressionConfig(), None)
+        job = SimpleNamespace(coverage_report_tcl="/tmp/imc_report.tcl", merged_coverage_dir="/missing")
+
+        with mock.patch("lib.simulators.xcelium.subprocess.run") as run:
+            coverage = simulator.collect_coverage_data({"//pkg:sys_tb": job})
+
+        run.assert_not_called()
         self.assertEqual({"sys_tb": {"cc": {}, "cf": {}}}, coverage)
 
     def test_xcelium_coverage_and_mce_details_are_validated(self):
@@ -399,6 +412,15 @@ class VcsRuntimeContractTest(unittest.TestCase):
             capture_output=True,
             text=True,
         )
+
+    def test_vcs_failed_coverage_merge_does_not_abort_report_generation(self):
+        options = parse_args(["-t", "unit:test", "--simulator", "VCS", "--cm", "line"])
+        simulator = VcsSimulator(options, DummyRegressionConfig(), None)
+        vcomp = SimpleNamespace(coverage_merge_script="/tmp/unit_vcs_cov_merge.sh")
+
+        with mock.patch("lib.simulators.vcs.subprocess.run",
+                        return_value=SimpleNamespace(returncode=1, stdout="", stderr="failed")):
+            simulator.run_report_coverage_merge({"//unit:tb": vcomp})
 
     def test_vcs_coverage_uses_one_vdb_path_for_simulation_and_merge(self):
         options = parse_args([

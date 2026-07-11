@@ -248,14 +248,22 @@ class XceliumSimulator(SimulatorInterface):
             return
         for vcomp in vcomp_jobs.values():
             log.info("Before merge: Vcomp {}.".format(vcomp))
-            merge_exec_tcl = os.path.join(vcomp.cov_work_dir, "merge_exec.tcl")
-            result = subprocess.run(
-                ["runmod", "xrun", "--", "imc", "-exec", merge_exec_tcl, "-verbose"],
-                capture_output=True,
-                text=True,
-            )
+            cov_work_dir = getattr(vcomp, "cov_work_dir", None)
+            if not cov_work_dir:
+                log.error("XRUN coverage merge skipped for %s: coverage work directory is unavailable", vcomp)
+                continue
+            merge_exec_tcl = os.path.join(cov_work_dir, "merge_exec.tcl")
+            try:
+                result = subprocess.run(
+                    ["runmod", "xrun", "--", "imc", "-exec", merge_exec_tcl, "-verbose"],
+                    capture_output=True,
+                    text=True,
+                )
+            except OSError as exc:
+                log.error("XRUN coverage merge could not start for %s: %s", vcomp, exc)
+                continue
             if result.returncode != 0:
-                raise RuntimeError("XRUN coverage merge failed:\n{}\n{}".format(result.stdout, result.stderr))
+                log.error("XRUN coverage merge failed for %s:\n%s\n%s", vcomp, result.stdout, result.stderr)
 
     def cleanup_test_coverage(self, test_job):
         path = getattr(test_job, "coverage_db_path", None)
@@ -267,11 +275,21 @@ class XceliumSimulator(SimulatorInterface):
         if not self.options.coverage:
             return {vcomp.split(":")[-1]: {"cc": {}, "cf": {}} for vcomp in vcomp_jobs}
         for vcomp, job in vcomp_jobs.items():
-            result = subprocess.run(
-                ["runmod", "xrun", "--", "imc", "-exec", job.coverage_report_tcl, "-verbose"],
-                capture_output=True,
-                text=True,
-            )
+            report_tcl = getattr(job, "coverage_report_tcl", None)
+            merged_coverage_dir = getattr(job, "merged_coverage_dir", None)
+            if not report_tcl or not merged_coverage_dir or not os.path.exists(merged_coverage_dir):
+                coverage[vcomp.split(":")[-1]] = {"cc": {}, "cf": {}}
+                continue
+            try:
+                result = subprocess.run(
+                    ["runmod", "xrun", "--", "imc", "-exec", report_tcl, "-verbose"],
+                    capture_output=True,
+                    text=True,
+                )
+            except OSError as exc:
+                log.error("IMC report generation could not start for %s: %s", job, exc)
+                coverage[vcomp.split(":")[-1]] = {"cc": {}, "cf": {}}
+                continue
             if result.returncode != 0:
                 log.error("IMC report generation failed:\n%s", result.stderr)
                 code_metrics = {}

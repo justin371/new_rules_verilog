@@ -185,12 +185,14 @@
       <tbody>
         {% for item in history_rows %}
         {% set history_passrate = item.passrate|default(0, true)|float %}
+        {% set history_code_available = item.cov_code is not none and item.cov_code is defined %}
+        {% set history_functional_available = item.cov_func is not none and item.cov_func is defined %}
         <tr>
           <td class="cell-primary"><a href="{{ item.timestamp|urlencode }}.html"><code>{{ item.timestamp }}</code></a></td>
           <td>{{ item.total|default(0, true) }}</td>
           <td class="{% if history_passrate >= 99.999 %}heat-good{% elif history_passrate >= 90 %}heat-warn{% else %}heat-bad{% endif %}">{{ "%.2f"|format(history_passrate) }}%</td>
-          <td>{{ "%.2f"|format(item.cov_code|default(0, true)|float) }}%</td>
-          <td>{{ "%.2f"|format(item.cov_func|default(0, true)|float) }}%</td>
+          <td>{% if history_code_available %}{{ "%.2f"|format(item.cov_code|float) }}%{% else %}N/A{% endif %}</td>
+          <td>{% if history_functional_available %}{{ "%.2f"|format(item.cov_func|float) }}%{% else %}N/A{% endif %}</td>
           <td class="{% if item.failed|default(0, true)|int > 0 %}heat-bad{% endif %}">{{ item.failed|default(0, true) }}</td>
         </tr>
         {% endfor %}

@@ -124,7 +124,8 @@ class RegressionReportTest(unittest.TestCase):
             self.assertEqual(75.0, summary["cov_code"])
             self.assertIsNone(summary["cov_func"])
             self.assertTrue((bench_path / "index.html").is_file())
-            self.assertIn("N/A", (bench_path / "index.html").read_text(encoding="utf-8"))
+            report_html = (bench_path / "index.html").read_text(encoding="utf-8")
+            self.assertGreaterEqual(report_html.count("N/A"), 2)
 
     def test_report_retention_removes_snapshot_and_timestamp_logs(self):
         with tempfile.TemporaryDirectory() as temporary_dir:
