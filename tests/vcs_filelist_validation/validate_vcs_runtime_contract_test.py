@@ -698,6 +698,8 @@ class VcsRuntimeContractTest(unittest.TestCase):
         self.assertNotIn("sockets_exit_code + socket_exit_code", sim)
         self.assertNotIn('time eval "{{ simulation_command }}"', sim)
         self.assertIn("time {{ simulation_command }}", sim)
+        self.assertIn("SIM_DURATION_FILE", sim)
+        self.assertIn("SIM_START_SECONDS=$SECONDS", sim)
         self.assertIn('kill "${{ socket_name|upper }}_PID"', sim)
         self.assertIn('kill -KILL "$current_pid"', sim)
         self.assertIn("{POST_FLIST_ARGS} \\", svunit)

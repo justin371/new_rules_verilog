@@ -80,6 +80,33 @@ class SimmerResultsTest(unittest.TestCase):
 
         self.assertEqual("FAILED", run["status"])
 
+    def test_result_duration_is_simulator_time_and_retains_job_wall_time(self):
+        run = simmer_results.create_run(["simmer", "-t", "tb:test"], self.rcfg, 1)
+        test_job = SimpleNamespace(
+            rcfg=SimpleNamespace(options=SimpleNamespace(waves=None)),
+            vcomper=SimpleNamespace(
+                name="tb",
+                bazel_vcomp_target="//tb:tb",
+                job_dir="compile",
+                log_path="cmp.log",
+            ),
+            name="test",
+            target="//tb:test",
+            iteration=1,
+            seed=7,
+            jobstatus=SimpleNamespace(name="PASSED"),
+            duration_s=19.8,
+            simulation_duration_s=7,
+            job_dir="sim",
+            _log_path="stdout.log",
+            error_message=None,
+        )
+
+        simmer_results.record_test_job(run, test_job)
+
+        self.assertEqual(7, run["tests"][0]["duration_s"])
+        self.assertEqual(19, run["tests"][0]["wall_duration_s"])
+
     def test_multi_test_history_keeps_summary_and_one_representative_test(self):
         run = self._completed_run()
         run["planned_tests"] = 3

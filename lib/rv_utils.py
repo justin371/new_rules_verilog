@@ -99,7 +99,7 @@ def print_summary(rcfg, vcomp_jobs, jm, trd):
             current_time = datetime.datetime.now().strftime("%Y%m%d_%H%M%S_%f")
             rcfg.current_time = current_time
 
-    table_data = [("bench", "test", "max_job_time", "passed", "skipped", "failed", "total", "logs", "category")]
+    table_data = [("bench", "test", "max_sim_time", "passed", "skipped", "failed", "total", "logs", "category")]
     separator = [""] * len(table_data[0])
     table_data.append(separator)
 
@@ -126,7 +126,7 @@ def print_summary(rcfg, vcomp_jobs, jm, trd):
             if not icfg.jobs[0].vcomper is vcomp:
                 continue
             timed_jobs = [job for job in icfg.jobs if job.jobstatus in [job.jobstatus.PASSED, job.jobstatus.FAILED]]
-            max_job_time = max(timed_jobs, key=lambda x: x.job_time)._get_total_time_str() if timed_jobs else ""
+            max_sim_time = max(timed_jobs, key=lambda x: x.job_time)._get_job_time_str() if timed_jobs else ""
             passed = [j for j in icfg.jobs if j.jobstatus.completed and j.jobstatus.successful]
             failed = [j for j in icfg.jobs if j.jobstatus == j.jobstatus.FAILED]
             skipped = [j for j in icfg.jobs if j.jobstatus not in [j.jobstatus.FAILED, j.jobstatus.PASSED]]
@@ -148,7 +148,7 @@ def print_summary(rcfg, vcomp_jobs, jm, trd):
             test_category = ",".join(category for category, config in getattr(rcfg, "category_total_cases", {}).items()
                                      if test_tags & set(config.get("tags", [])))
             test_set = ("", icfg.jobs[0].name,
-                        str(max_job_time), str(len(passed)) if passed else "", str(len(skipped)) if skipped else "",
+                        str(max_sim_time), str(len(passed)) if passed else "", str(len(skipped)) if skipped else "",
                         str(len(failed)) if failed else "", str(len(icfg.jobs)), "", test_category)
             table_data.append(test_set)
             trd.append(test_set)

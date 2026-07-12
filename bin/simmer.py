@@ -840,9 +840,12 @@ class TestJob(Job):
 
         # Parse file for duration
         net_time_str, cps_str = self._get_stats_from_log_file()
+        self.simulation_duration_s = self._read_simulation_duration()
+        self.job_time = (self.simulation_duration_s if self.simulation_duration_s is not None else int(self.duration_s))
+        sim_time_str = self._format_duration(self.job_time)
         total_time_str = self._get_total_time_str()
-        time_stats_str = "({} cps / {} net_time / {} total_time)".format(cps_str, net_time_str, total_time_str)
-        self.job_time = int(self.duration_s)
+        time_stats_str = "({} cps / {} net_time / {} sim_time / {} total_time)".format(
+            cps_str, net_time_str, sim_time_str, total_time_str)
 
         if self.job_lib.returncode != 0:
             # Use relative path for symlink for portability
@@ -935,11 +938,27 @@ class TestJob(Job):
         if self.simulator.should_spawn_test_job(self):
             self.job_lib.manager.add_job(self.clone())
 
-    def _get_total_time_str(self):
-        hours = int(self.duration_s // 3600)
-        minutes = int((self.duration_s % 3600) // 60)
-        seconds = int(self.duration_s % 60)
+    @staticmethod
+    def _format_duration(duration_s):
+        hours = int(duration_s // 3600)
+        minutes = int((duration_s % 3600) // 60)
+        seconds = int(duration_s % 60)
         return "{:0d}:{:02d}:{:02d}".format(hours, minutes, seconds)
+
+    def _get_total_time_str(self):
+        return self._format_duration(self.duration_s)
+
+    def _get_job_time_str(self):
+        return self._format_duration(self.job_time)
+
+    def _read_simulation_duration(self):
+        path = os.path.join(self.job_dir, "simulation_duration_s")
+        try:
+            with open(path, "r", encoding="utf-8") as filep:
+                duration = int(filep.read().strip())
+            return duration if duration >= 0 else None
+        except (OSError, ValueError):
+            return None
 
     def _get_stats_from_log_file(self):
         if not os.path.exists(self._log_path):

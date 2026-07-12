@@ -10,7 +10,7 @@ import uuid
 from contextlib import contextmanager
 
 RESULTS_FILENAME = ".simmer_results.json"
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
 MAX_RUNS = 100
 COLOR_GREEN = "\033[0;32m"
 COLOR_RED = "\033[0;31m"
@@ -118,6 +118,8 @@ def record_test_job(run, test_job, waves_script=None, waves_path=None):
             "exists": bool(waves_path and os.path.exists(waves_path)),
         })
 
+    wall_duration_s = int(getattr(test_job, "duration_s", 0) or 0)
+    simulation_duration_s = getattr(test_job, "simulation_duration_s", None)
     run["tests"].append({
         "bench": test_job.vcomper.name,
         "test": test_job.name,
@@ -126,7 +128,8 @@ def record_test_job(run, test_job, waves_script=None, waves_path=None):
         "iteration": test_job.iteration,
         "seed": getattr(test_job, "seed", None),
         "status": test_job.jobstatus.name,
-        "duration_s": int(getattr(test_job, "duration_s", 0) or 0),
+        "duration_s": int(simulation_duration_s) if simulation_duration_s is not None else wall_duration_s,
+        "wall_duration_s": wall_duration_s,
         "compile_dir": test_job.vcomper.job_dir,
         "sim_dir": test_job.job_dir,
         "stdout_log": test_job._log_path,

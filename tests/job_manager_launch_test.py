@@ -38,7 +38,7 @@ class _FakeTimedJob:
         self.vcomper = None
         self.log_path = ""
 
-    def _get_total_time_str(self):
+    def _get_job_time_str(self):
         return "0:00:{:02d}".format(self.job_time)
 
 
@@ -260,7 +260,7 @@ class JobManagerLaunchTest(unittest.TestCase):
         self.assertIn("cmd: echo profiled", output)
         self.assertIn("test_discovery_match", output)
 
-    def test_summary_leaves_max_job_time_blank_for_skipped_tests(self):
+    def test_summary_leaves_max_sim_time_blank_for_skipped_tests(self):
         log = _SummaryLogger()
         vcomp = SimpleNamespace(name="sys_tb", jobstatus=JobStatus.PASSED, log_path="cmp.log")
         skipped = _FakeTimedJob("skipped_test", JobStatus.SKIPPED)
@@ -294,10 +294,12 @@ class JobManagerLaunchTest(unittest.TestCase):
             log=log,
         )
 
-        rv_utils.print_summary(rcfg, {"//pkg:sys_tb": vcomp}, SimpleNamespace(exited_prematurely=False), [])
+        trd = []
+        rv_utils.print_summary(rcfg, {"//pkg:sys_tb": vcomp}, SimpleNamespace(exited_prematurely=False), trd)
 
         simulation_summary = next(message for message in log.messages if message.startswith("Simulation Summary"))
         self.assertRegex(simulation_summary, r"\b1\s+0\s+0\s+1\b")
+        self.assertIn(("", "smoke", "0:00:01", "1", "", "", "1", "", ""), trd)
 
     def test_category_stats_use_full_target_and_preserve_numeric_test_names(self):
         matching = _FakeTimedJob("reset_1", JobStatus.PASSED)
