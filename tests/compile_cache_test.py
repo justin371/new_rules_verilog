@@ -32,6 +32,15 @@ class CompileCacheTest(unittest.TestCase):
         self.assertNotEqual(initial, source_changed)
         self.assertNotEqual(source_changed, mode_changed)
 
+    def test_fingerprint_ignores_untracked_runtime_artifacts(self):
+        project, _, compile_args = self._project()
+        initial = compile_fingerprint(project, "vcs -f compile.f", compile_args)
+
+        (project / ".last_sim").write_text("sim/run\n", encoding="utf-8")
+        (project / "simmer.log").write_text("runtime log\n", encoding="utf-8")
+
+        self.assertEqual(initial, compile_fingerprint(project, "vcs -f compile.f", compile_args))
+
     def test_manifest_rejects_incompatible_reuse(self):
         project, _, compile_args = self._project()
         job_dir = project / "vcomp"

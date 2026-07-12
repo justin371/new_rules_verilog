@@ -122,7 +122,7 @@ def record_test_job(run, test_job, waves_script=None, waves_path=None):
 
     wall_duration_s = int(getattr(test_job, "duration_s", 0) or 0)
     simulation_duration_s = getattr(test_job, "simulation_duration_s", None)
-    run["tests"].append({
+    test_record = {
         "bench": test_job.vcomper.name,
         "test": test_job.name,
         "target": test_job.target,
@@ -138,7 +138,12 @@ def record_test_job(run, test_job, waves_script=None, waves_path=None):
         "cmp_log": test_job.vcomper.log_path,
         "waves": waves,
         "error_message": getattr(test_job, "error_message", None),
-    })
+    }
+    for index, existing in enumerate(run["tests"]):
+        if all(existing.get(key) == test_record.get(key) for key in ("target", "iteration", "seed")):
+            run["tests"][index] = test_record
+            return
+    run["tests"].append(test_record)
 
 
 def finalize_run(run, regression_log_path=None, backend_finalize_failed=False):

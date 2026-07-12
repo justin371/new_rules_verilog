@@ -37,16 +37,12 @@ def _git(project_dir, *args):
 def _source_digest(project_dir):
     head = _git(project_dir, "rev-parse", "HEAD")
     diff = _git(project_dir, "diff", "--binary", "--no-ext-diff", "HEAD", "--")
-    untracked = _git(project_dir, "ls-files", "--others", "--exclude-standard", "-z")
-    if head.returncode or diff.returncode or untracked.returncode:
+    if head.returncode or diff.returncode:
         return "unavailable"
 
     digest = hashlib.sha256()
     digest.update(head.stdout)
     digest.update(diff.stdout)
-    for relative_path in sorted(filter(None, untracked.stdout.split(b"\0"))):
-        digest.update(relative_path)
-        digest.update(_file_bytes(os.path.join(project_dir, os.fsdecode(relative_path))))
     return digest.hexdigest()
 
 

@@ -177,6 +177,36 @@ class SimmerResultsTest(unittest.TestCase):
         self.assertEqual(run["summary"], stored["summary"])
         self.assertEqual(["fail.log"], [test["stdout_log"] for test in stored["tests"]])
 
+    def test_record_test_job_updates_existing_iteration(self):
+        run = simmer_results.create_run(["simmer"], self.rcfg, 1)
+        test_job = SimpleNamespace(
+            duration_s=1,
+            error_message=None,
+            iteration=2,
+            job_dir="sim",
+            jobstatus=SimpleNamespace(name="PASSED"),
+            name="smoke",
+            rcfg=SimpleNamespace(options=SimpleNamespace(waves=None)),
+            seed=17,
+            simulation_duration_s=1,
+            target="//tests:smoke",
+            vcomper=SimpleNamespace(
+                bazel_vcomp_target="//tb:top",
+                job_dir="compile",
+                log_path="cmp.log",
+                name="top",
+            ),
+            _log_path="stdout.log",
+        )
+        simmer_results.record_test_job(run, test_job)
+        test_job.error_message = "post-processing failed"
+        test_job.jobstatus = SimpleNamespace(name="FAILED")
+        simmer_results.record_test_job(run, test_job)
+
+        self.assertEqual(1, len(run["tests"]))
+        self.assertEqual("FAILED", run["tests"][0]["status"])
+        self.assertEqual("post-processing failed", run["tests"][0]["error_message"])
+
 
 if __name__ == "__main__":
     unittest.main()

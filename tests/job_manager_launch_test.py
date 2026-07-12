@@ -70,8 +70,26 @@ class _FailingRunner:
 
 class _FailingPostRunJob(Job):
 
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.recorded_post_run_failure = None
+
     def post_run(self):
         raise RuntimeError("failed to collect results")
+
+    def post_run_failed(self, exc):
+        self.recorded_post_run_failure = str(exc)
+
+
+class _ExitedProcess:
+    pid = 123
+    returncode = 0
+
+    def poll(self):
+        return self.returncode
+
+    def wait(self):
+        return self.returncode
 
 
 class _RunningProcess:
@@ -204,6 +222,7 @@ class JobManagerLaunchTest(unittest.TestCase):
             manager.add_job(job)
             manager.wait()
             self.assertEqual(JobStatus.FAILED, job.jobstatus)
+            self.assertEqual("failed to collect results", job.recorded_post_run_failure)
         finally:
             manager.stop()
 
@@ -219,14 +238,13 @@ class JobManagerLaunchTest(unittest.TestCase):
         runner.job = job
         runner.log = _Logger()
         runner._p = _RunningProcess()
+        runner._process_group_id = 456
         runner._start_time = datetime.datetime.now() - datetime.timedelta(hours=1)
         runner._timed_out = False
         runner._term_deadline = None
         runner._kill_sent = False
 
-        with mock.patch("lib.job_lib.os.getpgid", return_value=456,
-                        create=True), mock.patch("lib.job_lib.os.killpg",
-                                                 create=True) as killpg, mock.patch("lib.job_lib.signal.SIGKILL",
+        with mock.patch("lib.job_lib.os.killpg", create=True) as killpg, mock.patch("lib.job_lib.signal.SIGKILL",
                                                                                     9,
                                                                                     create=True):
             self.assertFalse(runner._check_for_done())
@@ -238,6 +256,39 @@ class JobManagerLaunchTest(unittest.TestCase):
             killpg.call_args_list,
         )
         self.assertEqual(-signal.SIGTERM, runner.returncode)
+
+    def test_timed_out_runner_kills_process_group_after_shell_exits(self):
+        runner = SubprocessJobRunner.__new__(SubprocessJobRunner)
+        runner.job = SimpleNamespace(suppress_output=False,
+                                     rcfg=SimpleNamespace(options=SimpleNamespace(no_stdout=False)))
+        runner.log = _Logger()
+        runner._p = _ExitedProcess()
+        runner._process_group_id = 456
+        runner._timed_out = True
+        runner._term_deadline = datetime.datetime.now() - datetime.timedelta(seconds=1)
+        runner._kill_sent = False
+
+        with mock.patch("lib.job_lib.os.killpg") as killpg:
+            self.assertTrue(runner._check_for_done())
+
+        killpg.assert_called_once_with(456, signal.SIGKILL)
+
+    def test_runner_exception_kills_and_reaps_process_group(self):
+        runner = SubprocessJobRunner.__new__(SubprocessJobRunner)
+        runner.done = False
+        runner.job = SimpleNamespace(suppress_output=False,
+                                     rcfg=SimpleNamespace(options=SimpleNamespace(no_stdout=False)))
+        runner.log = _Logger()
+        runner._p = _ExitedProcess()
+        runner._process_group_id = 456
+        runner._check_for_done = mock.Mock(side_effect=RuntimeError("poll failed"))
+
+        with mock.patch("lib.job_lib.os.killpg") as killpg, mock.patch.object(runner._p, "wait",
+                                                                              wraps=runner._p.wait) as wait:
+            self.assertTrue(runner.check_for_done())
+
+        killpg.assert_called_once_with(456, signal.SIGKILL)
+        wait.assert_called_once_with()
 
     def test_test_timeout_waits_for_simulation_start_marker(self):
         job_dir = Path(tempfile.mkdtemp())

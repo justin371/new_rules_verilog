@@ -466,6 +466,10 @@ class VCompJob(Job):
         self.error_message = str(exc)
         simmer_results.record_compile_job(getattr(self.rcfg, "simmer_results_run", None), self)
 
+    def post_run_failed(self, exc):
+        super().post_run_failed(exc)
+        simmer_results.record_compile_job(getattr(self.rcfg, "simmer_results_run", None), self)
+
     def __repr__(self):
         sim_name = self.simulator.get_name() if hasattr(self, 'simulator') else '???'
         return 'Vcomp("{}@{}" -> {})'.format(self.bazel_vcomp_target, sim_name, self.name) # Add simulator info
@@ -858,6 +862,11 @@ class TestJob(Job):
         self.simulation_duration_s = None
         simmer_results.record_test_job(getattr(self.rcfg, "simmer_results_run", None), self)
 
+    def post_run_failed(self, exc):
+        super().post_run_failed(exc)
+        self.simulation_duration_s = None
+        simmer_results.record_test_job(getattr(self.rcfg, "simmer_results_run", None), self)
+
     @staticmethod
     def _format_duration(duration_s):
         hours = int(duration_s // 3600)
@@ -1059,77 +1068,80 @@ def main(rcfg, options):
         jm.kill()
         log.critical("Exiting due to keyboard interrupt")
 
-    workflow_finalize_failed = simulator.finalize_regression_workflow()
+    workflow_finalize_failed = False
+    regression_log_path = None
+    post_processing_complete = False
+    total_failures = 0
+    try:
+        workflow_finalize_failed = simulator.finalize_regression_workflow()
+        regression_log_path = rv_utils.print_summary(rcfg, vcomp_jobs, jm, trd)
 
-    regression_log_path = rv_utils.print_summary(rcfg, vcomp_jobs, jm, trd)
-    if getattr(rcfg, "simmer_results_run", None) is not None:
-        simmer_results.finalize_run(
-            rcfg.simmer_results_run,
-            regression_log_path=regression_log_path,
-            backend_finalize_failed=workflow_finalize_failed,
-        )
-        try:
-            simmer_results.save_run(rcfg.proj_dir, rcfg.simmer_results_run)
-        except OSError as exc:
-            log.error("Failed to write simmer results: %s", exc)
-    # add category_stats for soc
-    category_stats = None
-    if options.category_cfg is not None:
-        category_stats = rv_utils.calc_category_stats(rcfg)
-        rv_utils.print_category_summary(category_stats, rcfg.log, rv_utils.LOGGER_INDENT)
+        category_stats = None
+        if options.category_cfg is not None:
+            category_stats = rv_utils.calc_category_stats(rcfg)
+            rv_utils.print_category_summary(category_stats, rcfg.log, rv_utils.LOGGER_INDENT)
 
-    report_header = {}
-    if options.report:
-        if simulator.coverage_enabled():
-            rcfg._profile_step(
-                "coverage_merge",
-                "merge simulator coverage databases",
-                lambda: simulator.run_report_coverage_merge(vcomp_jobs),
-            )
-
-        report_header = rv_utils.get_report_header(rcfg)
-        rrt = regression_report.RegressionReport(rcfg, report_jinja2_env, webroot_path)
-        report_root = os.path.join(webroot_path, "regression_report")
-        project_lock_name = re.sub(r"[^A-Za-z0-9_.-]+", "_", report_header['project_name'])
-        project_lock_path = os.path.join(report_root, ".{}.lock".format(project_lock_name))
-        index_lock_path = os.path.join(report_root, ".index.lock")
-        os.makedirs(report_root, exist_ok=True)
-        rrt.prepare(report_header, trd, simulator.collect_coverage_data(vcomp_jobs), category_stats)
-        with open(project_lock_path, "w") as report_lock:
-            import fcntl
-            fcntl.flock(report_lock, fcntl.LOCK_EX)
-            rrt.render_regression_page()
-        with open(index_lock_path, "w") as report_lock:
-            fcntl.flock(report_lock, fcntl.LOCK_EX)
-            rrt.render_bench_page()
-            rrt.render_home_page()
-
-    rv_utils.print_simmer_profile(rcfg, jm)
-
-    failures = {}
-    for bench, (icfgs, test_list) in rcfg.all_vcomp.items():
-        failures[bench] = sum([j.jobstatus == JobStatus.FAILED for icfg in icfgs for j in icfg.jobs])
-        # Count failures directly from the job objects stored in test_jobs_list
-        #num_failed = sum(1 for j in test_jobs_list if j.jobstatus and not j.jobstatus.successful)
-        #failures[bench] = num_failed
+        report_header = {}
         if options.report:
-            report_path = os.path.join(report_root, report_header['project_name'], bench.split(":")[1], "index.html")
-            report_url = os.environ.get("SIMMER_REPORT_URL")
-            if report_url:
-                log.info("Report at: %s/%s/%s", report_url.rstrip("/"), report_header['project_name'],
-                         bench.split(":")[1])
-            else:
-                log.info("Report at: %s", report_path)
+            if simulator.coverage_enabled():
+                rcfg._profile_step(
+                    "coverage_merge",
+                    "merge simulator coverage databases",
+                    lambda: simulator.run_report_coverage_merge(vcomp_jobs),
+                )
 
-    for message in getattr(rcfg, "deferred_messages", []):
-        log.info(message)
+            report_header = rv_utils.get_report_header(rcfg)
+            rrt = regression_report.RegressionReport(rcfg, report_jinja2_env, webroot_path)
+            report_root = os.path.join(webroot_path, "regression_report")
+            project_lock_name = re.sub(r"[^A-Za-z0-9_.-]+", "_", report_header['project_name'])
+            project_lock_path = os.path.join(report_root, ".{}.lock".format(project_lock_name))
+            index_lock_path = os.path.join(report_root, ".index.lock")
+            os.makedirs(report_root, exist_ok=True)
+            rrt.prepare(report_header, trd, simulator.collect_coverage_data(vcomp_jobs), category_stats)
+            with open(project_lock_path, "w") as report_lock:
+                import fcntl
+                fcntl.flock(report_lock, fcntl.LOCK_EX)
+                rrt.render_regression_page()
+            with open(index_lock_path, "w") as report_lock:
+                fcntl.flock(report_lock, fcntl.LOCK_EX)
+                rrt.render_bench_page()
+                rrt.render_home_page()
 
-    simulator.cleanup_shared_runtime_artifacts(vcomp_jobs)
+        rv_utils.print_simmer_profile(rcfg, jm)
 
-    rcfg.log.exit_if_warnings_or_errors("Previous errors")
+        failures = {}
+        for bench, (icfgs, test_list) in rcfg.all_vcomp.items():
+            failures[bench] = sum([j.jobstatus == JobStatus.FAILED for icfg in icfgs for j in icfg.jobs])
+            if options.report:
+                report_path = os.path.join(report_root, report_header['project_name'],
+                                           bench.split(":")[1], "index.html")
+                report_url = os.environ.get("SIMMER_REPORT_URL")
+                if report_url:
+                    log.info("Report at: %s/%s/%s", report_url.rstrip("/"), report_header['project_name'],
+                             bench.split(":")[1])
+                else:
+                    log.info("Report at: %s", report_path)
 
-    # Exit with non-zero code if any test failed
-    total_failures = sum(failures.values())
+        for message in getattr(rcfg, "deferred_messages", []):
+            log.info(message)
+
+        simulator.cleanup_shared_runtime_artifacts(vcomp_jobs)
+        total_failures = sum(failures.values())
+        post_processing_complete = True
+        rcfg.log.exit_if_warnings_or_errors("Previous errors")
+    finally:
+        if getattr(rcfg, "simmer_results_run", None) is not None:
+            simmer_results.finalize_run(
+                rcfg.simmer_results_run,
+                regression_log_path=regression_log_path,
+                backend_finalize_failed=(workflow_finalize_failed or not post_processing_complete
+                                         or bool(rcfg.log.warn_count or rcfg.log.error_count)),
+            )
+            try:
+                simmer_results.save_run(rcfg.proj_dir, rcfg.simmer_results_run)
+            except OSError as exc:
+                log.error("Failed to write simmer results: %s", exc)
+
     if workflow_finalize_failed:
         log.info("Exiting with status 1 due to backend finalization failure.")
         sys.exit(1)
