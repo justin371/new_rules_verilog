@@ -5,10 +5,10 @@ set -Eeuo pipefail
 trap 'rc=$?; printf "ERROR: simulation script failed at line %s (exit %s): %s\n" "$LINENO" "$rc" "$BASH_COMMAND" >&2' ERR
 
 # Export variables that might be useful for sub-processes or debugging
-export PROJ_DIR={{ job.vcomper.rcfg.proj_dir }}
-export SIMRESULTS={{ job.job_dir }}
-export TEST_LOG_PATH={{ job._log_path }} # Export log path
-export SIM_WORK_DIR="{{ sim_working_dir }}"
+export PROJ_DIR={{ job.vcomper.rcfg.proj_dir|shell_quote }}
+export SIMRESULTS={{ job.job_dir|shell_quote }}
+export TEST_LOG_PATH={{ job._log_path|shell_quote }} # Export log path
+export SIM_WORK_DIR={{ sim_working_dir|shell_quote }}
 export VIP_LOG_DIR="$SIMRESULTS"
 export SVT_LOG_DIR="$SIMRESULTS"
 
@@ -94,9 +94,9 @@ function testFunction {
     cd "$SIMRESULTS"
 
     # Enter the simulation working directory
-    mkdir -p "{{ sim_working_dir }}"
-    ln -snf "{{ job.vcomper.bazel_runfiles_main }}" "{{ sim_working_dir }}/bazel_runfiles_main"
-    cd "{{ sim_working_dir }}"
+    mkdir -p {{ sim_working_dir|shell_quote }}
+    ln -snf {{ job.vcomper.bazel_runfiles_main|shell_quote }} {{ (sim_working_dir ~ '/bazel_runfiles_main')|shell_quote }}
+    cd {{ sim_working_dir|shell_quote }}
     echo "Current directory: $(pwd)"
 
     # Execute any simulator-specific pre-commands
@@ -196,8 +196,8 @@ function testFunction {
     # echo "--- Parsing Simulation Log ---"
     # Ensure we are in the job directory
     cd "$SIMRESULTS"
-    local check_test_script={{ check_test_path }}
-    local log_file_to_check="{{ job._log_path }}" # Log file path
+    local check_test_script={{ check_test_path|shell_quote }}
+    local log_file_to_check={{ job._log_path|shell_quote }} # Log file path
 
     if [ -f "$check_test_script" ] && [ -f "$log_file_to_check" ]; then
         # echo "Running: $check_test_script $log_file_to_check"

@@ -43,6 +43,30 @@ class CompileCacheTest(unittest.TestCase):
         with self.assertRaises(RuntimeError):
             validate_compile_fingerprint(job_dir, dict(fingerprint, compile_script="changed"))
 
+    def test_fingerprint_tracks_bazel_runfile_content(self):
+        project, _, compile_args = self._project()
+        runfiles = Path(tempfile.mkdtemp())
+        external_source = runfiles / "external" / "generated.sv"
+        external_source.parent.mkdir()
+        external_source.write_text("module generated; endmodule\n", encoding="utf-8")
+        inventory = runfiles / "compile_inputs.txt"
+        inventory.write_text("source\texternal/generated.sv\n", encoding="utf-8")
+
+        initial = compile_fingerprint(project, "vcs -f compile.f", compile_args, inventory, runfiles)
+        external_source.write_text("module generated; logic changed; endmodule\n", encoding="utf-8")
+        changed = compile_fingerprint(project, "vcs -f compile.f", compile_args, inventory, runfiles)
+
+        self.assertNotEqual(initial, changed)
+
+    def test_fingerprint_rejects_missing_inventory_input(self):
+        project, _, compile_args = self._project()
+        runfiles = Path(tempfile.mkdtemp())
+        inventory = runfiles / "compile_inputs.txt"
+        inventory.write_text("source\texternal/missing.sv\n", encoding="utf-8")
+
+        with self.assertRaisesRegex(RuntimeError, "missing file"):
+            compile_fingerprint(project, "vcs -f compile.f", compile_args, inventory, runfiles)
+
 
 if __name__ == "__main__":
     unittest.main()

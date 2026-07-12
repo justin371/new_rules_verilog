@@ -3,10 +3,10 @@ set -Eeuo pipefail
 
 trap 'rc=$?; printf "ERROR: Xcelium compile failed at line %s (exit %s): %s\n" "$LINENO" "$rc" "$BASH_COMMAND" >&2' ERR
 
-cd {{ bazel_runfiles_main }}
+cd {{ bazel_runfiles_main|shell_quote }}
 runmod -t xrun -- \
   {% if options.msie_prim is none -%}
-  -xmlibdirname {{ VCOMP_DIR }} \
+  -xmlibdirname {{ VCOMP_DIR|shell_quote }} \
   {% endif -%}
   {% for define in additional_defines -%}
     -define {{ define }} \
@@ -32,7 +32,7 @@ runmod -t xrun -- \
   {% if options.msie_prim -%}
     -mkprimsnap -top {{ msie_primary_top }} -snapshot {{ msie_primary_name }} \
     -href {{ msie_href_file }} \
-    -xmlibdirname {{ VCOMP_DIR }} \
+    -xmlibdirname {{ VCOMP_DIR|shell_quote }} \
     {% for extern_file in msie_extern_files -%}
     {{ extern_file }} \
     {% endfor -%}
@@ -46,11 +46,11 @@ runmod -t xrun -- \
   {% endif -%}
 
   {% if options.compile_args_file -%}
-    -file {{ options.compile_args_file }} \
+    -file {{ options.compile_args_file|shell_quote }} \
   {% endif -%}
 
-  -f {{ bazel_compile_args }} \
+  -f {{ bazel_compile_args|shell_quote }} \
   {% if cov_opts -%}
     {{ cov_opts }} \
   {% endif -%}
-  -l {{ VCOMP_DIR }}/cmp.log
+  -l {{ (VCOMP_DIR ~ '/cmp.log')|shell_quote }}

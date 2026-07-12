@@ -159,16 +159,32 @@ class SimulatorInterface(abc.ABC):
 
     def validate_run_options(self, vcomp_count):
         """Validate simulator capabilities needed by the selected run."""
-        if getattr(self.options, "vso", False):
-            raise ValueError("--vso is currently supported only with VCS.")
+        return
+
+    def uses_shared_regression_init(self):
+        """Return whether the backend needs a shared-regression initialization job."""
+        return False
+
+    def uses_dynamic_test_plan(self):
+        """Return whether the backend selects test iterations after compilation."""
+        return False
+
+    def prepare_test_job(self, test_job):
+        """Prepare backend-owned state and optionally return a seed override."""
+        return None
+
+    def should_spawn_test_job(self, test_job):
+        """Return whether a dynamically planned test needs another iteration."""
+        return False
+
+    def coverage_enabled(self):
+        """Return whether this backend requested coverage collection."""
+        return False
+
+    def get_compile_template_context(self, vcomp_job):
+        """Return backend-owned values needed by its compile template."""
+        return {}
 
     def collect_coverage_data(self, vcomp_jobs):
         """Return dashboard coverage summaries keyed by testbench name."""
         return {vcomp.split(":")[-1]: {"cc": {}, "cf": {}} for vcomp in vcomp_jobs}
-
-    def get_vso_build_name(self, vcomp_job):
-        """Return the VSO.ai buildname for a compile job.
-
-        The default implementation keeps the job name unchanged.
-        """
-        return vcomp_job.name

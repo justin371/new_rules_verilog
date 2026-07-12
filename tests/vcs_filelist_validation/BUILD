@@ -34,7 +34,10 @@ verilog_rtl_lint_test(
 verilog_dv_tb(
     name = "dv_tb_vcs",
     extra_compile_args = [
+        "+define+CADENCE",
+        "+define+CADENCE_WORKAROUND",
         "+define+UNIFIED_VCS_COMPILE_ARG",
+        "+define+XRUNNER",
         "+optconfigfile+$(location :vcs_partitions)",
     ],
     extra_runfiles = [":vcs_partitions"],

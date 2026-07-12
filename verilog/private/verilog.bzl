@@ -75,6 +75,19 @@ def runfiles_relative_short_path(f):
         return "external/" + short_path[3:]
     return short_path
 
+def verilog_input_inventory(deps, extra_files):
+    """Return a stable inventory of Verilog compile inputs."""
+    entries = []
+    sources = get_transitive_srcs([], deps, VerilogInfo, "transitive_sources", allow_other_outputs = True)
+    flists = get_transitive_srcs([], deps, VerilogInfo, "transitive_flists", allow_other_outputs = False)
+    for source in sources.to_list():
+        entries.append("source\t{}".format(runfiles_relative_short_path(source)))
+    for flist in flists.to_list():
+        entries.append("filelist\t{}".format(runfiles_relative_short_path(flist)))
+    for extra_file in extra_files:
+        entries.append("runfile\t{}".format(runfiles_relative_short_path(extra_file)))
+    return "\n".join(sorted(depset(entries).to_list())) + "\n"
+
 def flists_to_arguments(deps, provider, field, prefix, separator = "", tool_name = None, path_prefix = ""):
     # Emit Bazel short_path entries so generated filelists stay rooted at the
     # runfiles tree, e.g. hw/... and external/..., instead of machine-specific

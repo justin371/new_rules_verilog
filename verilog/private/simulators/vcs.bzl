@@ -13,9 +13,14 @@ def _sanitize_defines(defines):
 def _sanitize_compile_args(compile_args):
     sanitized = []
     for arg in compile_args:
-        if arg.startswith("+define+CADENCE") or arg.startswith("+define+XRUN"):
+        if arg in ["+define+CADENCE", "+define+XRUN", "-define CADENCE", "-define XRUN"]:
             continue
-        if arg.startswith("-define CADENCE") or arg.startswith("-define XRUN"):
+        if any([arg.startswith(prefix) for prefix in [
+            "+define+CADENCE=",
+            "+define+XRUN=",
+            "-define CADENCE=",
+            "-define XRUN=",
+        ]]):
             continue
         sanitized.append(arg)
     return sanitized

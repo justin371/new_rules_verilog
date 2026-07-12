@@ -1,6 +1,6 @@
 """Xcelium backend helpers for DV rules."""
 
-load("//verilog/private:verilog.bzl", "VerilogInfo", "flists_to_arguments", "get_transitive_srcs", "runfiles_relative_short_path")
+load("//verilog/private:verilog.bzl", "VerilogInfo", "flists_to_arguments", "verilog_input_inventory")
 
 def _validate_tb(ctx, has_msie_primary, has_msie_extras):
     if ctx.file.vcs_cm_hier:
@@ -18,18 +18,6 @@ def _compile_config(ctx, defines, compile_args):
         flists = flists_to_arguments(ctx.attr.deps + ctx.attr.shells, VerilogInfo, "transitive_flists", "\n-f"),
         template = ctx.file._compile_args_template_xrun,
     )
-
-def _msie_input_inventory(deps, extra_files):
-    entries = []
-    sources = get_transitive_srcs([], deps, VerilogInfo, "transitive_sources", allow_other_outputs = True)
-    flists = get_transitive_srcs([], deps, VerilogInfo, "transitive_flists", allow_other_outputs = False)
-    for source in sources.to_list():
-        entries.append("source\t{}".format(runfiles_relative_short_path(source)))
-    for flist in flists.to_list():
-        entries.append("filelist\t{}".format(runfiles_relative_short_path(flist)))
-    for extra_file in extra_files:
-        entries.append("runfile\t{}".format(runfiles_relative_short_path(extra_file)))
-    return "\n".join(sorted(depset(entries).to_list())) + "\n"
 
 def _expand_msie_compile_args(ctx, compile_args, compile_defines):
     if len(ctx.attr.msie_primary_deps) == 0:
@@ -72,7 +60,7 @@ def _expand_msie_compile_args(ctx, compile_args, compile_defines):
     )
     ctx.actions.write(
         output = primary_inputs,
-        content = _msie_input_inventory(
+        content = verilog_input_inventory(
             ctx.attr.msie_primary_deps,
             ctx.files.extra_runfiles + ctx.files.msie_primary_extra_runfiles,
         ),

@@ -1,9 +1,5 @@
 import argparse
 
-from lib.simulators.options import validate_explicit_switches
-from lib.simulators.vcs_options import validate_vcs_runtime_options
-from lib.simulators.xcelium_options import validate_xcelium_runtime_options
-
 from .common import (
     PROJ_DIR,
     SIM_PLATFORM,
@@ -17,9 +13,7 @@ from .common import (
 )
 from .vcs import add_vcs_arguments
 from .xcelium import (
-    add_xcelium_arguments,
-    apply_xcelium_postprocess,
-)
+    add_xcelium_arguments, )
 
 _RERUN_OMITTED_OPTIONS = {
     '-t',
@@ -48,17 +42,6 @@ def reproduction_args(argv):
         result.append(argument)
         index += 1
     return result
-
-
-def validate_simulator_specific_options(options, parser):
-    if options.simulator == 'VCS':
-        validate_explicit_switches(options.xcelium_explicit_switches, "Xcelium", "VCS", parser)
-        validate_vcs_runtime_options(options, parser)
-        return
-
-    if options.simulator == 'XRUN':
-        validate_explicit_switches(options.vcs_explicit_switches, "VCS", "Xcelium", parser)
-        validate_xcelium_runtime_options(options, parser)
 
 
 def create_parser():
@@ -147,8 +130,12 @@ def parse_args(argv):
             '--gui',
             '--vcs-cm-line',
             '--vcs-cm-report',
+            '--vcs-cm-cond',
+            '--vcs-cm-tgl',
             '--vcs-cm-hier',
             '--vcs-profile',
+            '--vcs-urg-parallel',
+            '--vcs-urg-show-tests',
             '--vcs-partcomp-mode',
             '--vcs-partcomp-jobs',
             '--vcs-partcomp-dir',
@@ -161,11 +148,19 @@ def parse_args(argv):
             '--vcs-xprop-mmsopt',
             '--vcs-xprop-banner',
             '--vcs-xprop-report',
+            '--ico',
+            '--ico-workdir',
+            '--ico-shared-record',
             '--vso',
             '--vso-workdir',
             '--vso-dbdir',
             '--vso-buildname',
             '--vso-target-metric',
+            '--vso-phase',
+            '--vso-cbv',
+            '--vso-ccex',
+            '--vso-ccex-rca',
+            '--vso-ccex-auto-merge-dir',
         ] if argument_explicitly_requested(argv, argument)
     ]
 
@@ -176,10 +171,5 @@ def parse_args(argv):
         parser.error("--wave-start must be non-negative.")
     if options.wave_end != 99999999 and options.wave_end <= options.wave_start:
         parser.error("--wave-end must be greater than --wave-start.")
-    validate_simulator_specific_options(options, parser)
-
-    if options.simulator == 'XRUN':
-        apply_xcelium_postprocess(options)
-
     options.proj_dir = PROJ_DIR
     return options

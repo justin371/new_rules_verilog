@@ -24,11 +24,22 @@ def add_vcs_arguments(parser):
                       help=('Pass -cm_line MODE to VCS. Requires --cm line or --cm A; use svtb modes only when '
                             'testbench line coverage is intentionally included.'))
     gvcs.add_argument('--vcs-cm-report',
+                      action='append',
+                      default=None,
+                      choices=['svpackages', 'noinitial'],
+                      help=('Pass one -cm_report mode to VCS; repeat for both. svpackages includes SystemVerilog '
+                            'packages and requires line coverage. noinitial excludes initial blocks from line, '
+                            'condition, and branch coverage.'))
+    gvcs.add_argument('--vcs-cm-cond',
                       type=str,
                       default=None,
-                      choices=['svpackages'],
-                      help=('Pass -cm_report svpackages to VCS so package coverage appears in reports. '
-                            'Requires --cm line or --cm A.'))
+                      help=('Pass a plus-separated -cm_cond mode list, for example obs+event as recommended for '
+                            'observable conditions and sensitivity lists. Requires --cm cond or --cm A.'))
+    gvcs.add_argument('--vcs-cm-tgl',
+                      type=str,
+                      default=None,
+                      help=('Pass a plus-separated -cm_tgl mode list, for example portsonly or mda. Requires '
+                            '--cm tgl or --cm A; portsonly reduces toggle coverage cost to design ports.'))
     gvcs.add_argument('--vcs-cm-hier',
                       type=str,
                       default=None,
@@ -39,6 +50,16 @@ def add_vcs_arguments(parser):
                       action='store_true',
                       help=('Add -pcmakeprof -reportstats and write phase/partition timing statistics to cmp.log. '
                             'Use this when comparing scratch, incremental, or Partition Compile performance.'))
+    gvcs.add_argument('--vcs-urg-parallel',
+                      default=False,
+                      action='store_true',
+                      help=('Add -parallel to the generated URG coverage merge. Enable only after measuring local '
+                            'CPU and memory use or configuring the site grid options outside simmer.'))
+    gvcs.add_argument('--vcs-urg-show-tests',
+                      default=False,
+                      action='store_true',
+                      help=('Add -show tests to the generated URG merge so the merged VDB retains test-to-cover '
+                            'correlation for grading and debug. This increases merged database size.'))
     gvcs.add_argument(
         '--vcs-partcomp-mode',
         default='adaptive',
@@ -100,28 +121,69 @@ def add_vcs_arguments(parser):
                       default=False,
                       action='store_true',
                       help='Add runtime -report=xprop. Requires --xprop F or --xprop C.')
+    gvcs.add_argument('--ico',
+                      default=False,
+                      action='store_true',
+                      help=('Enable VCS ICO shared-regression mode: initialize a shared CDB with crg and pass the '
+                            'recommended ICO auto-configuration runtime options to each simv.'))
+    gvcs.add_argument('--ico-workdir',
+                      type=str,
+                      default=None,
+                      help=('Override the VCS ICO local work directory. Requires --ico; default is '
+                            '<regression>/ico_artifacts/workdir.'))
+    gvcs.add_argument('--ico-shared-record',
+                      type=str,
+                      default=None,
+                      help=('Override the VCS ICO shared CDB directory. Requires --ico; default is '
+                            '<regression>/ico_artifacts/shared_record. An initialized CDB is reused.'))
     gvcs.add_argument('--vso',
                       default=False,
                       action='store_true',
-                      help=('Enable the VSO.ai init/ask/tell/finalize workflow. Preparation: source VSO_HOME, provide '
-                            'the required licenses, and select coverage with --cm or --vso-target-metric.'))
+                      help=('Enable the VSO.ai CSO three-step flow: compile each build with -vso cso, run driver '
+                            'init/ask-all, execute selected tests with run IDs, then finalize/merge with bulk status.'))
     gvcs.add_argument('--vso-workdir',
                       type=str,
                       default=None,
-                      help=('Override the VSO.ai work directory. Requires --vso; default is '
-                            '<regression>/vso_artifacts/workdir.'))
+                      help=('Override the VSO.ai per-regression workdir. Requires --vso; default is '
+                            '<regression>/vso_artifacts/workdir. All VSO steps and simv jobs must access it.'))
     gvcs.add_argument('--vso-dbdir',
                       type=str,
                       default=None,
-                      help=('Override the VSO.ai learning database directory. Requires --vso; default is '
-                            '<regression>/vso_artifacts/dbdir. Preserve it when reusing learned state.'))
+                      help=('Select the persistent VSO.ai learning dbdir. Requires --vso; default is an empty '
+                            '<regression>/vso_artifacts/dbdir suitable for a Day0 run.'))
     gvcs.add_argument('--vso-buildname',
                       type=str,
                       default=None,
-                      help='Override the VSO.ai build name. Requires --vso; default is the VCOMP job name.')
-    gvcs.add_argument(
-        '--vso-target-metric',
-        type=str,
-        default=None,
-        help=('Set the comma-separated VSO.ai optimization metrics used during init, for example '
-              'line,fsm,tgl,assert. Requires --vso; otherwise simmer derives supported metrics from --cm.'))
+                      help=('Override the VSO.ai build name for a single selected VCS build. Requires --vso; '
+                            'otherwise each VCOMP job name is used as its unique build name.'))
+    gvcs.add_argument('--vso-target-metric',
+                      type=str,
+                      default=None,
+                      help=('Set the comma-separated VSO.ai target metrics: all, assert, cond, fsm, group, line, '
+                            'or tgl. Requires --vso; otherwise metrics are derived from --cm.'))
+    gvcs.add_argument('--vso-phase',
+                      action='append',
+                      default=None,
+                      help=('Pass one VSO.ai init phase selection, such as stress, stress:3, acceleration, or '
+                            'exploration. Repeat the option for multiple phases. Requires --vso.'))
+    gvcs.add_argument('--vso-cbv',
+                      default=False,
+                      action='store_true',
+                      help=('Enable VSO.ai Change-Based Verification compile tagging by passing the CSO workdir '
+                            'to VCS. Requires --vso and Day0 line coverage or port-only toggle coverage.'))
+    gvcs.add_argument('--vso-ccex',
+                      default=False,
+                      action='store_true',
+                      help=('Enable the VSO.ai LCA Coverage Directed Solver by passing -vso ccex at VCS compile '
+                            'and simv runtime. Put extra compile options in --file and runtime -ccex_opts values '
+                            'in --sim-opts-file.'))
+    gvcs.add_argument('--vso-ccex-rca',
+                      default=False,
+                      action='store_true',
+                      help=('Enable Coverage Directed Solver static root-cause analysis with -ccex_opts rca. '
+                            'Requires --vso-ccex; inspect results with an URG or Verdi CCEX report.'))
+    gvcs.add_argument('--vso-ccex-auto-merge-dir',
+                      type=str,
+                      default=None,
+                      help=('Enable inter-simulation Coverage Directed Solver learning through the given shared '
+                            'directory. Requires --vso-ccex and storage visible to every simv job.'))

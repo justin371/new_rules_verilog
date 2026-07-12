@@ -124,10 +124,3 @@ def add_xcelium_arguments(parser):
          'pldm_sim: reuse synthesis output, compile the Palladium TB, then run tests.\n'
          'sim: compile and run the emulation environment with XRUN without Palladium synthesis.\n'
          'clean: run the project clean flow. Emulator modes cannot be combined with MCE or MSIE.'))
-
-
-def apply_xcelium_postprocess(options):
-    if options.msie_href is not None:
-        options.no_run = True
-    if options.msie_prim is not None:
-        options.no_run = True

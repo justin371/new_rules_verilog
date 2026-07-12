@@ -20,7 +20,6 @@ if str(LIB_DIR) not in sys.path:
 from args_parser import parse_args
 from args_parse.parser import create_parser
 from lint_parser_hal import HalLintLog
-from lib.job_lib import JobStatus
 from lib.runtime_options import format_sim_opts_dict, resolve_test_timeout_hours
 from lib.simulators.vcs import VcsSimulator
 from lib.simulators.xcelium import XceliumSimulator
@@ -91,14 +90,20 @@ class VcsRuntimeContractTest(unittest.TestCase):
         else:
             os.environ.pop("RV_VCS_RUNNER", None)
 
+    def _validated(self, argv):
+        options = parse_args(argv)
+        simulator_type = VcsSimulator if options.simulator == "VCS" else XceliumSimulator
+        simulator = simulator_type(options, DummyRegressionConfig(), None)
+        simulator.validate_resolved_options()
+        return options, simulator
+
     def test_normal_vcs_simmer_invocation_does_not_require_runner_override(self):
-        options = parse_args(["-t", "unit:test", "--simulator", "VCS", "--waves"])
+        options, simulator = self._validated(["-t", "unit:test", "--simulator", "VCS", "--waves"])
 
         self.assertEqual("VCS", options.simulator)
         self.assertIsNone(options.vcs_runner)
         self.assertEqual("fsdb", options.wave_type)
 
-        simulator = VcsSimulator(options, DummyRegressionConfig(), None)
         self.assertEqual("runmod vcs --", simulator.get_tool_runner())
 
     def test_xprop_is_opt_in_for_both_simulators(self):
@@ -138,13 +143,166 @@ class VcsRuntimeContractTest(unittest.TestCase):
         self.assertEqual(3,
                          XceliumSimulator(xrun_options, DummyRegressionConfig(), None).get_scheduler_threads_per_test())
 
-    def test_vcs_adapter_validates_vso_environment(self):
-        options = parse_args(["--simulator", "VCS", "--vso", "--cm", "line"])
+    def test_vcs_adapter_uses_documented_ico_shared_regression_options(self):
+        options = parse_args([
+            "--simulator",
+            "VCS",
+            "--ico",
+            "--ico-workdir",
+            "ico work",
+            "--ico-shared-record",
+            "ico shared",
+        ])
         simulator = VcsSimulator(options, DummyRegressionConfig(), None)
+        command, _ = simulator.build_ico_init_command()
 
-        with mock.patch.dict(os.environ, {}, clear=True):
-            with self.assertRaisesRegex(ValueError, "VSO_HOME is not set"):
-                simulator.validate_run_options(1)
+        self.assertEqual("crg", command[-5])
+        self.assertEqual(["-shared", "init"], command[-2:])
+        test_job = SimpleNamespace(name="smoke", iteration=2)
+        sim_options = shlex.split(simulator.generate_sim_options(test_job, 42))
+        self.assertIn("+ntb_solver_bias_mode_auto_config=2", sim_options)
+        self.assertIn("+ntb_solver_bias_test_type=uvm", sim_options)
+        self.assertIn("+ntb_solver_bias_test_name=smoke_sv42_i2", sim_options)
+        self.assertTrue(any(arg.startswith("+ntb_solver_bias_shared_record=") for arg in sim_options))
+        self.assertTrue(any(arg.startswith("+ntb_solver_bias_wdir=") for arg in sim_options))
+        self.assertNotIn("-vso", sim_options)
+
+    def test_vcs_adapter_uses_documented_vso_cso_three_step_flow(self):
+        options = parse_args([
+            "--simulator",
+            "VCS",
+            "--vso",
+            "--vso-target-metric",
+            "line,tgl",
+            "--vso-phase",
+            "stress:2",
+        ])
+        rcfg = DummyRegressionConfig()
+        simulator = VcsSimulator(options, rcfg, None)
+        with mock.patch.dict(os.environ, {"VSO_HOME": "/tools/vso"}):
+            simulator.validate_resolved_options()
+            simulator.validate_run_options(1)
+            self.assertEqual("/tools/vso/bin/driver", simulator.vso_workflow.driver_path())
+
+        vcomp = DummyVcompJob()
+        vcomp.bazel_vcomp_target = "//tb:unit"
+        test = SimpleNamespace(target="//tb:smoke", vcomper=vcomp)
+        iteration_cfg = SimpleNamespace(target=3, backend_assignments=[], jobs=[])
+        all_vcomp = {"//tb:unit": ([iteration_cfg], [test])}
+        init_args, _ = simulator.vso_workflow.build_init_command(all_vcomp, {"//tb:unit": vcomp})
+
+        self.assertIn("--simv_path_list", init_args)
+        self.assertIn("line,tgl", init_args)
+        self.assertEqual(["--phase", "stress:2"], init_args[-2:])
+        config = Path(init_args[init_args.index("--regr_config") + 1]).read_text(encoding="utf-8")
+        self.assertIn('name: "//tb:smoke"', config)
+        self.assertIn("count: 3", config)
+
+        ask_log = Path(rcfg.regression_dir) / "ask.log"
+        ask_log.write_text(
+            "CSO_RESULT:TEST=//tb:smoke BUILD=unit_vcomp RUN_ID=run-7 "
+            "SEED=0x2a SEED_TYPE=golden PHASE=stress\n",
+            encoding="utf-8",
+        )
+        result = simulator.vso_workflow.apply_ask_results(all_vcomp, str(ask_log))
+        self.assertEqual(1, result["planned_runs"])
+        run = SimpleNamespace(target="//tb:smoke", icfg=iteration_cfg, name="smoke", iteration=1)
+        self.assertEqual(42, simulator.prepare_test_job(run))
+        sim_options = shlex.split(simulator.generate_sim_options(run, 42))
+        self.assertEqual(["-vso", "cso"], sim_options[:2])
+        self.assertIn("run_id=run-7", sim_options)
+
+    def test_vso_ccex_is_separate_from_cso_and_ico(self):
+        merge_dir = tempfile.mkdtemp(prefix="ccex merge ")
+        options, simulator = self._validated([
+            "--simulator",
+            "VCS",
+            "--vso-ccex",
+            "--vso-ccex-rca",
+            "--vso-ccex-auto-merge-dir",
+            merge_dir,
+        ])
+        sim_options = shlex.split(simulator.generate_sim_options(SimpleNamespace(name="smoke", iteration=1), 7))
+
+        self.assertIn("ccex", sim_options)
+        self.assertIn("rca", sim_options)
+        self.assertIn("auto_merge_dir={}".format(merge_dir), sim_options)
+        with self.assertRaises(ValueError):
+            self._validated(["--simulator", "VCS", "--ico", "--vso-ccex"])
+        with self.assertRaises(ValueError):
+            self._validated(["--simulator", "XRUN", "--vso-ccex"])
+
+    def test_vso_cbv_adds_compile_workdir_only_when_requested(self):
+        _, normal = self._validated([
+            "--simulator",
+            "VCS",
+            "--vso",
+            "--cm",
+            "line",
+        ])
+        self.assertEqual("", normal.get_compile_template_context(DummyVcompJob())["vso_workdir"])
+
+        _, cbv = self._validated([
+            "--simulator",
+            "VCS",
+            "--vso",
+            "--vso-cbv",
+            "--cm",
+            "line",
+        ])
+        workdir = cbv.get_compile_template_context(DummyVcompJob())["vso_workdir"]
+        self.assertTrue(os.path.isdir(workdir))
+
+        with self.assertRaises(ValueError):
+            self._validated([
+                "--simulator",
+                "VCS",
+                "--vso",
+                "--vso-cbv",
+                "--vso-target-metric",
+                "line",
+            ])
+
+    def test_sim_platform_defers_backend_validation_until_discovery(self):
+        with mock.patch("args_parse.parser.SIM_PLATFORM", "VCS"):
+            options = parse_args(["--probe-packed", "64"])
+
+        self.assertEqual("VCS", options.simulator)
+        self.assertEqual(["--probe-packed"], options.xcelium_explicit_switches)
+
+    def test_custom_wave_tcl_is_not_rendered_over(self):
+        with tempfile.NamedTemporaryFile(suffix=".tcl") as wave_tcl:
+            for simulator_name, simulator_type, wave_type in (
+                ("VCS", VcsSimulator, "fsdb"),
+                ("XRUN", XceliumSimulator, "shm"),
+            ):
+                options = parse_args([
+                    "--simulator",
+                    simulator_name,
+                    "--waves",
+                    "--wave-type",
+                    wave_type,
+                    "--wave-tcl",
+                    wave_tcl.name,
+                ])
+                simulator = simulator_type(options, DummyRegressionConfig(), None)
+                capture = simulator.get_wave_capture_options(
+                    SimpleNamespace(job_dir=tempfile.mkdtemp()),
+                    "/tmp/generated-waves.tcl",
+                )
+
+                self.assertEqual(wave_tcl.name, capture["wave_tcl_path"])
+                self.assertFalse(capture["render_template"])
+
+    def test_xcelium_pldm_modes_use_separate_bazel_filelists(self):
+        for mode, suffix in (("pldm_sa", "pldm_sa"), ("pldm_sim", "pldm_ice")):
+            options = parse_args(["--simulator", "XRUN", "--emulator", mode])
+            simulator = XceliumSimulator(options, DummyRegressionConfig(), None)
+
+            self.assertEqual(
+                "/runfiles/tb/unit_compile_args_{}.f".format(suffix),
+                simulator.get_bazel_compile_args_file("/runfiles", "tb", "unit"),
+            )
 
     def test_simmer_dispatches_backend_validation_and_scheduler_capabilities(self):
         simmer_source = self._read_repo_file("bin/simmer.py")
@@ -154,6 +312,18 @@ class VcsRuntimeContractTest(unittest.TestCase):
         self.assertIn("simulator.get_scheduler_threads_per_test()", simmer_source)
         self.assertNotIn('options.simulator == "VCS"', simmer_source)
         self.assertNotIn('options.simulator == "XRUN"', simmer_source)
+        self.assertNotIn("options.ico", simmer_source)
+        self.assertNotIn("options.vso", simmer_source)
+        self.assertNotIn("options.cm", simmer_source)
+        self.assertNotIn("options.coverage", simmer_source)
+
+    def test_shell_templates_quote_runtime_paths(self):
+        for template_path in (
+                "bin/templates/sim_template.sh.j2",
+                "bin/templates/vcs_compile_template.sh.j2",
+                "bin/templates/xrun_compile_template.sh.j2",
+        ):
+            self.assertIn("|shell_quote", self._read_repo_file(template_path), template_path)
 
     def test_simulator_adapters_reject_opposite_backend_switches(self):
         vcs_options = parse_args(["--simulator", "VCS"])
@@ -171,7 +341,8 @@ class VcsRuntimeContractTest(unittest.TestCase):
 
         self.assertEqual("0", parse_args(["--python-seed", "0"]).python_seed)
         self.assertIn("range(1, iterations + 1)", simmer_source)
-        self.assertIn("if options.vso and self.icfg.spawn_count <= self.icfg.target:", simmer_source)
+        self.assertIn("IcoInitJob", simmer_source)
+        self.assertNotIn("vso_assignments", simmer_source)
         self.assertNotIn("random.seed(options.python_seed)", simmer_source)
 
     def test_category_config_is_explicitly_enabled(self):
@@ -233,6 +404,38 @@ class VcsRuntimeContractTest(unittest.TestCase):
         self.assertIn("-partcomp=incr_clean", partcomp_args)
         self.assertIn("-fastpartcomp=j8", partcomp_args)
 
+    def test_vcs_coverage_detail_options_follow_command_reference(self):
+        options, simulator = self._validated([
+            "--simulator",
+            "VCS",
+            "--cm",
+            "line+cond+tgl",
+            "--vcs-cm-report",
+            "svpackages",
+            "--vcs-cm-report",
+            "noinitial",
+            "--vcs-cm-cond",
+            "obs+event",
+            "--vcs-cm-tgl",
+            "portsonly",
+            "--vcs-urg-parallel",
+            "--vcs-urg-show-tests",
+        ])
+        simulator.env = SimpleNamespace(get_template=lambda _: SimpleNamespace(render=lambda **kwargs: "#!/bin/sh\n"))
+        compile_options = shlex.split(simulator.generate_compile_options(DummyVcompJob())["cov_opts"])
+
+        self.assertEqual(2, compile_options.count("-cm_report"))
+        self.assertIn("obs+event", compile_options)
+        self.assertIn("portsonly", compile_options)
+        merge_template = self._read_repo_file("bin/templates/vcs_cov_merge_template.sh.j2")
+        self.assertIn("{% if urg_parallel -%}", merge_template)
+        self.assertIn("{% if urg_show_tests -%}", merge_template)
+
+        with self.assertRaises(ValueError):
+            self._validated(["--simulator", "VCS", "--cm", "line", "--vcs-cm-cond", "obs"])
+        with self.assertRaises(ValueError):
+            self._validated(["--simulator", "VCS", "--cm", "tgl", "--vcs-cm-tgl", "modportarr"])
+
     def test_vcs_partition_compile_supports_external_shared_database(self):
         sharedlib = tempfile.mkdtemp(prefix="shared partition ")
         writable = os.path.join(tempfile.mkdtemp(prefix="writable parent "), "partition database")
@@ -260,10 +463,10 @@ class VcsRuntimeContractTest(unittest.TestCase):
         self.assertIn("-fastpartcomp=j4", partcomp_args)
 
     def test_vcs_partition_compile_rejects_invalid_configuration(self):
-        with self.assertRaises(SystemExit):
-            parse_args(["--simulator", "VCS", "--vcs-partcomp-jobs", "0"])
-        with self.assertRaises(SystemExit):
-            parse_args([
+        with self.assertRaises(ValueError):
+            self._validated(["--simulator", "VCS", "--vcs-partcomp-jobs", "0"])
+        with self.assertRaises(ValueError):
+            self._validated([
                 "--simulator",
                 "VCS",
                 "--vcs-partcomp-mode",
@@ -272,8 +475,8 @@ class VcsRuntimeContractTest(unittest.TestCase):
                 "/tmp/partcomp",
             ])
         sharedlib = tempfile.mkdtemp()
-        with self.assertRaises(SystemExit):
-            parse_args([
+        with self.assertRaises(ValueError):
+            self._validated([
                 "--simulator",
                 "VCS",
                 "--vcs-partcomp-dir",
@@ -301,23 +504,23 @@ class VcsRuntimeContractTest(unittest.TestCase):
 
     def test_smartlog_is_vcs_only_and_simmer_profile_is_common(self):
         self.assertTrue(parse_args(["-t", "unit:test", "--simulator", "XRUN", "--simmer-profile"]).simmer_profile)
-        with self.assertRaises(SystemExit):
-            parse_args(["-t", "unit:test", "--simulator", "XRUN", "--smartlog"])
-        with self.assertRaises(SystemExit):
-            parse_args(["-t", "unit:test", "--simulator", "XRUN", "--vcs-partcomp-jobs", "4"])
-        with self.assertRaises(SystemExit):
-            parse_args(["-t", "unit:test", "--simulator", "XRUN", "--vcs-partcomp-mode", "adaptive"])
+        with self.assertRaises(ValueError):
+            self._validated(["-t", "unit:test", "--simulator", "XRUN", "--smartlog"])
+        with self.assertRaises(ValueError):
+            self._validated(["-t", "unit:test", "--simulator", "XRUN", "--vcs-partcomp-jobs", "4"])
+        with self.assertRaises(ValueError):
+            self._validated(["-t", "unit:test", "--simulator", "XRUN", "--vcs-partcomp-mode", "adaptive"])
 
     def test_tool_specific_arguments_are_rejected_by_the_other_backend(self):
-        with self.assertRaises(SystemExit):
-            parse_args(["-t", "unit:test", "--simulator", "VCS", "--probe-packed", "64"])
-        with self.assertRaises(SystemExit):
-            parse_args(["-t", "unit:test", "--simulator", "VCS", "--probe-packed", "128"])
-        with self.assertRaises(SystemExit):
-            parse_args(["-t", "unit:test", "--simulator", "XRUN", "--gui"])
+        with self.assertRaises(ValueError):
+            self._validated(["-t", "unit:test", "--simulator", "VCS", "--probe-packed", "64"])
+        with self.assertRaises(ValueError):
+            self._validated(["-t", "unit:test", "--simulator", "VCS", "--probe-packed", "128"])
+        with self.assertRaises(ValueError):
+            self._validated(["-t", "unit:test", "--simulator", "XRUN", "--gui"])
         with mock.patch("args_parse.parser.SIM_PLATFORM", "VCS"):
-            with self.assertRaises(SystemExit):
-                parse_args(["-t", "unit:test", "--probe-packed", "64"])
+            with self.assertRaises(ValueError):
+                self._validated(["-t", "unit:test", "--probe-packed", "64"])
 
         common = self._read_repo_file("bin/args_parse/common.py")
         vcs = self._read_repo_file("bin/args_parse/vcs.py")
@@ -335,10 +538,10 @@ class VcsRuntimeContractTest(unittest.TestCase):
             parse_args(["--wave-start", "-1"])
         with self.assertRaises(SystemExit):
             parse_args(["--wave-start", "20", "--wave-end", "10"])
-        with self.assertRaises(SystemExit):
-            parse_args(["--simulator", "XRUN", "--wave-delta"])
-        with self.assertRaises(SystemExit):
-            parse_args(["--simulator", "XRUN", "--waves", "--wave-type", "vwdb", "--wave-delta"])
+        with self.assertRaises(ValueError):
+            self._validated(["--simulator", "XRUN", "--wave-delta"])
+        with self.assertRaises(ValueError):
+            self._validated(["--simulator", "XRUN", "--waves", "--wave-type", "vwdb", "--wave-delta"])
 
     def test_xcelium_msie_incremental_requires_primary_snapshot_name(self):
         with self.assertRaises(SystemExit):
@@ -347,14 +550,13 @@ class VcsRuntimeContractTest(unittest.TestCase):
 
         with self.assertRaises(SystemExit):
             parse_args(["--simulator", "XRUN", "--msie-prim"])
-        with self.assertRaises(SystemExit):
-            parse_args(["--simulator", "XRUN", "--msie-primary-name", "snapshot"])
+        with self.assertRaises(ValueError):
+            self._validated(["--simulator", "XRUN", "--msie-primary-name", "snapshot"])
 
     def test_xcelium_msie_template_separates_primary_top_and_snapshot(self):
-        template = jinja2.Template(
-            self._read_repo_file("bin/templates/xrun_compile_template.sh.j2"),
-            undefined=jinja2.StrictUndefined,
-        )
+        environment = jinja2.Environment(undefined=jinja2.StrictUndefined)
+        environment.filters["shell_quote"] = shlex.quote
+        template = environment.from_string(self._read_repo_file("bin/templates/xrun_compile_template.sh.j2"))
         rendered = template.render(
             VCOMP_DIR="/results/sys__XRUN_VCOMP_PRIM",
             additional_defines=[],
@@ -510,10 +712,13 @@ class VcsRuntimeContractTest(unittest.TestCase):
         template = self._read_repo_file("bin/templates/vcs_compile_template.sh.j2")
         compile_args = self._read_repo_file("vendors/synopsys/verilog_dv_tb_compile_args.f.template")
 
-        self.assertIn("mkdir -p {{ VCOMP_DIR }}/csrc", template)
-        self.assertIn("-Mdir={{ VCOMP_DIR }}/csrc", template)
-        self.assertIn("-Mlib={{ VCOMP_DIR }}/csrc", template)
+        self.assertIn("mkdir -p {{ (VCOMP_DIR ~ '/csrc')|shell_quote }}", template)
+        self.assertIn("-Mdir={{ (VCOMP_DIR ~ '/csrc')|shell_quote }}", template)
+        self.assertIn("-Mlib={{ (VCOMP_DIR ~ '/csrc')|shell_quote }}", template)
         self.assertIn("{{ partcomp_opts }}", template)
+        self.assertIn("{% if options.vso -%}", template)
+        self.assertIn("-vso_opts buildname={{ vso_build_name|shell_quote }}", template)
+        self.assertIn("{% elif options.vso_ccex -%}", template)
         self.assertNotIn("-partcomp", compile_args)
         self.assertIn("-Mupdate", compile_args)
 
@@ -529,11 +734,10 @@ class VcsRuntimeContractTest(unittest.TestCase):
         simulator.validate_reusable_compile_artifacts(vcomp)
 
     def test_xcelium_batch_vwdb_and_xprop_contract(self):
-        options = parse_args(["-t", "unit:test", "--simulator", "XRUN", "--waves", "--xprop", "F"])
+        options, simulator = self._validated(["-t", "unit:test", "--simulator", "XRUN", "--waves", "--xprop", "F"])
         self.assertEqual("vwdb", options.wave_type)
         self.assertFalse(options.gui)
 
-        simulator = XceliumSimulator(options, DummyRegressionConfig(), None)
         test_job = SimpleNamespace(job_dir=tempfile.mkdtemp())
         capture = simulator.get_wave_capture_options(test_job, "/tmp/waves.tcl")
         self.assertEqual("hdl_top", capture["default_capture"])
@@ -652,10 +856,10 @@ class VcsRuntimeContractTest(unittest.TestCase):
         self.assertEqual("76.00%", coverage["cf"]["Overall"])
 
     def test_xcelium_coverage_and_mce_details_are_validated(self):
-        with self.assertRaises(SystemExit):
-            parse_args(["--simulator", "XRUN", "--covfile", "/missing/coverage.ccf"])
-        with self.assertRaises(SystemExit):
-            parse_args([
+        with self.assertRaises(ValueError):
+            self._validated(["--simulator", "XRUN", "--covfile", "/missing/coverage.ccf"])
+        with self.assertRaises(ValueError):
+            self._validated([
                 "--simulator",
                 "XRUN",
                 "--coverage",
@@ -663,8 +867,8 @@ class VcsRuntimeContractTest(unittest.TestCase):
                 "--covfile",
                 "/missing/coverage.ccf",
             ])
-        with self.assertRaises(SystemExit):
-            parse_args(["--simulator", "XRUN", "--mce-sim-count", "4"])
+        with self.assertRaises(ValueError):
+            self._validated(["--simulator", "XRUN", "--mce-sim-count", "4"])
 
     def test_hal_empty_direct_waiver_does_not_match_every_message(self):
         with tempfile.NamedTemporaryFile(mode="w", suffix=".xml") as logfile:
@@ -673,22 +877,6 @@ class VcsRuntimeContractTest(unittest.TestCase):
 
             self.assertIsNone(HalLintLog(logfile.name, None).waiver_direct_regex)
             self.assertIsNone(HalLintLog(logfile.name, "").waiver_direct_regex)
-
-    def test_vso_unselected_tests_are_skipped(self):
-        options = parse_args(["--simulator", "VCS", "--vso", "--cm", "line"])
-        simulator = VcsSimulator(options, DummyRegressionConfig(), None)
-        icfg = SimpleNamespace(target=1, vso_assignments=[])
-        test = SimpleNamespace(
-            jobstatus=JobStatus.NOT_STARTED,
-            target="//unit:test",
-            vcomper=SimpleNamespace(name="unit_vcomp"),
-        )
-
-        with tempfile.NamedTemporaryFile(mode="w") as ask_log:
-            result = simulator.apply_vso_ask_results({"//unit:tb": ([icfg], [test])}, ask_log.name)
-
-        self.assertEqual(0, result["planned_runs"])
-        self.assertEqual(JobStatus.SKIPPED, test.jobstatus)
 
     def test_vcs_warning_parser_accepts_message_ids(self):
         options = parse_args(["-t", "unit:test", "--simulator", "VCS"])
@@ -810,7 +998,7 @@ class VcsRuntimeContractTest(unittest.TestCase):
         sim_template = self._read_repo_file("bin/templates/sim_template.sh.j2")
         waves_template = self._read_repo_file("bin/templates/run_waves_template.sh.j2")
 
-        self.assertIn("{{ check_test_path }}", sim_template)
+        self.assertIn("{{ check_test_path|shell_quote }}", sim_template)
         self.assertNotIn("bazel-bin/external/rules_verilog", sim_template)
         self.assertIn("SIMMER_WAVE_LAUNCHER", waves_template)
         self.assertNotIn("/global/tools/lsf", waves_template)

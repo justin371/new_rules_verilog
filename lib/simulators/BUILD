@@ -29,8 +29,14 @@ py_library(
         ":base",
         ":options",
         ":vcs_options",
+        ":vso",
         "//lib:coverage_data",
     ],
+)
+
+py_library(
+    name = "vso",
+    srcs = ["vso.py"],
 )
 
 py_library(

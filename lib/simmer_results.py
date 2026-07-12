@@ -136,7 +136,7 @@ def record_test_job(run, test_job, waves_script=None, waves_path=None):
     })
 
 
-def finalize_run(run, regression_log_path=None, vso_finalize_merge_failed=False):
+def finalize_run(run, regression_log_path=None, backend_finalize_failed=False):
     if run is None:
         return
     run["finished_at"] = _timestamp()
@@ -155,8 +155,12 @@ def finalize_run(run, regression_log_path=None, vso_finalize_merge_failed=False)
         "total": planned_tests,
     }
 
+    if backend_finalize_failed:
+        run["status"] = "FAILED"
+        return
+
     if tests:
-        if failed or vso_finalize_merge_failed:
+        if failed:
             run["status"] = "FAILED"
         elif skipped:
             run["status"] = "PARTIAL"

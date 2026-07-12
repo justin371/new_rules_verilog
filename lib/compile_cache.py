@@ -50,14 +50,38 @@ def _source_digest(project_dir):
     return digest.hexdigest()
 
 
-def compile_fingerprint(project_dir, compile_script, compile_args_path):
+def _compile_inputs_digest(compile_inputs_path, runfiles_root):
+    if not compile_inputs_path:
+        return None
+
+    digest = hashlib.sha256()
+    with open(compile_inputs_path, "r", encoding="utf-8") as filep:
+        for line in filep:
+            entry = line.rstrip("\n")
+            _, separator, relative_path = entry.partition("\t")
+            if not separator:
+                raise RuntimeError("Malformed compile input inventory entry: {!r}".format(entry))
+            input_path = os.path.join(runfiles_root, relative_path)
+            if not os.path.isfile(input_path):
+                raise RuntimeError("Compile input inventory references missing file: {}".format(input_path))
+            digest.update(entry.encode("utf-8"))
+            digest.update(b"\0")
+            digest.update(_file_bytes(input_path))
+            digest.update(b"\0")
+    return digest.hexdigest()
+
+
+def compile_fingerprint(project_dir, compile_script, compile_args_path, compile_inputs_path=None, runfiles_root=None):
     """Return the source, generated filelist and compile-mode identity."""
-    return {
-        "schema_version": 1,
+    fingerprint = {
+        "schema_version": 2,
         "source_sha256": _source_digest(os.fspath(project_dir)),
         "compile_script_sha256": _digest_bytes(compile_script.encode("utf-8")),
         "compile_args_sha256": _digest_bytes(_file_bytes(compile_args_path)),
     }
+    if compile_inputs_path:
+        fingerprint["compile_inputs_sha256"] = _compile_inputs_digest(compile_inputs_path, runfiles_root)
+    return fingerprint
 
 
 def _fingerprint_path(job_dir):

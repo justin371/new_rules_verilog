@@ -112,7 +112,9 @@ class VcsFilelistValidationTest(unittest.TestCase):
             "tests/vcs_filelist_validation/dv_tb_vcs_compile_args.f": [
                 "-file external/filelist_external_fixture/external_rtl.f",
                 "-file tests/vcs_filelist_validation/unit_test_top.f",
+                "+define+CADENCE_WORKAROUND",
                 "+define+UNIFIED_VCS_COMPILE_ARG",
+                "+define+XRUNNER",
                 "+optconfigfile+tests/vcs_filelist_validation/vcs_partitions.cfg",
             ],
         }
@@ -140,6 +142,7 @@ class VcsFilelistValidationTest(unittest.TestCase):
         external_flist = read_runfile("external/filelist_external_fixture/external_rtl.f")
         self.assertIn("external/filelist_external_fixture/external_ip.sv", external_flist)
         self.assertNotIn("../", external_flist)
+        self.assertNotIn("+define+CADENCE\n", read_runfile("tests/vcs_filelist_validation/dv_tb_vcs_compile_args.f"))
 
     def test_xcelium_tb_coverage_file_is_in_compile_args(self):
         compile_args = read_runfile("tests/vcs_filelist_validation/dv_tb_xrun_ccf_compile_args.f")
@@ -150,6 +153,11 @@ class VcsFilelistValidationTest(unittest.TestCase):
 
         vcs_options = ast.literal_eval(read_runfile("tests/vcs_filelist_validation/dv_tb_vcs_tb_options.py"))
         self.assertEqual("tests/vcs_filelist_validation/coverage_hier.cfg", vcs_options["vcs_cm_hier"])
+
+        compile_inputs = read_runfile(vcs_options["compile_inputs"])
+        self.assertIn("source\ttests/vcs_filelist_validation/unit_test_top.sv", compile_inputs)
+        self.assertIn("source\texternal/filelist_external_fixture/external_ip.sv", compile_inputs)
+        self.assertIn("runfile\ttests/vcs_filelist_validation/coverage_hier.cfg", compile_inputs)
 
     def test_xcelium_msie_filelists_are_bazel_generated_and_partitioned(self):
         primary_path = "tests/vcs_filelist_validation/dv_tb_xrun_ccf_msie_primary_compile_args.f"

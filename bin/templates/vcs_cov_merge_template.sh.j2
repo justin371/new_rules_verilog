@@ -4,7 +4,14 @@ set -Eeuo pipefail
 trap 'rc=$?; printf "ERROR: VCS coverage merge failed at line %s (exit %s): %s\n" "$LINENO" "$rc" "$BASH_COMMAND" >&2' ERR
 
 # Merge the coverage database produced by VCS -cm_dir.
-{{ urg_command }} -full64 -dir "{{ cov_db_path }}" -dbname "{{ merged_db_path }}" -flex_merge union -report "{{ report_dir }}"
+{{ urg_command }} -full64 -dir "{{ cov_db_path }}" -dbname "{{ merged_db_path }}" -flex_merge union \
+{% if urg_parallel -%}
+  -parallel \
+{% endif -%}
+{% if urg_show_tests -%}
+  -show tests \
+{% endif -%}
+  -report "{{ report_dir }}"
 
 # Launch Verdi for the merged database.
 echo "To view merged coverage: {{ verdi_command }} -cov -covdir {{ merged_db_path }}"

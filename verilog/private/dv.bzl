@@ -5,7 +5,7 @@ load("//deps:gatesim_modes_list.bzl", "GATESIM_MODES")
 load(":simulators/pldm.bzl", "pldm_dv_backend")
 load(":simulators/vcs.bzl", "vcs_dv_backend")
 load(":simulators/xcelium.bzl", "xcelium_dv_backend")
-load(":verilog.bzl", "ToolEncapsulationInfo", "VerilogInfo", "flists_to_arguments", "gather_shell_defines", "get_transitive_srcs", "runfiles_relative_short_path")
+load(":verilog.bzl", "ToolEncapsulationInfo", "VerilogInfo", "flists_to_arguments", "gather_shell_defines", "get_transitive_srcs", "runfiles_relative_short_path", "verilog_input_inventory")
 
 DVTestInfo = provider(fields = {
     "sim_opts": "Simulation :options to carry forward.",
@@ -554,9 +554,23 @@ def _verilog_dv_tb_impl(ctx):
         output = ctx.outputs.compile_warning_waivers,
         content = "[\n" + "\n".join(["re.compile({}),".format(repr(ww)) for ww in ctx.attr.warning_waivers]) + "\n]\n",
     )
+    all_deps = ctx.attr.deps + ctx.attr.shells + ctx.attr.msie_primary_deps + ctx.attr.msie_incremental_deps
+    compile_input_files = (
+        ctx.files.ccf +
+        ctx.files.extra_runfiles +
+        ctx.files.msie_primary_extra_runfiles +
+        ctx.files.msie_incremental_extra_runfiles +
+        ([ctx.file.xcelium_covfile] if ctx.file.xcelium_covfile else []) +
+        ([ctx.file.vcs_cm_hier] if ctx.file.vcs_cm_hier else [])
+    )
+    ctx.actions.write(
+        output = ctx.outputs.compile_inputs,
+        content = verilog_input_inventory(all_deps, compile_input_files),
+    )
     ctx.actions.write(
         output = ctx.outputs.tb_options,
         content = str({
+            "compile_inputs": runfiles_relative_short_path(ctx.outputs.compile_inputs),
             "dut_instance": ctx.attr.dut_instance,
             "dut_top": ctx.attr.dut_top,
             "vcs_cm_hier": runfiles_relative_short_path(ctx.file.vcs_cm_hier) if ctx.file.vcs_cm_hier else "",
@@ -573,11 +587,11 @@ def _verilog_dv_tb_impl(ctx):
         outputs = [ctx.outputs.executable],
     )
 
-    all_deps = ctx.attr.deps + ctx.attr.shells + ctx.attr.msie_primary_deps + ctx.attr.msie_incremental_deps
     trans_srcs = get_transitive_srcs([], all_deps, VerilogInfo, "transitive_sources", allow_other_outputs = True)
     trans_flists = get_transitive_srcs([], all_deps, VerilogInfo, "transitive_flists", allow_other_outputs = False)
     generated_outputs = [
         ctx.outputs.compile_args,
+        ctx.outputs.compile_inputs,
         ctx.outputs.runtime_args,
         ctx.outputs.compile_warning_waivers,
         ctx.outputs.tb_options,
@@ -752,6 +766,7 @@ verilog_dv_tb = rule(
     outputs = {
         "runtime_args": "%{name}_runtime_args.f",
         "compile_args": "%{name}_compile_args.f",
+        "compile_inputs": "%{name}_compile_inputs.txt",
         "compile_args_pldm_ice": "%{name}_compile_args_pldm_ice.f",
         "compile_args_pldm_sa": "%{name}_compile_args_pldm_sa.f",
         "compile_warning_waivers": "%{name}_compile_warning_waivers",

@@ -65,14 +65,20 @@ class SimmerResultsTest(unittest.TestCase):
         self.assertEqual("{broken", backups[0].read_text(encoding="utf-8"))
         self.assertEqual(1, len(json.loads(path.read_text(encoding="utf-8"))["runs"]))
 
-    def test_vso_failure_takes_precedence_over_partial(self):
+    def test_backend_finalize_failure_takes_precedence_over_partial(self):
         run = self._completed_run()
         run["planned_tests"] = 2
 
-        simmer_results.finalize_run(run, vso_finalize_merge_failed=True)
+        simmer_results.finalize_run(run, backend_finalize_failed=True)
 
         self.assertEqual("FAILED", run["status"])
-        self.assertEqual(1, run["summary"]["skipped"])
+
+    def test_backend_finalize_failure_with_no_tests_is_failed(self):
+        run = simmer_results.create_run(["simmer", "-t", "tb:test"], self.rcfg, 0)
+
+        simmer_results.finalize_run(run, backend_finalize_failed=True)
+
+        self.assertEqual("FAILED", run["status"])
 
     def test_multi_test_history_keeps_summary_and_one_representative_test(self):
         run = self._completed_run()

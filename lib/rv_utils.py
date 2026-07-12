@@ -38,7 +38,7 @@ class IterationCfg():
         self.target = target # Total number of iterations to spawn
         self.spawn_count = 1 # Current count of spawned iterations
         self.jobs = [] # List of jobs associated with this iteration config
-        self.vso_assignments = [] # Optional VSO ask-all planned runs for this test template
+        self.backend_assignments = [] # Optional dynamically planned runs
 
     def inc(self, job):
         """Increment spawn count and add a job to the iteration"""

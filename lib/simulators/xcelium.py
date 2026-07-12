@@ -58,6 +58,7 @@ class XceliumSimulator(SimulatorInterface):
             if emu_template_path:
                 emu_loader = jinja2.FileSystemLoader(searchpath=emu_template_path)
                 emu_env = jinja2.Environment(loader=emu_loader)
+                emu_env.filters['shell_quote'] = shlex.quote
                 try:
                     template = emu_env.get_template('xrun_emu_compile_template.sh.j2')
                     log.debug("Using EMU compile template from EMU_JINJA2_PATH")
@@ -93,15 +94,31 @@ class XceliumSimulator(SimulatorInterface):
             return self.options.mce_sim_count or (os.cpu_count() or 1)
         return 1
 
+    def coverage_enabled(self):
+        return bool(self.options.coverage)
+
+    def get_compile_template_context(self, vcomp_job):
+        if not self.options.emulator:
+            return {}
+        relpath, bazel_target = vcomp_job.bazel_vcomp_target.split(':')
+        return {
+            'bazel_compile_args_rtl':
+            self.get_bazel_emu_compile_args_file(
+                vcomp_job.bazel_runfiles_main,
+                relpath[2:],
+                bazel_target,
+            ),
+        }
+
     def get_bazel_compile_args_file(self, bazel_runfiles_main, relpath, bazel_target):
         if self.options.msie_prim:
             return os.path.join(bazel_runfiles_main, relpath, "{}_msie_primary_compile_args.f".format(bazel_target))
         if self.options.msie_incr:
             return os.path.join(bazel_runfiles_main, relpath, "{}_msie_incremental_compile_args.f".format(bazel_target))
-        # Handle EMU exception first
         if self.options.emulator == 'pldm_sa':
-            return os.path.join(bazel_runfiles_main, relpath, "{}_compile_args".format(bazel_target))
-        # Default XRUN/non-pldm_sa EMU
+            return os.path.join(bazel_runfiles_main, relpath, "{}_compile_args_pldm_sa.f".format(bazel_target))
+        if self.options.emulator == 'pldm_sim':
+            return os.path.join(bazel_runfiles_main, relpath, "{}_compile_args_pldm_ice.f".format(bazel_target))
         return os.path.join(bazel_runfiles_main, relpath, "{}_compile_args.f".format(bazel_target))
 
     def get_vcomp_job_dir(self, default_job_dir):
@@ -269,7 +286,7 @@ class XceliumSimulator(SimulatorInterface):
         return os.path.join(bazel_runfiles_main, relpath, "{}_runtime_args.f".format(bazel_target))
 
     def get_bazel_emu_compile_args_file(self, bazel_runfiles_main, relpath, bazel_target):
-        return os.path.join(bazel_runfiles_main, relpath, "{}_rtl_compile_args".format(bazel_target))
+        return os.path.join(bazel_runfiles_main, relpath, "{}_compile_args_pldm_ice.f".format(bazel_target))
 
     def generate_compile_options(self, vcomp_job):
         opts = {'cov_opts': '', 'xprop_cmd': None, 'additional_defines': []}
@@ -414,6 +431,7 @@ class XceliumSimulator(SimulatorInterface):
             'wave_tcl_path': wave_tcl_path,
             'waves_db': waves_db,
             'default_capture': default_capture,
+            'render_template': not self.options.wave_tcl,
         }
 
     def get_no_wave_capture_options(self, test_job, nwaves_tcl_path):
