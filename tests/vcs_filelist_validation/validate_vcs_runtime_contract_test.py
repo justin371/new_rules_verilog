@@ -332,8 +332,8 @@ class VcsRuntimeContractTest(unittest.TestCase):
                 "--vcs-cm-hier",
                 vcs_hier.name,
             ])
-            vcs_inputs = VcsSimulator(vcs_options, DummyRegressionConfig(), None).get_compile_fingerprint_inputs(
-                DummyVcompJob())
+            vcs_inputs = VcsSimulator(vcs_options, DummyRegressionConfig(),
+                                      None).get_compile_fingerprint_inputs(DummyVcompJob())
             self.assertIn(vcs_hier.name, vcs_inputs["extra_input_paths"])
 
             xrun_options = parse_args([
@@ -344,8 +344,7 @@ class VcsRuntimeContractTest(unittest.TestCase):
                 "--covfile",
                 xrun_covfile.name,
             ])
-            xrun_inputs = XceliumSimulator(xrun_options,
-                                           DummyRegressionConfig(),
+            xrun_inputs = XceliumSimulator(xrun_options, DummyRegressionConfig(),
                                            None).get_compile_fingerprint_inputs(DummyVcompJob())
             self.assertIn(xrun_covfile.name, xrun_inputs["extra_input_paths"])
 

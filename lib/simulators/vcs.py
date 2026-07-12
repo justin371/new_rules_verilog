@@ -140,10 +140,9 @@ class VcsSimulator(SimulatorInterface):
         inputs = super().get_compile_fingerprint_inputs(vcomp_job)
         if self.options.vcs_cm_hier:
             inputs["extra_input_paths"].append(self.options.vcs_cm_hier)
-        inputs["environment"].update({
-            key: os.environ.get(key, "")
-            for key in ("LM_LICENSE_FILE", "VCS_HOME", "VSO_HOME")
-        })
+        inputs["environment"].update(
+            {key: os.environ.get(key, "")
+             for key in ("LM_LICENSE_FILE", "VCS_HOME", "VSO_HOME")})
         return inputs
 
     def get_scheduler_threads_per_test(self):

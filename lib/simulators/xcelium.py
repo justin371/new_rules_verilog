@@ -114,10 +114,7 @@ class XceliumSimulator(SimulatorInterface):
         inputs = super().get_compile_fingerprint_inputs(vcomp_job)
         if self.options.coverage and self.options.covfile_was_explicit:
             inputs["extra_input_paths"].append(self.options.covfile)
-        inputs["environment"].update({
-            key: os.environ.get(key, "")
-            for key in ("LM_LICENSE_FILE", "XCELIUMHOME")
-        })
+        inputs["environment"].update({key: os.environ.get(key, "") for key in ("LM_LICENSE_FILE", "XCELIUMHOME")})
         return inputs
 
     def get_bazel_compile_args_file(self, bazel_runfiles_main, relpath, bazel_target):
