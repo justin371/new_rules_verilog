@@ -116,6 +116,26 @@ Use `--vcs-partcomp-mode disabled` to compare against regular incremental
 compilation. Shared partition databases and the full compatibility guidance are
 documented in [VCS and Xcelium workflow](docs/simmer_vcs_xcelium.md#vcs-partition-compile).
 
+### VCS ICO and VSO.ai
+
+ICO, VSO.ai CSO and VSO.ai Coverage Directed Solver are separate opt-in flows:
+
+```bash
+simmer -t 'sys_tb:*@20' --simulator VCS --ico \
+  --ico-shared-record /nfs/project/ico/shared_record
+
+simmer -t 'sys_tb:*@100' --simulator VCS --vso --vso-cbv --cm line \
+  --vso-dbdir /nfs/project/vso/model --vso-phase stress:3
+
+simmer -t 'sys_tb:*@20' --simulator VCS --vso-ccex \
+  --vso-ccex-auto-merge-dir /nfs/project/ccex/shared
+```
+
+ICO uses the runtime-only shared-CDB model from the Y-2026.03 ICO Guide. VSO.ai
+CSO uses the documented simplified init/ask-all/execute/finalize+merge model;
+CCEX adds `-vso ccex` at compile and runtime. They cannot be combined in one
+invocation and still require licensed Red Hat validation.
+
 ### Xcelium MSIE gatesim
 
 For heavy gate-level simulation, keep the stable gate netlist in
@@ -168,6 +188,10 @@ simmer -t 'sys_tb:*@10' --simulator VCS --cm A \
 simmer -t 'sys_tb:*@10' --simulator XRUN --coverage A \
   --report --report-dir "$PWD/report-output"
 ```
+
+For VCS, `--vcs-cm-cond obs+event`, `--vcs-cm-tgl portsonly`,
+`--vcs-urg-parallel`, and `--vcs-urg-show-tests` expose the documented coverage
+collection and merge controls without leaking them into XRUN.
 
 Configure coverage files on the matching testbench target: use `vcs_cm_hier`
 for VCS or `xcelium_covfile` for Xcelium, plus `dut_top`/`dut_instance` when the
@@ -232,6 +256,10 @@ available without installing a wrapper:
 ```bash
 bazel run //bin:simmer -- --help
 ```
+
+The [simmer command cookbook](docs/simmer_vcs_xcelium.md#command-cookbook)
+collects ready-to-adapt commands for normal runs, reuse, waves, coverage,
+reporting, MSIE, Palladium, ICO, VSO.ai and CCEX.
 
 ### Python Dependencies
 rules_verilog is also dependent on several python libraries. These are defined in requirements.txt and may be installed in the package manager of your choice. The recommended flow is to install them via the `pip_parse` rule in your `WORKSPACE` file:

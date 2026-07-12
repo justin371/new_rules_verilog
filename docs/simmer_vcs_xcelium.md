@@ -31,6 +31,100 @@ RV_VCS_RUNNER="runmod vcs --" simmer -t <bench>:<test> --simulator VCS
 simmer -t <bench>:<test> --simulator VCS --vcs-runner "runmod vcs --"
 ```
 
+## Command cookbook
+
+Quote test selectors so the shell does not expand `*`. Start with discovery when
+checking a new target or checkout:
+
+```bash
+simmer -t 'sys_tb:smoke_test@1' --simulator VCS --discovery-only
+simmer -t 'sys_tb:smoke_test@1' --simulator XRUN --discovery-only
+simmer -t 'sys_tb:*@10' --tag nightly --ntag broken --jobs 8
+```
+
+Normal runs and deterministic reruns:
+
+```bash
+simmer -t 'sys_tb:smoke_test@1' --simulator VCS
+simmer -t 'sys_tb:smoke_test@1' --simulator XRUN
+simmer -t 'sys_tb:smoke_test@1' --simulator VCS --seed 12345
+simmer -t 'sys_tb:*@10' --simulator VCS --python-seed 12345
+```
+
+Compile reuse and profiling:
+
+```bash
+simmer -t 'sys_tb:smoke_test@1' --simulator VCS --no-compile
+simmer -t 'sys_tb:smoke_test@1' --simulator VCS --no-compile --no-bazel
+simmer -t 'sys_tb:smoke_test@1' --simulator VCS --recompile
+simmer -t 'sys_tb:*@10' --simulator VCS --simmer-profile --vcs-profile
+```
+
+Wave and debug runs:
+
+```bash
+simmer -t 'sys_tb:smoke_test@1' --simulator VCS --waves hdl_top.dut --wave-depth 8
+simmer -t 'sys_tb:smoke_test@1' --simulator VCS --wave-tcl ./debug/waves.tcl --waves
+simmer -t 'sys_tb:smoke_test@1' --simulator VCS --gui
+simmer -t 'sys_tb:smoke_test@1' --simulator XRUN --waves hdl_top.dut --wave-type vwdb
+```
+
+Coverage and reports:
+
+```bash
+simmer -t 'sys_tb:*@10' --simulator VCS --cm line+cond+fsm \
+  --vcs-cm-cond obs+event --vcs-urg-parallel --report
+simmer -t 'sys_tb:*@10' --simulator VCS --cm tgl \
+  --vcs-cm-tgl portsonly --vcs-urg-show-tests --report
+simmer -t 'sys_tb:*@10' --simulator XRUN --coverage A --report
+```
+
+VCS optimization flows are separate and cannot be combined:
+
+```bash
+# ICO shared CDB; no VCS compile-time ICO option is added.
+simmer -t 'sys_tb:*@20' --simulator VCS --ico \
+  --ico-shared-record /nfs/project/ico/shared_record
+
+# VSO.ai simplified CSO init/ask-all/execute/finalize+merge flow.
+simmer -t 'sys_tb:*@100' --simulator VCS --vso --cm A \
+  --vso-dbdir /nfs/project/vso/model
+
+# Add Change-Based Verification tagging for a stress-focused run.
+simmer -t 'sys_tb:*@100' --simulator VCS --vso --vso-cbv --cm line \
+  --vso-dbdir /nfs/project/vso/model --vso-phase stress:3
+
+# VSO.ai LCA Coverage Directed Solver, independent of CSO and ICO.
+simmer -t 'sys_tb:*@20' --simulator VCS --vso-ccex \
+  --vso-ccex-auto-merge-dir /nfs/project/ccex/shared --vso-ccex-rca
+```
+
+Xcelium scale, MSIE and project-provided Palladium flows:
+
+```bash
+simmer -t 'sys_tb:*@20' --simulator XRUN --mce --mce-sim-count 4
+simmer -t 'gate_tb:smoke_test@1' --simulator XRUN --msie-href dut
+simmer -t 'gate_tb:smoke_test@1' --simulator XRUN --msie-prim dut \
+  --msie-primary-name dut_wc --msie-primary-key XCELIUM-25.03:netlist-r42:sdf_wc
+simmer -t 'gate_tb:smoke_test@1' --simulator XRUN --msie-incr dut_wc \
+  --msie-primary-key XCELIUM-25.03:netlist-r42:sdf_wc
+simmer -t 'emu_tb:smoke_test@1' --simulator XRUN --emulator pldm_sa
+simmer -t 'emu_tb:smoke_test@1' --simulator XRUN --emulator pldm_sim
+```
+
+Result inspection and retention:
+
+```bash
+simmer --history
+simmer --history 20
+simmer -t 'sys_tb:*@10' --simulator VCS --report --report-dir "$PWD/report-output"
+simmer -t 'sys_tb:*@10' --simulator VCS --nt
+```
+
+Run `simmer -h` for all options. MSIE stages must use the same target,
+`SIMRESULTS`, suffix and primary key. Palladium modes require the project-owned
+`EMU_JINJA2_PATH` template and site runtime libraries.
+
 ## VCS compile reuse
 
 The default VCS flow is incremental:
@@ -190,11 +284,12 @@ verilog_dv_tb(
 
 Simulator arguments are defined and validated in their own modules:
 
-- `bin/args_parse/vcs.py`: VCS coverage, FGP, DTL, VSO.ai, Verdi GUI, SmartLog.
+- `bin/args_parse/vcs.py`: VCS coverage, FGP, DTL, ICO, VSO.ai, CCEX, Verdi GUI, SmartLog.
 - `bin/args_parse/xcelium.py`: Xcelium coverage, MCE, MSIE, EMU and Xcelium-only probe controls.
 - `bin/args_parse/common.py`: simmer scheduling, test selection, shared UVM, shared wave scope/time and result behavior.
 
-Passing a vendor-specific option to the other backend fails before Bazel starts.
+Passing a vendor-specific option to the other backend fails after test-config
+discovery resolves the backend and before simulator compile/run starts.
 Use `extra_compile_args` only for compile/elaboration flags and
 `extra_runtime_args` only for runtime flags. CLI `--sim-opts` overrides matching
 test-config simulation options.
@@ -376,9 +471,28 @@ For quiet normal runs, avoid `--tool-debug`; it prints scheduler polling noise.
   number of concurrent tests to account for those threads.
 - Avoid waves, `-debug_access`, VPI and SmartLog in throughput regressions.
 
-DTL (`--dtl`) and VSO.ai (`--vso`) are opt-in advanced flows. They are not
-enabled by default because they require feature-specific licenses, setup and
-real workload validation.
+DTL (`--dtl`) and VCS ICO (`--ico`) are opt-in advanced flows. ICO does not change VCS compilation. Simmer initializes a
+shared CDB with `crg -dir <shared_record> -shared init` and passes the recommended
+`+ntb_solver_bias_mode_auto_config=2`, shared-record, work-directory, UVM test-type
+and test-name options to each `simv`. Existing initialized CDBs are reused.
+
+VSO.ai CSO (`--vso`) is separate from ICO. Simmer implements the documented
+simplified three-step flow: VCS compiles with `-vso cso` and unique build names,
+the driver runs init plus ask-all, selected `simv` runs receive `workdir` and
+`run_id`, and finalize/merge receives the bulk status CSV. `--vso-phase` exposes
+the documented stress, acceleration and exploration selection. `--vso-cbv`
+adds the compile-time workdir tag required by Change-Based Verification and
+requires line or port-only toggle learning in the Day0 model.
+
+VSO.ai LCA Coverage Directed Solver (`--vso-ccex`) is a third independent flow.
+It adds `-vso ccex` at compile and runtime. `--vso-ccex-rca` enables static RCA;
+`--vso-ccex-auto-merge-dir` enables inter-simulation learning through shared
+storage. Advanced `-ccex_opts` can be supplied through `--sim-opts-file` only
+for runtime, or through `--file` for compile/elaboration, after checking the
+installed release documentation.
+
+These flows are not enabled by default because they require feature-specific
+licenses, setup and real workload validation.
 
 ## Coverage generation and merge
 
@@ -386,6 +500,14 @@ VCS `--cm` writes one `.vdb` per vcomp and generates
 `<vcomp>_vcs_cov_merge.sh`. The same configured VCS runner is used for `urg`
 and Verdi. Xcelium `--coverage` keeps IMC generation and merge in the Xcelium
 adapter. Coverage switches from one backend are rejected by the other.
+
+VCS coverage tuning follows the Y-2026.03 Command Reference and Coverage Guide.
+Use `--vcs-cm-cond obs+event` for observability-based condition coverage plus
+sensitivity-list events. Use `--vcs-cm-tgl portsonly` to reduce toggle cost, or
+another documented mode when full signal coverage is required. Repeat
+`--vcs-cm-report` for `svpackages` and `noinitial`. URG merge can opt into
+`--vcs-urg-parallel` and `--vcs-urg-show-tests`; the latter retains test
+correlation but increases VDB size.
 
 Run report generation only when the regression database is complete. Keep raw
 per-test coverage until the merge succeeds; merged databases and HTML reports
@@ -429,7 +551,7 @@ seed and original simulator options. Run it directly from any directory. Set
   time. `--no-bazel` accepts it only while BUILD, `.bzl`, MODULE/WORKSPACE and
   Bazel configuration files remain older than the cache.
 - Passing tests are removed by default. `--nt` intentionally retains them.
-- Do not enable waves, coverage, SmartLog, VSO artifacts or `--nt` in routine
+- Do not enable waves, coverage, SmartLog, ICO artifacts or `--nt` in routine
   throughput regressions.
 - Reuse the VCS VCOMP directory instead of creating a new `--dir-suffix` for
   every run.
