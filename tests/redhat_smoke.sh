@@ -16,4 +16,5 @@ if [[ "$(bazel --version)" != "bazel 7.7.1" ]]; then
 fi
 
 bazel test --test_output=errors //:buildifier_diff //tests/... //examples/dpi:dpi_c_test
+bazel run //:buildifier_lint
 ./tests/doc_test.sh

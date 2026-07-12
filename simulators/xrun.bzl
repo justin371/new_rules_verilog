@@ -1,7 +1,7 @@
 # vim: set ft=bzl :
 """Repository setup for Cadence Xcelium/XRUN."""
 
-load("//simulators:common.bzl", "VARS", "dpi_headers_build")
+load("//simulators:common.bzl", "dpi_headers_build", "simulator_environment")
 
 XRUN_DPI_HEADERS = ["svdpi.h", "svdpi_compatibility.h"]
 
@@ -10,7 +10,7 @@ def _xcelium_setup_impl(repository_ctx):
         fail("Name xcelium_setup rule: 'XCELIUM'!")
     result = repository_ctx.execute(
         ["runmod", "xrun", "--", "printenv", "XCELIUMHOME"],
-        environment = repository_ctx.os.environ,
+        environment = simulator_environment(repository_ctx),
         # working_directory="..",
     )
     if result.return_code:
@@ -25,5 +25,4 @@ def _xcelium_setup_impl(repository_ctx):
 xcelium_setup = repository_rule(
     implementation = _xcelium_setup_impl,
     local = True,
-    environ = VARS,
 )

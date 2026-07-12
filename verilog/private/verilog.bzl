@@ -3,20 +3,20 @@
 
 CUSTOM_SHELL = "custom"
 
-VerilogInfo = provider(fields = {
+VerilogInfo = provider("Transitive Verilog build inputs.", fields = {
     "transitive_sources": "All source source files needed by a target. This flow is not currently setup to do partioned compile, so all files need to be carried through to the final step for compilation as a whole.",
     "transitive_flists": "All flists which specify ordering of transitive sources.",
     "transitive_dpi": "Shared libraries (.so/.dll/.dylib) to link in via the DPI for testbenches.",
     "last_module": "This is a convenience accessor. The last module specified is assumed be the top module in a design. This is frequently needed by downstream tools.",
 })
 
-ShellInfo = provider(fields = {
+ShellInfo = provider("Metadata for a Verilog shell target.", fields = {
     "is_pkg": "Indicates if this verilog_rtl_library used the verilog_rtl_pkg rule. Additional restrictions are imposed on packages to encourage a clean dependency tree.",
     "is_shell_of": "If non-empty, indicates this verilog_rtl_library represents a shell of another module",
     "gumi_path": "The bazel short_path to a gumi file. Used when generating a verilog_rtl_library's associated flist.",
 })
 
-ToolEncapsulationInfo = provider(fields = {
+ToolEncapsulationInfo = provider("A configurable tool command.", fields = {
     "command": "The command invocation for a particular tool. Useful for aliases, redirection, and wrappers.",
 })
 
@@ -75,8 +75,33 @@ def runfiles_relative_short_path(f):
         return "external/" + short_path[3:]
     return short_path
 
+def merge_default_runfiles(ctx, files, targets, transitive_files = None):
+    """Create runfiles and merge the default runfiles of dependency targets.
+
+    Args:
+      ctx: Rule context.
+      files: Direct runtime files.
+      targets: Targets whose default runfiles are required.
+      transitive_files: Optional depset of additional runtime files.
+
+    Returns:
+      A runfiles object containing direct, transitive, and target runfiles.
+    """
+    return ctx.runfiles(
+        files = files,
+        transitive_files = transitive_files,
+    ).merge_all([target[DefaultInfo].default_runfiles for target in targets])
+
 def verilog_input_inventory(deps, extra_files):
-    """Return a stable inventory of Verilog compile inputs."""
+    """Return a stable inventory of Verilog compile inputs.
+
+    Args:
+      deps: Targets that provide Verilog inputs.
+      extra_files: Additional compile input files.
+
+    Returns:
+      A newline-delimited compile input inventory.
+    """
     entries = []
     sources = get_transitive_srcs([], deps, VerilogInfo, "transitive_sources", allow_other_outputs = True)
     flists = get_transitive_srcs([], deps, VerilogInfo, "transitive_flists", allow_other_outputs = False)

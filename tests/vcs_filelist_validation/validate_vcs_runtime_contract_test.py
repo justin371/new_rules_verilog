@@ -1,6 +1,7 @@
 import os
 from pathlib import Path
 import shlex
+import subprocess
 import sys
 import tempfile
 import unittest
@@ -605,9 +606,9 @@ class VcsRuntimeContractTest(unittest.TestCase):
             bazel_runfiles_main="/runfiles",
             cov_opts="",
             debug_mode="default",
-            msie_extern_files=["/results/sys__XRUN_VCOMP_MSIE/dut_externs.v"],
-            msie_href_file="/results/sys__XRUN_VCOMP_MSIE/href.txt",
-            msie_primary_dir="/results/sys__XRUN_VCOMP_PRIM",
+            msie_extern_files=["/results/MSIE artifacts/dut_externs.v"],
+            msie_href_file="/results/MSIE artifacts/href.txt",
+            msie_primary_dir="/results/MSIE primary",
             msie_primary_name="dut_sdf_wc",
             msie_primary_top="dut",
             options=SimpleNamespace(
@@ -622,6 +623,8 @@ class VcsRuntimeContractTest(unittest.TestCase):
         )
 
         self.assertIn("-top dut -snapshot dut_sdf_wc", rendered)
+        self.assertIn("-href '/results/MSIE artifacts/href.txt'", rendered)
+        self.assertIn("'/results/MSIE artifacts/dut_externs.v'", rendered)
         self.assertNotIn("-name dut", rendered)
         self.assertIn("dut_externs.v", rendered)
         self.assertNotIn("incr_pkg", rendered)
@@ -767,6 +770,33 @@ class VcsRuntimeContractTest(unittest.TestCase):
             self.assertIn("set -Eeuo pipefail", template)
             self.assertIn('"$@"', template)
         self.assertIn('"${PYTHON:-python3}" ./{LINT_PARSER}', lint_templates[1])
+
+    def test_cdc_template_passes_one_command_payload(self):
+        template = self._read_repo_file("vendors/cadence/verilog_rtl_cdc_test.sh.template")
+        with tempfile.TemporaryDirectory() as temporary_dir:
+            root = Path(temporary_dir)
+            command = root / "jasper_stub.sh"
+            command.write_text(
+                "#!/usr/bin/env bash\n"
+                "printf '%s\\n' \"$#\" > jasper_args.txt\n"
+                "printf '<%s>\\n' \"$@\" >> jasper_args.txt\n"
+                "mkdir -p cdc_run\n"
+                ": > cdc_run/jg.log\n",
+                encoding="utf-8",
+            )
+            command.chmod(0o755)
+            script = root / "run_cdc.sh"
+            script.write_text(
+                template.replace("{CDC_COMMAND}",
+                                 shlex.quote(str(command))).replace("{PREAMBLE_CMDS}", "preamble.tcl").replace(
+                                     "{CMD_FILES}", "commands.tcl").replace("{EPILOGUE_CMDS}", "epilogue.tcl"),
+                encoding="utf-8",
+            )
+            subprocess.run(["bash", str(script), "first", "second"], cwd=root, check=True)
+
+            arguments = (root / "jasper_args.txt").read_text(encoding="utf-8").splitlines()
+            self.assertEqual("1", arguments[0])
+            self.assertIn("first second", arguments[1])
 
     def test_vcs_compile_template_defaults_to_incremental_compile(self):
         template = self._read_repo_file("bin/templates/vcs_compile_template.sh.j2")
@@ -1074,6 +1104,7 @@ class VcsRuntimeContractTest(unittest.TestCase):
         self.assertNotIn("sorted(os.environ.items())", source)
         self.assertIn("j.jobstatus == JobStatus.FAILED", source)
         self.assertLess(source.index('"coverage_merge"'), source.index("print_simmer_profile(rcfg, jm)"))
+        self.assertLess(source.index("cleanup_shared_runtime_artifacts"), source.index("simmer_results.save_run"))
 
     def test_vcs_unit_test_rules_use_simulator_specific_defaults(self):
         dv_bzl = self._read_repo_file("verilog/private/dv.bzl")
@@ -1088,7 +1119,9 @@ class VcsRuntimeContractTest(unittest.TestCase):
         self.assertIn("xcelium_dv_backend", dv_bzl)
         self.assertNotIn('filelist_flag = "-file"', dv_bzl)
         self.assertIn('filelist_flag = "-file"', vcs_backend)
-        self.assertIn("_ut_sim_template_vcs_default", vcs_backend)
+        self.assertNotIn("_ut_sim_template_xrun_default", vcs_backend)
+        self.assertNotIn("_default_sim_opts_xrun_default", vcs_backend)
+        self.assertIn("_ut_sim_template_vcs_default", dv_bzl)
         self.assertNotIn("simulators/xcelium.bzl", vcs_backend)
         self.assertNotIn("simulators/vcs.bzl", xcelium_backend)
         self.assertNotIn("xcelium_options", vcs_python)

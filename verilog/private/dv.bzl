@@ -5,9 +5,9 @@ load("//deps:gatesim_modes_list.bzl", "GATESIM_MODES")
 load(":simulators/pldm.bzl", "pldm_dv_backend")
 load(":simulators/vcs.bzl", "vcs_dv_backend")
 load(":simulators/xcelium.bzl", "xcelium_dv_backend")
-load(":verilog.bzl", "ToolEncapsulationInfo", "VerilogInfo", "flists_to_arguments", "gather_shell_defines", "get_transitive_srcs", "runfiles_relative_short_path", "verilog_input_inventory")
+load(":verilog.bzl", "ToolEncapsulationInfo", "VerilogInfo", "flists_to_arguments", "gather_shell_defines", "get_transitive_srcs", "merge_default_runfiles", "runfiles_relative_short_path", "verilog_input_inventory")
 
-DVTestInfo = provider(fields = {
+DVTestInfo = provider("Runtime configuration for a DV test.", fields = {
     "sim_opts": "Simulation :options to carry forward.",
     "uvm_testname": "UVM Test Name; passed to simulator via plusarg +UVM_TESTNAME.",
     "tb": "The verilog_dv_tb (verilog compile) associated with this test. Must be a Label of type verilog_dv_tb.",
@@ -18,7 +18,7 @@ DVTestInfo = provider(fields = {
     "description": "Test scenario descriptions.",
 })
 
-DVTBInfo = provider(fields = {
+DVTBInfo = provider("Simulator configuration for a DV testbench.", fields = {
     "ccf": "Coverage config file.",
     "dut_instance": "DUT hierarchy used by coverage reports.",
     "dut_top": "DUT module used to scope code coverage.",
@@ -543,14 +543,14 @@ def _verilog_dv_tb_impl(ctx):
     extra_compile_outputs = backend.extra_compile_outputs(ctx, defines, selected_compile_args, compile_config)
 
     runtime_config = backend.runtime_config(ctx)
-    runtime_args = ctx.attr.extra_runtime_args
+    runtime_args = [ctx.expand_location(arg, targets = ctx.attr.extra_runfiles) for arg in ctx.attr.extra_runtime_args]
     _validate_runtime_args(runtime_args, simulator)
 
     ctx.actions.expand_template(
         template = runtime_config.template,
         output = ctx.outputs.runtime_args,
         substitutions = {
-            "{RUNTIME_ARGS}": ctx.expand_location("\n".join(runtime_args), targets = ctx.attr.extra_runfiles),
+            "{RUNTIME_ARGS}": "\n".join(runtime_args),
             "{DPI_LIBS}": runtime_config.dpi,
         },
     )
@@ -585,10 +585,10 @@ def _verilog_dv_tb_impl(ctx):
         }),
     )
 
-    # Null action to trigger run?
-    ctx.actions.run_shell(
-        command = "echo \"Build compile tree directory in \"`pwd`; touch {}".format(ctx.outputs.executable.path),
-        outputs = [ctx.outputs.executable],
+    ctx.actions.write(
+        output = ctx.outputs.executable,
+        content = "",
+        is_executable = True,
     )
 
     trans_srcs = get_transitive_srcs([], all_deps, VerilogInfo, "transitive_sources", allow_other_outputs = True)
@@ -604,12 +604,25 @@ def _verilog_dv_tb_impl(ctx):
     generated_outputs.extend(extra_compile_outputs.generated_outputs)
     out_deps = depset(generated_outputs)
     all_files = depset([], transitive = [trans_srcs, trans_flists, out_deps])
+    runfile_targets = (
+        all_deps +
+        ctx.attr.ccf +
+        ctx.attr.extra_runfiles +
+        ctx.attr.msie_primary_extra_runfiles +
+        ctx.attr.msie_incremental_extra_runfiles
+    )
+    if ctx.attr.xcelium_covfile:
+        runfile_targets.append(ctx.attr.xcelium_covfile)
+    if ctx.attr.vcs_cm_hier:
+        runfile_targets.append(ctx.attr.vcs_cm_hier)
 
     return [
         DefaultInfo(
             files = all_files,
-            runfiles = ctx.runfiles(
+            runfiles = merge_default_runfiles(
+                ctx,
                 files = ctx.files.ccf + ctx.files.extra_runfiles + ctx.files.msie_primary_extra_runfiles + ctx.files.msie_incremental_extra_runfiles + ([ctx.file.xcelium_covfile] if ctx.file.xcelium_covfile else []) + ([ctx.file.vcs_cm_hier] if ctx.file.vcs_cm_hier else []) + [runtime_config.template],
+                targets = runfile_targets,
                 transitive_files = all_files,
             ),
         ),
@@ -790,6 +803,11 @@ def _verilog_dv_unit_test_impl(ctx):
     backend = _dv_backend(simulator)
     unit_test_template = ctx.file.ut_sim_template
     default_sim_opts = ctx.file.default_sim_opts
+    if simulator == "VCS":
+        if unit_test_template.short_path == ctx.file._ut_sim_template_xrun_default.short_path:
+            unit_test_template = ctx.file._ut_sim_template_vcs_default
+        if default_sim_opts.short_path == ctx.file._default_sim_opts_xrun_default.short_path:
+            default_sim_opts = ctx.file._default_sim_opts_vcs_default
     simulator_command = ctx.attr._command_override[ToolEncapsulationInfo].command
     filelist_flag = "-f"
     dpi_tool = None
@@ -819,7 +837,11 @@ def _verilog_dv_unit_test_impl(ctx):
         is_executable = True,
     )
 
-    runfiles = ctx.runfiles(files = flists_list + srcs_list + dpi.to_list() + [unit_test_config.default_sim_opts])
+    runfiles = merge_default_runfiles(
+        ctx,
+        files = flists_list + srcs_list + dpi.to_list() + [unit_test_config.default_sim_opts],
+        targets = ctx.attr.deps + [ctx.attr.default_sim_opts, ctx.attr._default_sim_opts_vcs_default],
+    )
     return [DefaultInfo(
         runfiles = runfiles,
         executable = ctx.outputs.out,

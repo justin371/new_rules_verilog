@@ -39,7 +39,7 @@ fi
     {PREAMBLE_CMDS} \
     {CMD_FILES} \
     {EPILOGUE_CMDS} \
-    ${remaining_args[@]}"
+    ${remaining_args[*]}"
 if [ ! -f cdc_run/jg.log ]; then
     echo "ERROR: CDC completed without cdc_run/jg.log" >&2
     exit 1

@@ -1,7 +1,7 @@
 # vim: set ft=bzl :
 """Rules to gather and compile RTL."""
 
-load(":verilog.bzl", "CUSTOM_SHELL", "ShellInfo", "ToolEncapsulationInfo", "VerilogInfo", "gather_shell_defines", "get_transitive_srcs", "runfiles_relative_short_path")
+load(":verilog.bzl", "CUSTOM_SHELL", "ShellInfo", "ToolEncapsulationInfo", "VerilogInfo", "gather_shell_defines", "get_transitive_srcs", "merge_default_runfiles", "runfiles_relative_short_path")
 
 _SHELLS_DOC = """List of verilog_rtl_shell Labels.
 For each Label, a gumi define will be placed on the command line to use this shell instead of the original module.
@@ -436,7 +436,11 @@ def _verilog_rtl_unit_test_impl(ctx):
         },
     )
 
-    runfiles = ctx.runfiles(files = flists_list + srcs_list + ctx.files.data + ctx.files.shells + [waves_cmd])
+    runfiles = merge_default_runfiles(
+        ctx,
+        files = flists_list + srcs_list + ctx.files.data + ctx.files.shells + [waves_cmd],
+        targets = ctx.attr.shells + ctx.attr.deps + ctx.attr.data,
+    )
     return [DefaultInfo(
         runfiles = runfiles,
     )]
@@ -642,7 +646,19 @@ def _verilog_rtl_lint_test_impl(ctx):
     trans_flists = get_transitive_srcs([], ctx.attr.shells + ctx.attr.deps, VerilogInfo, "transitive_flists", allow_other_outputs = False)
     trans_srcs = get_transitive_srcs([], ctx.attr.shells + ctx.attr.deps, VerilogInfo, "transitive_sources", allow_other_outputs = True)
 
-    runfiles = ctx.runfiles(files = trans_srcs.to_list() + trans_flists.to_list() + ctx.files.design_info + [rulefile, lint_parser] + ctx.files._lint_parser_lib + [ctx.outputs.command_script])
+    lint_runfile_targets = ctx.attr.shells + ctx.attr.deps + ctx.attr.design_info + [
+        ctx.attr.lint_parser,
+        ctx.attr._lint_parser_lib,
+        ctx.attr._lint_parser_vcs_default,
+        ctx.attr._rulefile_vcs_default,
+    ]
+    if ctx.attr.rulefile:
+        lint_runfile_targets.append(ctx.attr.rulefile)
+    runfiles = merge_default_runfiles(
+        ctx,
+        files = trans_srcs.to_list() + trans_flists.to_list() + ctx.files.design_info + [rulefile, lint_parser] + ctx.files._lint_parser_lib + [ctx.outputs.command_script],
+        targets = lint_runfile_targets,
+    )
 
     return [
         DefaultInfo(runfiles = runfiles),
@@ -842,7 +858,11 @@ def _verilog_rtl_cdc_test_impl(ctx):
         substitutions = {},
     )
 
-    runfiles = ctx.runfiles(files = [ctx.outputs.preamble_cmds, ctx.outputs.epilogue_cmds] + trans_srcs.to_list() + trans_flists.to_list() + ctx.files.cmd_files)
+    runfiles = merge_default_runfiles(
+        ctx,
+        files = [ctx.outputs.preamble_cmds, ctx.outputs.epilogue_cmds] + trans_srcs.to_list() + trans_flists.to_list() + ctx.files.cmd_files,
+        targets = ctx.attr.shells + ctx.attr.deps + ctx.attr.cmd_files,
+    )
 
     return [
         DefaultInfo(runfiles = runfiles),

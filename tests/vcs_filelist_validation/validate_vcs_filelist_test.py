@@ -121,6 +121,7 @@ class VcsFilelistValidationTest(unittest.TestCase):
         content_checks = {
             "tests/vcs_filelist_validation/dv_tb_vcs_runtime_args.f": [
                 "+UNIFIED_VCS_RUNTIME_ARG",
+                "-f bazel_runfiles_main/tests/vcs_filelist_validation/vcs_partitions.cfg",
             ],
         }
 
@@ -192,6 +193,12 @@ class VcsFilelistValidationTest(unittest.TestCase):
             contents = read_runfile(relative_path)
             for needle in needles:
                 assert_contains(contents, needle, relative_path)
+
+    def test_rtl_unit_test_propagates_data_target_runfiles(self):
+        self.assertEqual(
+            "runtime tool data\n",
+            read_runfile("tests/vcs_filelist_validation/runtime_tool.data"),
+        )
 
     def test_generated_unit_test_scripts_execute_with_tool_stubs(self):
         tool_stub = """#!/usr/bin/env python3

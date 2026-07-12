@@ -67,10 +67,6 @@ def _runtime_config(ctx):
     )
 
 def _unit_test_config(ctx, unit_test_template, default_sim_opts, simulator_command, filelist_flag, dpi_tool):
-    if unit_test_template.short_path == ctx.file._ut_sim_template_xrun_default.short_path:
-        unit_test_template = ctx.file._ut_sim_template_vcs_default
-    if default_sim_opts.short_path == ctx.file._default_sim_opts_xrun_default.short_path:
-        default_sim_opts = ctx.file._default_sim_opts_vcs_default
     return struct(
         default_sim_opts = default_sim_opts,
         dpi_tool = "vcs",

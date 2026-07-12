@@ -17,6 +17,12 @@ filegroup(
     srcs = ["vcs_partitions.cfg"],
 )
 
+sh_binary(
+    name = "runtime_tool",
+    srcs = ["runtime_tool.sh"],
+    data = ["runtime_tool.data"],
+)
+
 verilog_rtl_library(
     name = "unit_test_top",
     modules = ["unit_test_top.sv"],
@@ -43,6 +49,7 @@ verilog_dv_tb(
     extra_runfiles = [":vcs_partitions"],
     extra_runtime_args = [
         "+UNIFIED_VCS_RUNTIME_ARG",
+        "-f bazel_runfiles_main/$(location :vcs_partitions)",
     ],
     run_fail_patterns = ["^PROJECT FAIL$"],
     run_pass_patterns = ["^PROJECT PASS$"],
@@ -105,6 +112,7 @@ verilog_dv_unit_test(
 
 verilog_rtl_unit_test(
     name = "rtl_unit_vcs",
+    data = [":runtime_tool"],
     simulator = "VCS",
     tags = ["manual"],
     deps = [":unit_test_top"],

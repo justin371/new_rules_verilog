@@ -44,7 +44,9 @@ jobs:
           os: 'linux'
 
       - name: run-bazel-checks
-        run: bazel test --test_output=errors //:buildifier_diff //tests/... //examples/dpi:dpi_c_test
+        run: |
+          bazel test --test_output=errors //:buildifier_diff //tests/... //examples/dpi:dpi_c_test
+          bazel run //:buildifier_lint
 
       - name: check-generated-docs
         run: ./tests/doc_test.sh
