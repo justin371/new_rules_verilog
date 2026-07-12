@@ -110,6 +110,16 @@ class XceliumSimulator(SimulatorInterface):
             ),
         }
 
+    def get_compile_fingerprint_inputs(self, vcomp_job):
+        inputs = super().get_compile_fingerprint_inputs(vcomp_job)
+        if self.options.coverage and self.options.covfile_was_explicit:
+            inputs["extra_input_paths"].append(self.options.covfile)
+        inputs["environment"].update({
+            key: os.environ.get(key, "")
+            for key in ("LM_LICENSE_FILE", "XCELIUMHOME")
+        })
+        return inputs
+
     def get_bazel_compile_args_file(self, bazel_runfiles_main, relpath, bazel_target):
         if self.options.msie_prim:
             return os.path.join(bazel_runfiles_main, relpath, "{}_msie_primary_compile_args.f".format(bazel_target))
@@ -154,13 +164,7 @@ class XceliumSimulator(SimulatorInterface):
                 digest.update(b"\0")
                 digest.update(relative_path.encode("utf-8"))
                 digest.update(b"\0")
-                if kind == "source":
-                    file_stat = os.stat(path)
-                    digest.update(str(file_stat.st_size).encode("ascii"))
-                    digest.update(b"\0")
-                    digest.update(str(file_stat.st_mtime_ns).encode("ascii"))
-                else:
-                    digest.update((_sha256_file(path) or "missing").encode("ascii"))
+                digest.update((_sha256_file(path) or "missing").encode("ascii"))
                 digest.update(b"\0")
                 count += 1
         return digest.hexdigest(), count
@@ -524,6 +528,8 @@ class XceliumSimulator(SimulatorInterface):
         Constructs the full simulation command string for XRUN, including logging.
         """
         emu_type = self.options.emulator.upper()
+        if emu_type == 'CLEAN':
+            raise RuntimeError("Xcelium emulator clean mode does not run simulations")
         if emu_type in ('PLDM_SA', 'PLDM_SIM'):
             emu_dpi_lib = os.environ.get("RV_EMU_DPI_LIB", "dv_common/global/libwc_time_dpi.so")
             emu_xmlib_dir = os.environ.get("RV_EMU_XMLIBDIR", "hw_lib")

@@ -315,6 +315,7 @@ class VCompJob(Job):
 
         compile_script = compile_template.render(**template_context)
         sim_artifacts.write_executable_script(vcomp_sh_path, compile_script)
+        fingerprint_inputs = self.simulator.get_compile_fingerprint_inputs(self)
         self.compile_fingerprint = compile_cache.compile_fingerprint(
             self.rcfg.proj_dir,
             compile_script,
@@ -322,6 +323,7 @@ class VCompJob(Job):
             os.path.join(self.bazel_runfiles_main, self.tb_options["compile_inputs"])
             if self.tb_options["compile_inputs"] else None,
             self.bazel_runfiles_main,
+            **fingerprint_inputs,
         )
 
         log.debug("bazel_runfiles_main: %s", self.bazel_runfiles_main)
@@ -459,108 +461,14 @@ class VCompJob(Job):
         # Note: '_completed' isn't standard, jobstatus.completed is the way to check
         # self._completed = True # This line might be unnecessary if super() handles it
 
+    def launch_failed(self, exc):
+        super().launch_failed(exc)
+        self.error_message = str(exc)
+        simmer_results.record_compile_job(getattr(self.rcfg, "simmer_results_run", None), self)
+
     def __repr__(self):
         sim_name = self.simulator.get_name() if hasattr(self, 'simulator') else '???'
         return 'Vcomp("{}@{}" -> {})'.format(self.bazel_vcomp_target, sim_name, self.name) # Add simulator info
-
-
-class IcoInitJob(Job):
-    """Initializes the shared VCS ICO CDB before tests start."""
-
-    def __init__(self, rcfg, simulator):
-        super(IcoInitJob, self).__init__(rcfg, "ico_init")
-        self.simulator = simulator
-        self.job_dir = simulator._get_ico_artifact_dir()
-        self.main_cmdline = None
-
-    def pre_run(self):
-        super(IcoInitJob, self).pre_run()
-        command_parts, log_path = self.simulator.build_ico_init_command()
-        self.log_path = log_path
-        if command_parts is None:
-            self.main_cmdline = "echo {} > {}".format(
-                shlex.quote("Reusing initialized VCS ICO shared CDB."),
-                shlex.quote(log_path),
-            )
-        else:
-            self.main_cmdline = shlex.join(command_parts) + " > {} 2>&1".format(shlex.quote(log_path))
-        self.log.debug(" > %s", self.main_cmdline)
-
-    def post_run(self):
-        super(IcoInitJob, self).post_run()
-        if self.job_lib.returncode == 0:
-            self.jobstatus = JobStatus.PASSED
-            self.rcfg.deferred_messages.append("VCS ICO shared-CDB init log: {}".format(self.log_path))
-        else:
-            self.jobstatus = JobStatus.FAILED
-            self.log.error("%s failed. Log in %s", self, getattr(self, "log_path", "<unknown>"))
-
-    def __repr__(self):
-        return "VCS ICO init"
-
-
-class VsoInitJob(Job):
-    """Runs VSO.ai init after all selected VCS builds complete."""
-
-    def __init__(self, rcfg, simulator, vcomp_jobs):
-        super(VsoInitJob, self).__init__(rcfg, "vso_init")
-        self.simulator = simulator
-        self.vcomp_jobs = vcomp_jobs
-        self.job_dir = simulator.vso_workflow.artifact_dir()
-
-    def pre_run(self):
-        super(VsoInitJob, self).pre_run()
-        args, self.log_path = self.simulator.vso_workflow.build_init_command(self.rcfg.all_vcomp, self.vcomp_jobs)
-        command = [self.simulator.vso_workflow.driver_path()] + args
-        self.main_cmdline = shlex.join(command) + " > {} 2>&1".format(shlex.quote(self.log_path))
-
-    def post_run(self):
-        super(VsoInitJob, self).post_run()
-        self.jobstatus = JobStatus.PASSED if self.job_lib.returncode == 0 else JobStatus.FAILED
-        if self.jobstatus == JobStatus.PASSED:
-            self.rcfg.deferred_messages.append("VSO.ai init log: {}".format(self.log_path))
-        else:
-            self.log.error("%s failed. Log in %s", self, self.log_path)
-
-    def __repr__(self):
-        return "VSO.ai init"
-
-
-class VsoAskJob(Job):
-    """Runs VSO.ai ask-all and schedules the returned test runs."""
-
-    def __init__(self, rcfg, simulator):
-        super(VsoAskJob, self).__init__(rcfg, "vso_ask")
-        self.simulator = simulator
-        self.job_dir = simulator.vso_workflow.artifact_dir()
-
-    def pre_run(self):
-        super(VsoAskJob, self).pre_run()
-        args, self.log_path = self.simulator.vso_workflow.build_ask_command()
-        command = [self.simulator.vso_workflow.driver_path()] + args
-        self.main_cmdline = shlex.join(command) + " > {} 2>&1".format(shlex.quote(self.log_path))
-
-    def post_run(self):
-        super(VsoAskJob, self).post_run()
-        if self.job_lib.returncode:
-            self.jobstatus = JobStatus.FAILED
-            self.log.error("%s failed. Log in %s", self, self.log_path)
-            return
-        try:
-            result = self.simulator.vso_workflow.apply_ask_results(self.rcfg.all_vcomp, self.log_path)
-        except (OSError, RuntimeError) as exc:
-            self.jobstatus = JobStatus.FAILED
-            self.log.error("Failed to apply VSO.ai ask results from %s: %s", self.log_path, exc)
-            return
-        for test in result["selected_tests"]:
-            self.job_lib.manager.add_job(test)
-        if self.rcfg.simmer_results_run is not None:
-            self.rcfg.simmer_results_run["planned_tests"] = result["planned_runs"]
-        self.jobstatus = JobStatus.PASSED
-        self.rcfg.deferred_messages.append("VSO.ai ask log: {}".format(self.log_path))
-
-    def __repr__(self):
-        return "VSO.ai ask"
 
 
 class TestJob(Job):
@@ -644,6 +552,7 @@ class TestJob(Job):
         self.simname = simname
         self.job_dir = os.path.join(self.rcfg.regression_dir, simname)
         self._log_path = os.path.join(self.job_dir, self.LOG_NAME)
+        self.timeout_start_path = os.path.join(self.job_dir, "simulation_started")
 
         # --- Create job directory immediately --- Required before simulator methods use it
         # Note: super().pre_run() might also try to create it, but -p makes it safe.
@@ -651,6 +560,11 @@ class TestJob(Job):
         os.makedirs(self.rcfg.regression_dir, exist_ok=True)
         # Now create the specific job directory
         os.makedirs(self.job_dir, exist_ok=True)
+        for stale_path in (self.timeout_start_path, os.path.join(self.job_dir, "simulation_duration_s")):
+            try:
+                os.remove(stale_path)
+            except FileNotFoundError:
+                pass
 
         # --- Super pre_run and Socket Logic ---
         super(TestJob, self).pre_run()
@@ -680,7 +594,7 @@ class TestJob(Job):
             socket_file = os.path.join(self.job_dir, "{}.socket".format(socket_name))
             socket_file = os.path.join("/tmp", sha1(socket_file.encode('ascii')).hexdigest())
             sim_opts += " " + shlex.join(["+SOCKET__{}={}".format(socket_name, socket_file)])
-            socket_command = socket_command.format(socket_file=socket_file)
+            socket_command = socket_command.replace("{socket_file}", socket_file)
             sockets.append((socket_name, socket_command, socket_file))
 
         # --- Add Test Name and Merge CLI/Bazel Options (Common Logic) ---
@@ -841,7 +755,7 @@ class TestJob(Job):
         # Parse file for duration
         net_time_str, cps_str = self._get_stats_from_log_file()
         self.simulation_duration_s = self._read_simulation_duration()
-        self.job_time = (self.simulation_duration_s if self.simulation_duration_s is not None else int(self.duration_s))
+        self.job_time = self.simulation_duration_s or 0
         sim_time_str = self._format_duration(self.job_time)
         total_time_str = self._get_total_time_str()
         time_stats_str = "({} cps / {} net_time / {} sim_time / {} total_time)".format(
@@ -938,6 +852,12 @@ class TestJob(Job):
         if self.simulator.should_spawn_test_job(self):
             self.job_lib.manager.add_job(self.clone())
 
+    def launch_failed(self, exc):
+        super().launch_failed(exc)
+        self.error_message = str(exc)
+        self.simulation_duration_s = None
+        simmer_results.record_test_job(getattr(self.rcfg, "simmer_results_run", None), self)
+
     @staticmethod
     def _format_duration(duration_s):
         hours = int(duration_s // 3600)
@@ -1012,11 +932,7 @@ def main(rcfg, options):
     btbj_jobs = []
     trd = []
     webroot_path = options.report_dir
-    ico_init_job = None
-    ico_enabled = simulator.uses_shared_regression_init()
     dynamic_test_plan = simulator.uses_dynamic_test_plan()
-    vso_init_job = None
-    vso_ask_job = None
     workflow_finalize_failed = False
 
     rcfg.all_vcomp = seed_plan.ordered_regression_tests(rcfg.all_vcomp)
@@ -1059,23 +975,7 @@ def main(rcfg, options):
 
         rcfg.all_vcomp[vcomp] = (icfgs, tests)
 
-    if ico_enabled and not options.no_run:
-        ico_init_job = IcoInitJob(rcfg, simulator)
-        for vcomp_job in vcomp_jobs.values():
-            ico_init_job.add_dependency(vcomp_job)
-        for _, (_, tests) in rcfg.all_vcomp.items():
-            for test in tests:
-                test.add_dependency(ico_init_job)
-
-    if dynamic_test_plan and not options.no_run:
-        vso_init_job = VsoInitJob(rcfg, simulator, vcomp_jobs)
-        for vcomp_job in vcomp_jobs.values():
-            vso_init_job.add_dependency(vcomp_job)
-        vso_ask_job = VsoAskJob(rcfg, simulator)
-        vso_ask_job.add_dependency(vso_init_job)
-        for _, (_, tests) in rcfg.all_vcomp.items():
-            for test in tests:
-                test.add_dependency(vso_ask_job)
+    workflow_jobs = simulator.create_regression_jobs(vcomp_jobs)
 
     suppress_via_vcomp_jobs = False
     if len(vcomp_jobs) > 1:
@@ -1117,12 +1017,8 @@ def main(rcfg, options):
                 vcomper.jobstatus = JobStatus.TO_BE_BYPASSED
             jm.add_job(vcomper)
 
-        if ico_init_job is not None:
-            jm.add_job(ico_init_job)
-        if vso_init_job is not None:
-            jm.add_job(vso_init_job)
-        if vso_ask_job is not None:
-            jm.add_job(vso_ask_job)
+        for workflow_job in workflow_jobs:
+            jm.add_job(workflow_job)
 
         for btcj in btcj_jobs:
             if options.no_run:
@@ -1150,7 +1046,7 @@ def main(rcfg, options):
             for test in tests:
                 if options.no_run:
                     test.jobstatus = JobStatus.TO_BE_BYPASSED
-                elif vso_ask_job is None:
+                elif not dynamic_test_plan:
                     jm.add_job(test)
 
         jm.wait()
@@ -1163,13 +1059,7 @@ def main(rcfg, options):
         jm.kill()
         log.critical("Exiting due to keyboard interrupt")
 
-    if (dynamic_test_plan and not options.no_run and vso_init_job.jobstatus.successful
-            and vso_ask_job.jobstatus.successful):
-        try:
-            simulator.vso_workflow.finalize_merge(rcfg.all_vcomp)
-        except (OSError, RuntimeError) as exc:
-            workflow_finalize_failed = True
-            log.error("%s", exc)
+    workflow_finalize_failed = simulator.finalize_regression_workflow()
 
     regression_log_path = rv_utils.print_summary(rcfg, vcomp_jobs, jm, trd)
     if getattr(rcfg, "simmer_results_run", None) is not None:

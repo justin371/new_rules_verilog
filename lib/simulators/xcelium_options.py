@@ -37,5 +37,5 @@ def validate_xcelium_runtime_options(options, parser):
     if options.msie_primary_key and options.msie_prim is None and options.msie_incr is None:
         parser.error("--msie-primary-key requires --msie-prim or --msie-incr. Stopping before Bazel starts.")
 
-    if options.msie_href is not None or options.msie_prim is not None:
+    if options.msie_href is not None or options.msie_prim is not None or options.emulator == 'clean':
         options.no_run = True

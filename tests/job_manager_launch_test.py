@@ -35,6 +35,7 @@ class _FakeTimedJob:
         self.name = name
         self.jobstatus = status
         self.job_time = seconds
+        self.simulation_duration_s = seconds
         self.vcomper = None
         self.log_path = ""
 
@@ -175,7 +176,8 @@ class JobManagerLaunchTest(unittest.TestCase):
 
     def test_runner_launch_failure_fails_job_without_killing_scheduler(self):
         log = _Logger()
-        rcfg = SimpleNamespace(options=SimpleNamespace(timeout=1), log=log)
+        result_run = {"launch_failures": []}
+        rcfg = SimpleNamespace(options=SimpleNamespace(timeout=1), log=log, simmer_results_run=result_run)
         job = Job(rcfg, "vcomp")
         job.job_dir = str(Path(tempfile.mkdtemp()) / "vcomp")
         manager = JobManager({"idle_print_seconds": 60, "quit_count": 1}, log)
@@ -186,6 +188,7 @@ class JobManagerLaunchTest(unittest.TestCase):
             manager.wait()
             self.assertEqual(JobStatus.FAILED, job.jobstatus)
             self.assertIn(job, manager._done)
+            self.assertEqual("failed to launch", result_run["launch_failures"][0]["error_message"])
         finally:
             manager.stop()
 
@@ -235,6 +238,28 @@ class JobManagerLaunchTest(unittest.TestCase):
             killpg.call_args_list,
         )
         self.assertEqual(-signal.SIGTERM, runner.returncode)
+
+    def test_test_timeout_waits_for_simulation_start_marker(self):
+        job_dir = Path(tempfile.mkdtemp())
+        marker = job_dir / "simulation_started"
+        job = SimpleNamespace(
+            timeout=0.001,
+            timeout_start_path=str(marker),
+            suppress_output=False,
+            job_dir=str(job_dir),
+            rcfg=SimpleNamespace(options=SimpleNamespace(no_stdout=False)),
+        )
+        runner = SubprocessJobRunner.__new__(SubprocessJobRunner)
+        runner.job = job
+        runner.log = _Logger()
+        runner._p = _RunningProcess()
+        runner._start_time = datetime.datetime.now() - datetime.timedelta(hours=1)
+        runner._timed_out = False
+        runner._term_deadline = None
+        runner._kill_sent = False
+
+        self.assertFalse(runner._check_for_done())
+        self.assertFalse(runner._timed_out)
 
     def test_simmer_profile_prints_phase_and_job_details(self):
         log = _SummaryLogger()

@@ -71,16 +71,35 @@ def _compile_inputs_digest(compile_inputs_path, runfiles_root):
     return digest.hexdigest()
 
 
-def compile_fingerprint(project_dir, compile_script, compile_args_path, compile_inputs_path=None, runfiles_root=None):
+def _extra_inputs_digest(paths):
+    digest = hashlib.sha256()
+    for path in sorted(os.path.abspath(os.fspath(path)) for path in paths if path):
+        digest.update(path.encode("utf-8"))
+        digest.update(b"\0")
+        digest.update(_file_bytes(path))
+        digest.update(b"\0")
+    return digest.hexdigest()
+
+
+def compile_fingerprint(project_dir,
+                        compile_script,
+                        compile_args_path,
+                        compile_inputs_path=None,
+                        runfiles_root=None,
+                        extra_input_paths=(),
+                        environment=None):
     """Return the source, generated filelist and compile-mode identity."""
     fingerprint = {
-        "schema_version": 2,
+        "schema_version": 3,
         "source_sha256": _source_digest(os.fspath(project_dir)),
         "compile_script_sha256": _digest_bytes(compile_script.encode("utf-8")),
         "compile_args_sha256": _digest_bytes(_file_bytes(compile_args_path)),
+        "environment": dict(sorted((environment or {}).items())),
     }
     if compile_inputs_path:
         fingerprint["compile_inputs_sha256"] = _compile_inputs_digest(compile_inputs_path, runfiles_root)
+    if extra_input_paths:
+        fingerprint["extra_inputs_sha256"] = _extra_inputs_digest(extra_input_paths)
     return fingerprint
 
 

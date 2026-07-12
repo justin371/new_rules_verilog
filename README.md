@@ -261,6 +261,10 @@ The [simmer command cookbook](docs/simmer_vcs_xcelium.md#command-cookbook)
 collects ready-to-adapt commands for normal runs, reuse, waves, coverage,
 reporting, MSIE, Palladium, ICO, VSO.ai and CCEX.
 
+`--no-compile` reuse is rejected when source/runfile content, an external
+compile configuration, or the selected simulator tool environment changes.
+Recent normal-run compile/start failures remain visible through `simmer --history`.
+
 ### Python Dependencies
 rules_verilog is also dependent on several python libraries. These are defined in requirements.txt and may be installed in the package manager of your choice. The recommended flow is to install them via the `pip_parse` rule in your `WORKSPACE` file:
 

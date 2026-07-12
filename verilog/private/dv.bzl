@@ -13,7 +13,7 @@ DVTestInfo = provider(fields = {
     "tb": "The verilog_dv_tb (verilog compile) associated with this test. Must be a Label of type verilog_dv_tb.",
     "simulator": "Simulator selected for this test configuration.",
     "tags": "Additional tags to be able to filter in simmer.",
-    "timeout": "Duration in minutes before the test will be killed due to timeout.",
+    "timeout": "Main simulation timeout in minutes, excluding socket and pre-run setup.",
     "pre_run": "Bazel run command that can be executed immediately before dv_tb simulation.",
     "description": "Test scenario descriptions.",
 })
@@ -164,7 +164,11 @@ def _verilog_dv_test_cfg_impl(ctx):
     provider_args["pre_run"] = pre_run
     provider_args["description"] = description
 
+    socket_name_start = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz_"
+    socket_name_chars = socket_name_start + "0123456789"
     for socket_name, socket_command in ctx.attr.sockets.items():
+        if not socket_name or socket_name[0] not in socket_name_start or any([char not in socket_name_chars for char in socket_name.elems()]):
+            fail("socket name {} must match [A-Za-z_][A-Za-z0-9_]*".format(socket_name))
         if "{socket_file}" not in socket_command:
             fail("socket {} did not have {{socket_file}} in socket_command".format(socket_name))
 
@@ -245,9 +249,9 @@ _verilog_dv_test_cfg_rule = rule(
             doc = "Dictionary mapping of socket_name to socket_command.\n" +
                   "Simmer has the ability to spawn parallel processes to the primary simulation that are connected via sockets.\n" +
                   "For each entry in the dictionary, simmer will create a separate process and pass a unique temporary file path to both the simulator and the socket_command.\n" +
-                  "The socket name is a short identifier that will be passed as \"+SOCKET__<socket_name>=<socket_file>\" to the simulator.\n" +
+                  "The socket name must match [A-Za-z_][A-Za-z0-9_]* and is passed as \"+SOCKET__<socket_name>=<socket_file>\" to the simulator.\n" +
                   "The socket_file is a path to a unique temporary file in the simulation results directory created by simmer.\n" +
-                  "The socket_command is a bash command that must contain a python string formatter of \"{socket_file}\".\n" +
+                  "The socket_command is a bash command that must contain the literal placeholder \"{socket_file}\"; other shell braces are preserved.\n" +
                   "The socket_command will be run from the root of the project tree.",
         ),
         "pre_run": attr.string(
@@ -257,7 +261,7 @@ _verilog_dv_test_cfg_rule = rule(
         ),
         "timeout": attr.int(
             default = -1,
-            doc = "Duration in minutes before the test will be killed due to timeout.\n" +
+            doc = "Main simulation timeout in minutes, excluding socket and pre-run setup.\n" +
                   "This option is inheritable. Use -1 to inherit, 0 to disable, or a positive value to set a timeout.",
         ),
         "description": attr.string(

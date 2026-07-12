@@ -28,10 +28,17 @@ py_library(
     deps = [
         ":base",
         ":options",
+        ":vcs_jobs",
         ":vcs_options",
         ":vso",
         "//lib:coverage_data",
     ],
+)
+
+py_library(
+    name = "vcs_jobs",
+    srcs = ["vcs_jobs.py"],
+    deps = ["//lib:job_lib"],
 )
 
 py_library(

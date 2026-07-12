@@ -304,6 +304,11 @@ class VcsRuntimeContractTest(unittest.TestCase):
                 simulator.get_bazel_compile_args_file("/runfiles", "tb", "unit"),
             )
 
+        clean_options, clean_simulator = self._validated(["--simulator", "XRUN", "--emulator", "clean"])
+        self.assertTrue(clean_options.no_run)
+        with self.assertRaisesRegex(RuntimeError, "does not run simulations"):
+            clean_simulator.get_sim_command(None, "", "/tmp/vcomp", "/tmp/stdout.log")
+
     def test_simmer_dispatches_backend_validation_and_scheduler_capabilities(self):
         simmer_source = self._read_repo_file("bin/simmer.py")
 
@@ -316,6 +321,33 @@ class VcsRuntimeContractTest(unittest.TestCase):
         self.assertNotIn("options.vso", simmer_source)
         self.assertNotIn("options.cm", simmer_source)
         self.assertNotIn("options.coverage", simmer_source)
+
+    def test_compile_fingerprint_inputs_remain_backend_owned(self):
+        with tempfile.NamedTemporaryFile() as vcs_hier, tempfile.NamedTemporaryFile() as xrun_covfile:
+            vcs_options = parse_args([
+                "--simulator",
+                "VCS",
+                "--cm",
+                "line",
+                "--vcs-cm-hier",
+                vcs_hier.name,
+            ])
+            vcs_inputs = VcsSimulator(vcs_options, DummyRegressionConfig(), None).get_compile_fingerprint_inputs(
+                DummyVcompJob())
+            self.assertIn(vcs_hier.name, vcs_inputs["extra_input_paths"])
+
+            xrun_options = parse_args([
+                "--simulator",
+                "XRUN",
+                "--coverage",
+                "B",
+                "--covfile",
+                xrun_covfile.name,
+            ])
+            xrun_inputs = XceliumSimulator(xrun_options,
+                                           DummyRegressionConfig(),
+                                           None).get_compile_fingerprint_inputs(DummyVcompJob())
+            self.assertIn(xrun_covfile.name, xrun_inputs["extra_input_paths"])
 
     def test_shell_templates_quote_runtime_paths(self):
         for template_path in (
@@ -338,10 +370,16 @@ class VcsRuntimeContractTest(unittest.TestCase):
 
     def test_iterations_are_preplanned_for_parallel_execution(self):
         simmer_source = self._read_repo_file("bin/simmer.py")
+        vcs_jobs_source = self._read_repo_file("lib/simulators/vcs_jobs.py")
 
         self.assertEqual("0", parse_args(["--python-seed", "0"]).python_seed)
         self.assertIn("range(1, iterations + 1)", simmer_source)
-        self.assertIn("IcoInitJob", simmer_source)
+        self.assertNotIn("IcoInitJob", simmer_source)
+        self.assertNotIn("VsoAskJob", simmer_source)
+        self.assertIn("IcoInitJob", vcs_jobs_source)
+        self.assertIn("VsoAskJob", vcs_jobs_source)
+        self.assertIn("simulator.create_regression_jobs(vcomp_jobs)", simmer_source)
+        self.assertIn("simulator.finalize_regression_workflow()", simmer_source)
         self.assertNotIn("vso_assignments", simmer_source)
         self.assertNotIn("random.seed(options.python_seed)", simmer_source)
 
@@ -538,6 +576,10 @@ class VcsRuntimeContractTest(unittest.TestCase):
             parse_args(["--wave-start", "-1"])
         with self.assertRaises(SystemExit):
             parse_args(["--wave-start", "20", "--wave-end", "10"])
+        with self.assertRaises(SystemExit):
+            parse_args(["--wave-type", "fsdb"])
+        with self.assertRaises(SystemExit):
+            parse_args(["--wave-depth", "0", "--waves"])
         with self.assertRaises(ValueError):
             self._validated(["--simulator", "XRUN", "--wave-delta"])
         with self.assertRaises(ValueError):
@@ -641,6 +683,15 @@ class VcsRuntimeContractTest(unittest.TestCase):
         incremental = XceliumSimulator(incremental_options, DummyRegressionConfig(), None)
         incremental.prepare_compile_job(vcomp())
 
+        source_path = runfiles / "tb/dut.sv"
+        source_stat = source_path.stat()
+        source_contents = source_path.read_bytes()
+        source_path.write_bytes(source_contents.replace(b"dut", b"dux", 1))
+        os.utime(source_path, ns=(source_stat.st_atime_ns, source_stat.st_mtime_ns))
+        with self.assertRaisesRegex(RuntimeError, "inputs_sha256"):
+            XceliumSimulator(incremental_options, DummyRegressionConfig(), None).prepare_compile_job(vcomp())
+        source_path.write_bytes(source_contents)
+
         wrong_key_options = parse_args([
             "--simulator",
             "XRUN",
@@ -699,9 +750,17 @@ class VcsRuntimeContractTest(unittest.TestCase):
         self.assertNotIn('time eval "{{ simulation_command }}"', sim)
         self.assertIn("time {{ simulation_command }}", sim)
         self.assertIn("SIM_DURATION_FILE", sim)
+        self.assertIn("SIM_TIMEOUT_START_FILE", sim)
+        self.assertIn(': > "$SIM_TIMEOUT_START_FILE"', sim)
         self.assertIn("SIM_START_SECONDS=$SECONDS", sim)
-        self.assertIn('kill "${{ socket_name|upper }}_PID"', sim)
+        self.assertIn('kill "$SOCKET_{{ loop.index }}_PID"', sim)
         self.assertIn('kill -KILL "$current_pid"', sim)
+        simmer = self._read_repo_file("bin/simmer.py")
+        self.assertNotIn("socket_command.format(socket_file=socket_file)", simmer)
+        self.assertIn('socket_command.replace("{socket_file}", socket_file)', simmer)
+        dv_rule = self._read_repo_file("verilog/private/dv.bzl")
+        self.assertIn("must match [A-Za-z_][A-Za-z0-9_]*", dv_rule)
+        self.assertIn("other shell braces are preserved", dv_rule)
         self.assertIn("{POST_FLIST_ARGS} \\", svunit)
         self.assertIn('"${remaining_args[@]}"', svunit)
         self.assertIn("completed without cdc_run/jg.log", cdc)

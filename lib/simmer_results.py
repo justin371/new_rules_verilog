@@ -82,6 +82,7 @@ def create_run(argv, rcfg, planned_tests):
         },
         "compile": [],
         "tests": [],
+        "launch_failures": [],
     }
 
 
@@ -102,6 +103,7 @@ def record_compile_job(run, vcomp_job):
         "status": vcomp_job.jobstatus.name,
         "compile_dir": vcomp_job.job_dir,
         "cmp_log": vcomp_job.log_path,
+        "error_message": getattr(vcomp_job, "error_message", None),
     }
     _upsert_by_key(run["compile"], "vcomp_target", compile_record)
 
@@ -128,7 +130,7 @@ def record_test_job(run, test_job, waves_script=None, waves_path=None):
         "iteration": test_job.iteration,
         "seed": getattr(test_job, "seed", None),
         "status": test_job.jobstatus.name,
-        "duration_s": int(simulation_duration_s) if simulation_duration_s is not None else wall_duration_s,
+        "duration_s": int(simulation_duration_s) if simulation_duration_s is not None else None,
         "wall_duration_s": wall_duration_s,
         "compile_dir": test_job.vcomper.job_dir,
         "sim_dir": test_job.job_dir,
@@ -173,6 +175,8 @@ def finalize_run(run, regression_log_path=None, backend_finalize_failed=False):
 
     if any(item.get("status") == "FAILED" for item in run.get("compile", [])):
         run["status"] = "COMPILE_FAILED"
+    elif run.get("launch_failures"):
+        run["status"] = "FAILED"
     else:
         run["status"] = "NO_SIM_RUN"
 
@@ -201,8 +205,6 @@ def load_store(project_dir):
 
 
 def save_run(project_dir, run, max_runs=MAX_RUNS):
-    if not run.get("tests"):
-        return
     stored_run = dict(run)
     if int(run.get("planned_tests") or len(run["tests"])) > 1 and len(run["tests"]) > 1:
         representative = next((test for test in run["tests"] if test.get("status") == "FAILED"), run["tests"][0])
@@ -306,7 +308,7 @@ def format_history(project_dir, count, use_color=None):
         store = load_store(project_dir)
     except (OSError, ValueError) as exc:
         return "Unable to read simmer history: {}".format(exc)
-    runs = [run for run in store.get("runs", []) if run.get("tests")]
+    runs = store.get("runs", [])
     if not runs:
         return "No simmer history found."
 

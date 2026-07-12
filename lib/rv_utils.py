@@ -125,7 +125,11 @@ def print_summary(rcfg, vcomp_jobs, jm, trd):
         for icfg in icfgs:
             if not icfg.jobs[0].vcomper is vcomp:
                 continue
-            timed_jobs = [job for job in icfg.jobs if job.jobstatus in [job.jobstatus.PASSED, job.jobstatus.FAILED]]
+            timed_jobs = [
+                job for job in icfg.jobs
+                if job.jobstatus in [job.jobstatus.PASSED, job.jobstatus.FAILED]
+                and getattr(job, "simulation_duration_s", None) is not None
+            ]
             max_sim_time = max(timed_jobs, key=lambda x: x.job_time)._get_job_time_str() if timed_jobs else ""
             passed = [j for j in icfg.jobs if j.jobstatus.completed and j.jobstatus.successful]
             failed = [j for j in icfg.jobs if j.jobstatus == j.jobstatus.FAILED]

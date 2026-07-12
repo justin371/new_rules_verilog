@@ -160,6 +160,15 @@ class Job():
         self.log.debug("post_run %s %s duration %s", self.__class__.__name__, self.name, self.duration_s)
         #self.completed = True
 
+    def launch_failed(self, exc):
+        """Record a failure that occurs before the subprocess starts."""
+        run = getattr(self.rcfg, "simmer_results_run", None)
+        if run is not None:
+            run.setdefault("launch_failures", []).append({
+                "job": repr(self),
+                "error_message": str(exc),
+            })
+
     @property
     def duration_s(self):
         try:
@@ -263,7 +272,16 @@ class SubprocessJobRunner(JobRunner):
                 self._kill_sent = True
             return False
 
-        delta = now - self._start_time
+        timeout_start = self._start_time
+        timeout_start_path = getattr(self.job, "timeout_start_path", None)
+        if timeout_start_path:
+            try:
+                timeout_start = datetime.datetime.fromtimestamp(os.path.getmtime(timeout_start_path))
+            except OSError:
+                timeout_start = None
+        if timeout_start is None:
+            return False
+        delta = now - timeout_start
         if self.job.timeout > 0 and delta > datetime.timedelta(hours=self.job.timeout):
             self.log.error("%s exceeded timeout value of %s; sending SIGTERM", self.job, self.job.timeout)
             self._timed_out = True
@@ -457,6 +475,10 @@ class JobManager():
                     self.log.error("%s launch_failed(): %s", job, exc)
                     job.job_stop_time = datetime.datetime.now()
                     job.jobstatus = JobStatus.FAILED
+                    try:
+                        job.launch_failed(exc)
+                    except Exception as record_exc:
+                        self.log.error("Could not record launch failure for %s: %s", job, record_exc)
                     self._error_count += 1
                     self._move_children_to_skipped(job)
                     if self._error_count >= self._quit_count:

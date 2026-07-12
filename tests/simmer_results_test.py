@@ -107,6 +107,51 @@ class SimmerResultsTest(unittest.TestCase):
         self.assertEqual(7, run["tests"][0]["duration_s"])
         self.assertEqual(19, run["tests"][0]["wall_duration_s"])
 
+    def test_missing_simulator_duration_does_not_report_setup_time_as_simulation(self):
+        run = simmer_results.create_run(["simmer", "-t", "tb:test"], self.rcfg, 1)
+        test_job = SimpleNamespace(
+            rcfg=SimpleNamespace(options=SimpleNamespace(waves=None)),
+            vcomper=SimpleNamespace(
+                name="tb",
+                bazel_vcomp_target="//tb:tb",
+                job_dir="compile",
+                log_path="cmp.log",
+            ),
+            name="test",
+            target="//tb:test",
+            iteration=1,
+            seed=None,
+            jobstatus=SimpleNamespace(name="FAILED"),
+            duration_s=19.8,
+            simulation_duration_s=None,
+            job_dir="sim",
+            _log_path="stdout.log",
+            error_message="setup failed",
+        )
+
+        simmer_results.record_test_job(run, test_job)
+
+        self.assertIsNone(run["tests"][0]["duration_s"])
+        self.assertEqual(19, run["tests"][0]["wall_duration_s"])
+
+    def test_compile_failure_without_started_test_is_saved_and_shown(self):
+        run = simmer_results.create_run(["simmer", "-t", "tb:test"], self.rcfg, 1)
+        run["compile"] = [{
+            "bench": "tb",
+            "vcomp_target": "//tb:tb",
+            "status": "FAILED",
+            "compile_dir": "compile",
+            "cmp_log": "cmp.log",
+        }]
+        simmer_results.finalize_run(run)
+
+        simmer_results.save_run(self.project_dir, run)
+
+        self.assertEqual("COMPILE_FAILED", run["status"])
+        history = simmer_results.format_history(self.project_dir, 10, use_color=False)
+        self.assertIn("COMPILE_FAILED", history)
+        self.assertIn("compile: cmp.log", history)
+
     def test_multi_test_history_keeps_summary_and_one_representative_test(self):
         run = self._completed_run()
         run["planned_tests"] = 3

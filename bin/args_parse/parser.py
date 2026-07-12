@@ -167,9 +167,23 @@ def parse_args(argv):
     options.reproduce_args = reproduction_args(argv)
 
     options.simulator = (options.simulator if options.simulator_was_explicit else SIM_PLATFORM).upper()
+    wave_detail_switches = [
+        '--wave-type',
+        '--wave-tcl',
+        '--wave-start',
+        '--wave-end',
+        '--wave-depth',
+    ]
+    requested_wave_details = [
+        argument for argument in wave_detail_switches if argument_explicitly_requested(argv, argument)
+    ]
+    if options.waves is None and requested_wave_details:
+        parser.error("{} require --waves.".format(", ".join(requested_wave_details)))
     if options.wave_start < 0:
         parser.error("--wave-start must be non-negative.")
     if options.wave_end != 99999999 and options.wave_end <= options.wave_start:
         parser.error("--wave-end must be greater than --wave-start.")
+    if options.wave_depth <= 0:
+        parser.error("--wave-depth must be positive.")
     options.proj_dir = PROJ_DIR
     return options

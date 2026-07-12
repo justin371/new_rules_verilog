@@ -1,5 +1,6 @@
 # lib/simulators/base.py
 import abc
+import os
 
 
 class ValidationErrorParser:
@@ -161,12 +162,16 @@ class SimulatorInterface(abc.ABC):
         """Validate simulator capabilities needed by the selected run."""
         return
 
-    def uses_shared_regression_init(self):
-        """Return whether the backend needs a shared-regression initialization job."""
-        return False
-
     def uses_dynamic_test_plan(self):
         """Return whether the backend selects test iterations after compilation."""
+        return False
+
+    def create_regression_jobs(self, vcomp_jobs):
+        """Create backend-owned jobs and attach their dependencies."""
+        return []
+
+    def finalize_regression_workflow(self):
+        """Finalize a backend-owned workflow and report whether it failed."""
         return False
 
     def prepare_test_job(self, test_job):
@@ -184,6 +189,17 @@ class SimulatorInterface(abc.ABC):
     def get_compile_template_context(self, vcomp_job):
         """Return backend-owned values needed by its compile template."""
         return {}
+
+    def get_compile_fingerprint_inputs(self, vcomp_job):
+        """Return common external files and environment affecting compilation."""
+        compile_args_file = self.options.compile_args_file
+        return {
+            "extra_input_paths": [compile_args_file] if compile_args_file else [],
+            "environment": {
+                key: os.environ.get(key, "")
+                for key in ("LOADEDMODULES", "MODULEPATH", "PATH")
+            },
+        }
 
     def collect_coverage_data(self, vcomp_jobs):
         """Return dashboard coverage summaries keyed by testbench name."""

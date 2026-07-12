@@ -148,9 +148,10 @@ simmer -t <bench>:<test> --simulator VCS --no-compile
 simmer -t <bench>:<test> --simulator VCS --no-compile --no-bazel
 ```
 
-`--no-compile` validates a fingerprint of tracked/untracked source state, the
-rendered compile script and compile arguments. It fails before simulation when
-the existing compile output does not match the current inputs.
+`--no-compile` validates a fingerprint of tracked/untracked source state,
+runfile content, the rendered compile script, compile arguments, external
+compile configuration files and the selected tool environment. It fails before
+simulation when the existing compile output does not match the current inputs.
 
 Use `--recompile` to force a clean VCS compile.
 
@@ -562,9 +563,10 @@ seed and original simulator options. Run it directly from any directory. Set
 
 ## Simulation history
 
-Completed simulation runs are recorded in `.simmer_results.json` at the project
-root. The file is local run state and is intended for quick lookup of recent
-simulation outputs.
+Normal simulation invocations are recorded in `.simmer_results.json` at the
+project root, including compile and launch failures that prevent a test from
+starting. The file is local run state and is intended for quick lookup of recent
+outputs.
 
 Print the most recent 10 runs:
 
@@ -601,5 +603,7 @@ Use `--use-color` to force color output:
 simmer --use-color --history
 ```
 
-Runs that only discover tests, compile without running simulation, or fail
-before any simulation job starts are not recorded.
+Discovery-only and explicit compile-only invocations are not recorded. For a
+started test, `duration_s` is the main simulator command time and
+`wall_duration_s` is the complete test job time; a failure before the simulator
+starts leaves `duration_s` unset.

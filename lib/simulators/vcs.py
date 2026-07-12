@@ -12,6 +12,7 @@ from .base import SimulatorInterface, ValidationErrorParser
 from .options import validate_explicit_switches
 from .vcs_options import validate_vcs_runtime_options
 from .vso import VsoWorkflow
+from .vcs_jobs import IcoInitJob, VsoAskJob, VsoInitJob
 
 log = logging.getLogger(__name__)
 
@@ -40,6 +41,8 @@ class VcsSimulator(SimulatorInterface):
     def __init__(self, options, rcfg, env):
         super().__init__(options, rcfg, env)
         self.vso_workflow = VsoWorkflow(options, rcfg)
+        self._vso_init_job = None
+        self._vso_ask_job = None
 
     def get_name(self):
         return "vcs"
@@ -73,11 +76,46 @@ class VcsSimulator(SimulatorInterface):
         if self.options.vso_buildname and vcomp_count > 1:
             raise ValueError("--vso-buildname can only be used with one selected VCS build.")
 
-    def uses_shared_regression_init(self):
-        return self.options.ico
-
     def uses_dynamic_test_plan(self):
         return self.options.vso
+
+    def create_regression_jobs(self, vcomp_jobs):
+        if self.options.no_run:
+            return []
+
+        jobs = []
+        if self.options.ico:
+            ico_init_job = IcoInitJob(self.rcfg, self)
+            for vcomp_job in vcomp_jobs.values():
+                ico_init_job.add_dependency(vcomp_job)
+            for _, tests in self.rcfg.all_vcomp.values():
+                for test in tests:
+                    test.add_dependency(ico_init_job)
+            jobs.append(ico_init_job)
+
+        if self.options.vso:
+            self._vso_init_job = VsoInitJob(self.rcfg, self, vcomp_jobs)
+            for vcomp_job in vcomp_jobs.values():
+                self._vso_init_job.add_dependency(vcomp_job)
+            self._vso_ask_job = VsoAskJob(self.rcfg, self)
+            self._vso_ask_job.add_dependency(self._vso_init_job)
+            for _, tests in self.rcfg.all_vcomp.values():
+                for test in tests:
+                    test.add_dependency(self._vso_ask_job)
+            jobs.extend([self._vso_init_job, self._vso_ask_job])
+        return jobs
+
+    def finalize_regression_workflow(self):
+        if not self.options.vso or self.options.no_run:
+            return False
+        if not self._vso_init_job.jobstatus.successful or not self._vso_ask_job.jobstatus.successful:
+            return False
+        try:
+            self.vso_workflow.finalize_merge(self.rcfg.all_vcomp)
+        except (OSError, RuntimeError) as exc:
+            log.error("%s", exc)
+            return True
+        return False
 
     def prepare_test_job(self, test_job):
         return self.vso_workflow.prepare_test(test_job) if self.options.vso else None
@@ -97,6 +135,16 @@ class VcsSimulator(SimulatorInterface):
             'vso_build_name': self.vso_workflow.build_name(vcomp_job) if self.options.vso else '',
             'vso_workdir': vso_workdir,
         }
+
+    def get_compile_fingerprint_inputs(self, vcomp_job):
+        inputs = super().get_compile_fingerprint_inputs(vcomp_job)
+        if self.options.vcs_cm_hier:
+            inputs["extra_input_paths"].append(self.options.vcs_cm_hier)
+        inputs["environment"].update({
+            key: os.environ.get(key, "")
+            for key in ("LM_LICENSE_FILE", "VCS_HOME", "VSO_HOME")
+        })
+        return inputs
 
     def get_scheduler_threads_per_test(self):
         return self.options.fgp if self.options.fgp is not None else 1

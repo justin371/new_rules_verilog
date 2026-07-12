@@ -10,6 +10,8 @@ export SIMRESULTS={{ job.job_dir|shell_quote }}
 export TEST_LOG_PATH={{ job._log_path|shell_quote }} # Export log path
 export SIM_WORK_DIR={{ sim_working_dir|shell_quote }}
 SIM_DURATION_FILE="$SIMRESULTS/simulation_duration_s"
+SIM_TIMEOUT_START_FILE="$SIMRESULTS/simulation_started"
+rm -f "$SIM_DURATION_FILE" "$SIM_TIMEOUT_START_FILE"
 export VIP_LOG_DIR="$SIMRESULTS"
 export SVT_LOG_DIR="$SIMRESULTS"
 
@@ -26,19 +28,18 @@ function testFunction {
     # Spawn socket process
     echo "Spawning: {{ socket_command }}"
     {{ socket_command }} > "{{ job.job_dir }}/{{ socket_name }}.log" 2>&1 &
-    # Store PID using uppercase name convention
-    declare {{ socket_name|upper }}_PID=$!
-    echo "Socket {{ socket_name }} started with PID ${{ socket_name|upper }}_PID (Log: {{ job.job_dir }}/{{ socket_name }}.log)"
+    declare SOCKET_{{ loop.index }}_PID=$!
+    echo "Socket {{ socket_name }} started with PID $SOCKET_{{ loop.index }}_PID (Log: {{ job.job_dir }}/{{ socket_name }}.log)"
 
     # Wait for socket file to be created by the process
     local wait_count=0
     local max_wait=30 # Max seconds to wait
     while [ ! -e "{{ socket_file }}" ]; do
-        echo "Waiting for {{ socket_name }} (PID ${{ socket_name|upper }}_PID) to create {{ socket_file }}..."
+        echo "Waiting for {{ socket_name }} (PID $SOCKET_{{ loop.index }}_PID) to create {{ socket_file }}..."
         sleep 1
         # Check if the socket process is still running
-        if ! ps -p ${{ socket_name|upper }}_PID > /dev/null; then
-           echo "%E- ERROR: Socket process {{ socket_name }} (PID ${{ socket_name|upper }}_PID) exited prematurely without creating {{ socket_file }}."
+        if ! ps -p $SOCKET_{{ loop.index }}_PID > /dev/null; then
+           echo "%E- ERROR: Socket process {{ socket_name }} (PID $SOCKET_{{ loop.index }}_PID) exited prematurely without creating {{ socket_file }}."
            echo "Check log: {{ job.job_dir }}/{{ socket_name }}.log"
            # Decide whether to exit immediately or continue and let failure be caught later
            # exit 1 # Exit immediately
@@ -48,9 +49,9 @@ function testFunction {
         # Timeout check
         wait_count=$((wait_count + 1))
         if [ "$wait_count" -ge "$max_wait" ]; then
-            echo "%E- ERROR: Timeout waiting for socket {{ socket_name }} (PID ${{ socket_name|upper }}_PID) to create {{ socket_file }}."
+            echo "%E- ERROR: Timeout waiting for socket {{ socket_name }} (PID $SOCKET_{{ loop.index }}_PID) to create {{ socket_file }}."
             final_result=1
-            kill "${{ socket_name|upper }}_PID" 2>/dev/null || true
+            kill "$SOCKET_{{ loop.index }}_PID" 2>/dev/null || true
             break
         fi
     done
@@ -115,7 +116,7 @@ function testFunction {
 
     # Execute the main simulation command with timing
     set +o errexit # Disable errexit to capture the simulation's exit code
-    rm -f "$SIM_DURATION_FILE"
+    : > "$SIM_TIMEOUT_START_FILE"
     local SIM_START_SECONDS=$SECONDS
     time {{ simulation_command }}
     local sim_exit_code=$?
@@ -149,7 +150,7 @@ function testFunction {
     # echo "--- Cleaning Up Sockets ---"
     declare -i sockets_exit_code=0
  {%- for socket_name, _, _ in sockets %}
-    SOCKET_PID_VARNAME="{{ socket_name|upper }}_PID"
+    SOCKET_PID_VARNAME="SOCKET_{{ loop.index }}_PID"
     # Check if PID variable is set and non-empty
     if [ -n "${!SOCKET_PID_VARNAME:-}" ]; then
         local current_pid="${!SOCKET_PID_VARNAME}"

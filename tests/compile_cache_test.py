@@ -67,6 +67,37 @@ class CompileCacheTest(unittest.TestCase):
         with self.assertRaisesRegex(RuntimeError, "missing file"):
             compile_fingerprint(project, "vcs -f compile.f", compile_args, inventory, runfiles)
 
+    def test_fingerprint_tracks_external_config_content_and_tool_environment(self):
+        project, _, compile_args = self._project()
+        config = project.parent / "coverage_hier.cfg"
+        config.write_text("+tree top\n", encoding="utf-8")
+        initial = compile_fingerprint(
+            project,
+            "vcs -f compile.f",
+            compile_args,
+            extra_input_paths=[config],
+            environment={"VCS_HOME": "/tools/vcs/Y-2026.03"},
+        )
+
+        config.write_text("+tree dut\n", encoding="utf-8")
+        config_changed = compile_fingerprint(
+            project,
+            "vcs -f compile.f",
+            compile_args,
+            extra_input_paths=[config],
+            environment={"VCS_HOME": "/tools/vcs/Y-2026.03"},
+        )
+        environment_changed = compile_fingerprint(
+            project,
+            "vcs -f compile.f",
+            compile_args,
+            extra_input_paths=[config],
+            environment={"VCS_HOME": "/tools/vcs/Z-2027.03"},
+        )
+
+        self.assertNotEqual(initial, config_changed)
+        self.assertNotEqual(config_changed, environment_changed)
+
 
 if __name__ == "__main__":
     unittest.main()
