@@ -430,18 +430,24 @@ class VcsSimulator(SimulatorInterface):
 
     def run_report_coverage_merge(self, vcomp_jobs):
         if not self.options.cm:
-            return
+            return False
+        failed = False
         for vcomp_job in vcomp_jobs.values():
             merge_script = getattr(vcomp_job, "coverage_merge_script", None)
             if not merge_script:
+                log.error("VCS coverage merge script is unavailable for %s", vcomp_job)
+                failed = True
                 continue
             try:
                 result = subprocess.run(["bash", merge_script], capture_output=True, text=True)
             except OSError as exc:
                 log.error("VCS coverage merge could not start for %s: %s", vcomp_job, exc)
+                failed = True
                 continue
             if result.returncode != 0:
                 log.error("VCS coverage merge failed for %s:\n%s\n%s", vcomp_job, result.stdout, result.stderr)
+                failed = True
+        return failed
 
     def cleanup_test_coverage(self, test_job):
         path = getattr(test_job, "coverage_db_path", None)

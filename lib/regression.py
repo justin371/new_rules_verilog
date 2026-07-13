@@ -214,7 +214,12 @@ class RegressionConfig():
             except OSError:
                 digest = "missing"
             files.append({"path": relative_path, "sha256": digest})
-        return {"schema_version": 1, "files": files}
+        return {
+            "schema_version": 1,
+            "allow_no_run": bool(self.options.allow_no_run),
+            "discovery_query": self._build_vcomp_discovery_query(),
+            "files": files,
+        }
 
     def _write_discovery_manifest(self):
         self.dict_to_json(self._discovery_dependency_manifest(), "discovery_manifest.json")

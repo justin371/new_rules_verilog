@@ -55,12 +55,12 @@ simmer -t //hw/dv/project_benches/sys/tb:some_vcs_test --simulator VCS
 
 Override the launcher with `RV_VCS_RUNNER` or `--vcs-runner` only when a project needs a different module wrapper.
 
-VCS regression testbenches use the two-step `simmer` flow. Small DV and RTL unit
-tests support both `simulator = "XRUN"` and `simulator = "VCS"`.
+VCS simulations use the two-step `verilog_dv_tb` + `simmer` flow. The one-step
+DV and RTL unit-test rules remain Xcelium-only.
 
-### Unit tests with Xcelium and VCS
+### Unit tests with Xcelium
 
-Select the backend on each unit-test target:
+Use Xcelium for one-step unit-test targets:
 
 ```starlark
 verilog_rtl_unit_test(
@@ -69,36 +69,23 @@ verilog_rtl_unit_test(
     simulator = "XRUN",
 )
 
-verilog_rtl_unit_test(
-    name = "counter_test_vcs",
-    deps = [":counter_test_top"],
-    simulator = "VCS",
-)
 ```
 
-Site wrappers can be configured independently without mixing vendor arguments:
+Configure the Xcelium site wrappers independently from the VCS regression flow:
 
 ```bazelrc
 build:xrun --@rules_verilog//:verilog_dv_unit_test_command="runmod -t xrun --"
 build:xrun --@rules_verilog//:verilog_rtl_unit_test_command="runmod -t xrun --"
-
-build:vcs --@rules_verilog//:verilog_dv_unit_test_command_vcs="runmod vcs -- vcs"
-build:vcs --@rules_verilog//:verilog_rtl_unit_test_command_vcs="runmod vcs -- vcs"
-build:vcs --@rules_verilog//:verilog_rtl_wave_viewer_command_vcs="runmod vcs -- verdi"
 ```
 
-Run both backends on the Red Hat workstation:
+Run the Xcelium unit test on the Red Hat workstation:
 
 ```bash
 bazel test --config=xrun //path/to:counter_test_xrun
-bazel test --config=vcs //path/to:counter_test_vcs
 ```
 
 `runmod` is a site-provided command from a separate repository and is assumed
 to be available on `PATH`.
-
-VCS RTL unit tests accept `--waves`, `--launch`, `--compile-arg <arg>`, and
-`--run-arg <arg>` after Bazel's `--` separator.
 
 ### VCS Partition Compile
 

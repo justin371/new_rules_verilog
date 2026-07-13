@@ -109,8 +109,8 @@ class SimulatorInterface(abc.ABC):
 
     @abc.abstractmethod
     def run_report_coverage_merge(self, vcomp_jobs):
-        """Run any coverage merge commands needed before report generation."""
-        pass
+        """Run coverage merges and return whether any merge failed."""
+        return False
 
     @abc.abstractmethod
     def get_log_parsing_info(self):

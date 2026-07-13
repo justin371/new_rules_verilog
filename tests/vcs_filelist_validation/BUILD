@@ -95,15 +95,6 @@ verilog_dv_test_cfg(
 )
 
 verilog_dv_unit_test(
-    name = "dv_unit_vcs",
-    compile_args = ["+UNIT_VCS_COMPILE_ARG"],
-    run_args = ["+UNIT_VCS_RUN_ARG"],
-    simulator = "VCS",
-    tags = ["manual"],
-    deps = [":unit_test_top"],
-)
-
-verilog_dv_unit_test(
     name = "dv_unit_xrun",
     simulator = "XRUN",
     tags = ["manual"],
@@ -111,15 +102,8 @@ verilog_dv_unit_test(
 )
 
 verilog_rtl_unit_test(
-    name = "rtl_unit_vcs",
-    data = [":runtime_tool"],
-    simulator = "VCS",
-    tags = ["manual"],
-    deps = [":unit_test_top"],
-)
-
-verilog_rtl_unit_test(
     name = "rtl_unit_xrun",
+    data = [":runtime_tool"],
     simulator = "XRUN",
     tags = ["manual"],
     deps = [":unit_test_top"],
@@ -139,11 +123,9 @@ py_test(
         ":dv_tb_xrun_ccf",
         ":dv_tb_xrun_ccf_compile_args.f",
         ":dv_tb_xrun_ccf_tb_options.py",
-        ":dv_unit_vcs",
         ":dv_unit_xrun",
         ":rtl_lint_vcs",
         ":rtl_lint_vcs_cmds.tcl",
-        ":rtl_unit_vcs",
         ":rtl_unit_xrun",
         ":vcs_partitions",
         "@filelist_external_fixture//:external_rtl",

@@ -3,7 +3,6 @@
 import hashlib
 import json
 import os
-import subprocess
 import tempfile
 
 FINGERPRINT_FILE = ".compile_fingerprint.json"
@@ -23,27 +22,6 @@ def _file_bytes(path):
             return filep.read()
     except OSError:
         return b"<missing>"
-
-
-def _git(project_dir, *args):
-    return subprocess.run(
-        ["git", *args],
-        cwd=project_dir,
-        check=False,
-        capture_output=True,
-    )
-
-
-def _source_digest(project_dir):
-    head = _git(project_dir, "rev-parse", "HEAD")
-    diff = _git(project_dir, "diff", "--binary", "--no-ext-diff", "HEAD", "--")
-    if head.returncode or diff.returncode:
-        return "unavailable"
-
-    digest = hashlib.sha256()
-    digest.update(head.stdout)
-    digest.update(diff.stdout)
-    return digest.hexdigest()
 
 
 def _compile_inputs_digest(compile_inputs_path, runfiles_root):
@@ -86,8 +64,7 @@ def compile_fingerprint(project_dir,
                         environment=None):
     """Return the source, generated filelist and compile-mode identity."""
     fingerprint = {
-        "schema_version": 3,
-        "source_sha256": _source_digest(os.fspath(project_dir)),
+        "schema_version": 4,
         "compile_script_sha256": _digest_bytes(compile_script.encode("utf-8")),
         "compile_args_sha256": _digest_bytes(_file_bytes(compile_args_path)),
         "environment": dict(sorted((environment or {}).items())),

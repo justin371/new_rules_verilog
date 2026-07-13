@@ -41,9 +41,9 @@ bazel build //docs:defs_docs
 
 5. Confirm the generated filelists for a testbench are the unified names above, and that their contents match the selected simulator only.
 
-6. Run matching `verilog_dv_unit_test` targets under `XRUN` and `VCS`. Confirm the generated scripts use `-f`/Xcelium defaults or `-file`/VCS defaults respectively.
+6. Run one `verilog_dv_unit_test` target under `XRUN`. VCS simulations use `verilog_dv_tb` plus `simmer` instead.
 
-7. Run matching `verilog_rtl_unit_test` targets under `XRUN` and `VCS`. For VCS, also check `--waves` produces `waves.fsdb` and `--launch` invokes Verdi.
+7. Run one `verilog_rtl_unit_test` target under `XRUN`.
 
 ## Failure cases worth testing
 
@@ -70,9 +70,7 @@ If you want quick confidence before broader regression:
 - One default XRUN DV regression target
 - One explicit VCS DV regression target
 - One DV unit test under XRUN
-- One DV unit test under VCS
 - One RTL unit test under XRUN
-- One RTL unit test under VCS
 
 ## Notes
 

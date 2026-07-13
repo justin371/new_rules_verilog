@@ -943,6 +943,7 @@ def main(rcfg, options):
     webroot_path = options.report_dir
     dynamic_test_plan = simulator.uses_dynamic_test_plan()
     workflow_finalize_failed = False
+    coverage_merge_failed = False
 
     rcfg.all_vcomp = seed_plan.ordered_regression_tests(rcfg.all_vcomp)
     planned_seeds = {}
@@ -1084,7 +1085,7 @@ def main(rcfg, options):
         report_header = {}
         if options.report:
             if simulator.coverage_enabled():
-                rcfg._profile_step(
+                coverage_merge_failed = rcfg._profile_step(
                     "coverage_merge",
                     "merge simulator coverage databases",
                     lambda: simulator.run_report_coverage_merge(vcomp_jobs),
@@ -1134,7 +1135,8 @@ def main(rcfg, options):
             simmer_results.finalize_run(
                 rcfg.simmer_results_run,
                 regression_log_path=regression_log_path,
-                backend_finalize_failed=(workflow_finalize_failed or not post_processing_complete
+                backend_finalize_failed=(workflow_finalize_failed or coverage_merge_failed
+                                         or not post_processing_complete
                                          or bool(rcfg.log.warn_count or rcfg.log.error_count)),
             )
             try:
@@ -1142,8 +1144,8 @@ def main(rcfg, options):
             except OSError as exc:
                 log.error("Failed to write simmer results: %s", exc)
 
-    if workflow_finalize_failed:
-        log.info("Exiting with status 1 due to backend finalization failure.")
+    if workflow_finalize_failed or coverage_merge_failed:
+        log.info("Exiting with status 1 due to backend finalization or coverage merge failure.")
         sys.exit(1)
     if total_failures > 0:
         log.info(f"Exiting with status 1 due to {total_failures} test failure(s).")

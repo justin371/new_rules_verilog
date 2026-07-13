@@ -128,6 +128,22 @@ class RegressionDiscoveryTest(unittest.TestCase):
 
         self.assertIn('filter(":soc_tb$", kind(dv_tb, //benches/...))', query)
 
+    def test_cache_manifest_tracks_requested_bench_query(self):
+        config = self._config(Path(tempfile.mkdtemp()))
+        initial = config._discovery_dependency_manifest()
+
+        config.options.tests[0].btiglob = "other_tb:*"
+
+        self.assertNotEqual(initial, config._discovery_dependency_manifest())
+
+    def test_cache_manifest_tracks_allow_no_run(self):
+        config = self._config(Path(tempfile.mkdtemp()))
+        initial = config._discovery_dependency_manifest()
+
+        config.options.allow_no_run = True
+
+        self.assertNotEqual(initial, config._discovery_dependency_manifest())
+
     def test_test_cfg_query_uses_the_public_macro_identity(self):
         config = self._config(Path(tempfile.mkdtemp()))
 

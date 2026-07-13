@@ -4,8 +4,7 @@
 
 - Bazel and CI are pinned to 7.7.1; Python dependencies are explicit Bazel deps.
 - VCS and Xcelium generate and validate separate compile/runtime arguments.
-- DV and RTL unit-test rules generate native XRUN or VCS scripts.
-- VCS RTL unit tests support FSDB generation and Verdi launch.
+- DV and RTL one-step unit-test rules remain XRUN-only.
 - `rerun.sh`, `run_waves.sh` and log-checker lookup are portable across main and external workspaces.
 - VCS coverage uses one `.vdb` path from simulation through URG merge.
 - VCS Partition Compile keeps each writable database under its VCOMP directory
@@ -35,7 +34,7 @@ Xcelium EMU runtime assets can be overridden with `RV_EMU_DPI_LIB` and
 
 - `SimulatorInterface` remains the explicit seam between simmer and two real EDA adapters. It is broad, but deleting it would spread vendor branching back into simmer.
 - `external/<repo>/...` paths remain in generated filelists because they are Bazel's stable runfiles representation. Environment variables are reserved for site tool setup.
-- VCS regression testbenches remain a two-step compile/run flow; one-step VCS support is limited to small unit tests.
+- VCS simulations use the two-step `verilog_dv_tb` + `simmer` compile/run flow.
 
 ## Needs licensed Red Hat validation
 

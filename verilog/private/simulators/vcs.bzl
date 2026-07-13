@@ -1,6 +1,6 @@
 """VCS backend helpers for DV rules."""
 
-load("//verilog/private:verilog.bzl", "ToolEncapsulationInfo", "VerilogInfo", "flists_to_arguments")
+load("//verilog/private:verilog.bzl", "VerilogInfo", "flists_to_arguments")
 
 def _sanitize_defines(defines):
     sanitized = {}
@@ -66,20 +66,10 @@ def _runtime_config(ctx):
         template = ctx.file._default_sim_opts_vcs,
     )
 
-def _unit_test_config(ctx, unit_test_template, default_sim_opts, simulator_command, filelist_flag, dpi_tool):
-    return struct(
-        default_sim_opts = default_sim_opts,
-        dpi_tool = "vcs",
-        filelist_flag = "-file",
-        simulator_command = ctx.attr._command_override_vcs[ToolEncapsulationInfo].command,
-        unit_test_template = unit_test_template,
-    )
-
 vcs_dv_backend = struct(
     compile_config = _compile_config,
     config_arg = _config_arg,
     extra_compile_outputs = _extra_compile_outputs,
     runtime_config = _runtime_config,
-    unit_test_config = _unit_test_config,
     validate_tb = _validate_tb,
 )

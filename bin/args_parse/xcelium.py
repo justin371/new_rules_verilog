@@ -32,8 +32,8 @@ def add_xcelium_arguments(parser):
         '--mce',
         default=False,
         action='store_true',
-        help=('Enable XRUN Multicore Engine for compile and simulation. Requires MCE licenses and cannot be '
-              'combined with --xprop, MSIE, or --emulator.'))
+        help=('Enable XRUN Multicore Engine for compile and simulation. Requires MCE licenses; xprop is ignored and '
+              'MSIE or emulator modes are rejected.'))
     gxrun.add_argument('--mce-build-count',
                        type=int,
                        default=4,
@@ -74,14 +74,14 @@ def add_xcelium_arguments(parser):
         metavar='PRIMARY_TOP',
         help=('Enable XRUN single-step MSIE for the named stable primary top. Preparation: configure the complete '
               'testbench in verilog_dv_tb.deps; XRUN partitions that command automatically. This mode does not use '
-              'the multi-step primary/incremental deps and cannot be combined with --xprop, --mce, or --emulator.'))
+              'the multi-step primary/incremental deps; xprop is ignored and MCE or emulator modes are rejected.'))
     gxrun.add_argument(
         '--msie-href',
         metavar='PRIMARY_TOP',
         help=('Run the first multi-step MSIE stage for the named stable DUT/netlist top, generate href and externs '
               'under <tb>__XRUN_VCOMP_MSIE, then stop. Preparation: configure the complete model in '
-              'verilog_dv_tb.deps. Run this before --msie-prim; other MSIE modes, --xprop, --mce, and --emulator '
-              'are incompatible.'))
+              'verilog_dv_tb.deps. Run this before --msie-prim; xprop is ignored and other MSIE modes, MCE, or '
+              'emulator are rejected.'))
     gxrun.add_argument(
         '--msie-prim',
         metavar='PRIMARY_TOP',

@@ -107,16 +107,26 @@ class VcsRuntimeContractTest(unittest.TestCase):
 
         self.assertEqual("runmod vcs --", simulator.get_tool_runner())
 
-    def test_xprop_is_opt_in_for_both_simulators(self):
-        vcs_options = parse_args(["-t", "unit:test", "--simulator", "VCS"])
-        xcelium_options = parse_args(["-t", "unit:test", "--simulator", "XRUN"])
+    def test_xprop_is_opt_in_for_vcs_and_defaults_to_fox_for_xcelium(self):
+        vcs_options, vcs_simulator = self._validated(["-t", "unit:test", "--simulator", "VCS"])
+        xcelium_options, xcelium_simulator = self._validated(["-t", "unit:test", "--simulator", "XRUN"])
 
         self.assertIsNone(vcs_options.xprop)
         self.assertFalse(vcs_options.xprop_was_explicit)
-        self.assertIsNone(xcelium_options.xprop)
+        self.assertEqual("F", xcelium_options.xprop)
+        xcelium_vcomp = DummyVcompJob()
+        Path(xcelium_vcomp.bench_dir, "fox_xprop.txt").touch()
+        self.assertIn("fox_xprop.txt", xcelium_simulator.generate_compile_options(xcelium_vcomp)["xprop_cmd"])
+        self.assertIsNone(vcs_simulator.generate_compile_options(DummyVcompJob())["xprop_cmd"])
 
-        simulator = VcsSimulator(vcs_options, DummyRegressionConfig(), None)
-        self.assertIsNone(simulator.generate_compile_options(DummyVcompJob())["xprop_cmd"])
+        mce_options, mce_simulator = self._validated(["--simulator", "XRUN", "--mce"])
+        self.assertEqual("F", mce_options.xprop)
+        self.assertIsNone(mce_simulator.generate_compile_options(DummyVcompJob())["xprop_cmd"])
+
+        _, msie_simulator = self._validated(["--simulator", "XRUN", "--msie-incr", "dut", "--xprop", "F"])
+        msie_vcomp = DummyVcompJob()
+        Path(msie_vcomp.bench_dir, "fox_xprop.txt").touch()
+        self.assertIn("fox_xprop.txt", msie_simulator.generate_compile_options(msie_vcomp)["xprop_cmd"])
 
     def test_explicit_vcs_xprop_f_enables_compile_option(self):
         options = parse_args(["-t", "unit:test", "--simulator", "VCS", "--xprop", "F"])
@@ -838,7 +848,9 @@ class VcsRuntimeContractTest(unittest.TestCase):
         self.assertIn("fox_xprop.txt", simulator.generate_compile_options(vcomp)["xprop_cmd"])
 
         Path(vcomp.bench_dir, "fox_xprop.txt").unlink()
-        self.assertEqual("-xprop F -xverbose", simulator.generate_compile_options(vcomp)["xprop_cmd"])
+        with self.assertLogs("lib.simulators.xcelium", level="WARNING") as messages:
+            self.assertIsNone(simulator.generate_compile_options(vcomp)["xprop_cmd"])
+        self.assertIn("fox_xprop.txt", messages.output[0])
 
     def test_xcelium_coverage_uses_explicit_ccf_and_unique_base_runs(self):
         with tempfile.NamedTemporaryFile() as covfile:
@@ -980,7 +992,7 @@ class VcsRuntimeContractTest(unittest.TestCase):
         vcomp = SimpleNamespace(coverage_merge_script="/tmp/unit_vcs_cov_merge.sh")
 
         with mock.patch("lib.simulators.vcs.subprocess.run", return_value=SimpleNamespace(returncode=0)) as run:
-            simulator.run_report_coverage_merge({"//unit:tb": vcomp})
+            self.assertFalse(simulator.run_report_coverage_merge({"//unit:tb": vcomp}))
 
         run.assert_called_once_with(
             ["bash", "/tmp/unit_vcs_cov_merge.sh"],
@@ -988,14 +1000,23 @@ class VcsRuntimeContractTest(unittest.TestCase):
             text=True,
         )
 
-    def test_vcs_failed_coverage_merge_does_not_abort_report_generation(self):
+    def test_vcs_failed_coverage_merge_is_reported(self):
         options = parse_args(["-t", "unit:test", "--simulator", "VCS", "--cm", "line"])
         simulator = VcsSimulator(options, DummyRegressionConfig(), None)
         vcomp = SimpleNamespace(coverage_merge_script="/tmp/unit_vcs_cov_merge.sh")
 
         with mock.patch("lib.simulators.vcs.subprocess.run",
                         return_value=SimpleNamespace(returncode=1, stdout="", stderr="failed")):
-            simulator.run_report_coverage_merge({"//unit:tb": vcomp})
+            self.assertTrue(simulator.run_report_coverage_merge({"//unit:tb": vcomp}))
+
+    def test_xcelium_failed_coverage_merge_is_reported(self):
+        options = parse_args(["--simulator", "XRUN", "--coverage", "A"])
+        simulator = XceliumSimulator(options, DummyRegressionConfig(), None)
+        vcomp = SimpleNamespace(cov_work_dir=tempfile.mkdtemp())
+
+        with mock.patch("lib.simulators.xcelium.subprocess.run",
+                        return_value=SimpleNamespace(returncode=1, stdout="", stderr="failed")):
+            self.assertTrue(simulator.run_report_coverage_merge({"//unit:tb": vcomp}))
 
     def test_vcs_coverage_uses_one_vdb_path_for_simulation_and_merge(self):
         options = parse_args([
@@ -1103,10 +1124,12 @@ class VcsRuntimeContractTest(unittest.TestCase):
         self.assertIn("ENV_CAPTURE_KEYS", source)
         self.assertNotIn("sorted(os.environ.items())", source)
         self.assertIn("j.jobstatus == JobStatus.FAILED", source)
+        self.assertIn("coverage_merge_failed = rcfg._profile_step", source)
+        self.assertIn("workflow_finalize_failed or coverage_merge_failed", source)
         self.assertLess(source.index('"coverage_merge"'), source.index("print_simmer_profile(rcfg, jm)"))
         self.assertLess(source.index("cleanup_shared_runtime_artifacts"), source.index("simmer_results.save_run"))
 
-    def test_vcs_unit_test_rules_use_simulator_specific_defaults(self):
+    def test_vcs_uses_two_step_flow_instead_of_unit_test_rules(self):
         dv_bzl = self._read_repo_file("verilog/private/dv.bzl")
         pldm_backend = self._read_repo_file("verilog/private/simulators/pldm.bzl")
         vcs_backend = self._read_repo_file("verilog/private/simulators/vcs.bzl")
@@ -1118,19 +1141,20 @@ class VcsRuntimeContractTest(unittest.TestCase):
         self.assertIn("vcs_dv_backend", dv_bzl)
         self.assertIn("xcelium_dv_backend", dv_bzl)
         self.assertNotIn('filelist_flag = "-file"', dv_bzl)
-        self.assertIn('filelist_flag = "-file"', vcs_backend)
+        self.assertIn('"\\n-file"', vcs_backend)
         self.assertNotIn("_ut_sim_template_xrun_default", vcs_backend)
         self.assertNotIn("_default_sim_opts_xrun_default", vcs_backend)
-        self.assertIn("_ut_sim_template_vcs_default", dv_bzl)
+        self.assertIn("does not support simulator = 'VCS'", dv_bzl)
+        self.assertNotIn("_ut_sim_template_vcs_default", dv_bzl)
+        self.assertNotIn("unit_test_config", vcs_backend)
         self.assertNotIn("simulators/xcelium.bzl", vcs_backend)
         self.assertNotIn("simulators/vcs.bzl", xcelium_backend)
         self.assertNotIn("xcelium_options", vcs_python)
         self.assertNotIn("vcs_options", xcelium_python)
         self.assertIn("compile_args_pldm_ice", pldm_backend)
         self.assertIn("expand_msie_compile_args", xcelium_backend)
-        self.assertIn('filelist_flag = "-file"', rtl_bzl)
-        self.assertIn("_ut_sim_waves_template_vcs_default", rtl_bzl)
-        self.assertIn('pre_fa.append("  +define+{}{}', rtl_bzl)
+        self.assertIn("does not support simulator = 'VCS'", rtl_bzl)
+        self.assertNotIn("_ut_sim_waves_template_vcs_default", rtl_bzl)
         self.assertIn('defines.extend(["+define+{}{}', rtl_bzl)
         self.assertNotIn('defines.extend(["+{}{}', rtl_bzl)
         self.assertIn("[_gatesim_target(inherit, corner) for inherit in inherits]", dv_bzl)

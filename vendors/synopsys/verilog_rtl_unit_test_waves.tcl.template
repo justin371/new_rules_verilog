@@ -1,7 +1,0 @@
-dump -file waves.fsdb -type FSDB
-dump -add {TOP_BASE_NAME} -fid FSDB0 -depth 0 -aggregates -fsdb_opt +packedmda+struct+parameter
-dump -enable -fid FSDB0
-run
-dump -flush FSDB0
-dump -close
-exit

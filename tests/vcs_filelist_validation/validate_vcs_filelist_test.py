@@ -182,11 +182,9 @@ class VcsFilelistValidationTest(unittest.TestCase):
         self.assertEqual(incremental_path, tb_options["msie_incremental_compile_args"])
         self.assertEqual(inputs_path, tb_options["msie_primary_inputs"])
 
-    def test_unit_test_scripts_select_the_requested_simulator(self):
+    def test_unit_test_scripts_use_xcelium(self):
         scripts = {
-            "tests/vcs_filelist_validation/dv_unit_vcs_run.sh": ["vcs", "-file", "./simv"],
             "tests/vcs_filelist_validation/dv_unit_xrun_run.sh": ["xrun", "-f"],
-            "tests/vcs_filelist_validation/rtl_unit_vcs": ["vcs", "-file", "waves.fsdb"],
             "tests/vcs_filelist_validation/rtl_unit_xrun": ["xrun", "-f", "waves.shm"],
         }
         for relative_path, needles in scripts.items():
@@ -205,33 +203,18 @@ class VcsFilelistValidationTest(unittest.TestCase):
 import json
 import os
 from pathlib import Path
-import shutil
 import sys
 
 tool = Path(sys.argv[0]).name
 with open(os.environ["TOOL_LOG"], "a", encoding="utf-8") as log_file:
     log_file.write(json.dumps({"tool": tool, "args": sys.argv[1:]}) + "\\n")
-if tool == "vcs":
-    output = sys.argv[sys.argv.index("-o") + 1]
-    shutil.copy2(os.environ["SIMV_STUB"], output)
-    Path(output).chmod(0o755)
-"""
-        simv_stub = """#!/usr/bin/env python3
-import json
-import os
-import sys
-with open(os.environ["TOOL_LOG"], "a", encoding="utf-8") as log_file:
-    log_file.write(json.dumps({"tool": "simv", "args": sys.argv[1:]}) + "\\n")
 """
 
         with tempfile.TemporaryDirectory() as temporary_dir:
             temporary_path = Path(temporary_dir)
             bin_dir = temporary_path / "bin"
             bin_dir.mkdir()
-            simv_stub_path = bin_dir / "simv_stub"
-            simv_stub_path.write_text(simv_stub, encoding="utf-8")
-            simv_stub_path.chmod(0o755)
-            for tool in ("vcs", "runmod", "xrun", "verdi", "simvision"):
+            for tool in ("runmod", ):
                 tool_path = bin_dir / tool
                 tool_path.write_text(tool_stub, encoding="utf-8")
                 tool_path.chmod(0o755)
@@ -240,19 +223,10 @@ with open(os.environ["TOOL_LOG"], "a", encoding="utf-8") as log_file:
             environment = dict(os.environ)
             environment.update({
                 "PATH": "{}{}{}".format(bin_dir, os.pathsep, environment["PATH"]),
-                "SIMV_STUB": str(simv_stub_path),
                 "TOOL_LOG": str(log_path),
             })
             invocations = {
-                "tests/vcs_filelist_validation/dv_unit_vcs_run.sh": [],
                 "tests/vcs_filelist_validation/dv_unit_xrun_run.sh": [],
-                "tests/vcs_filelist_validation/rtl_unit_vcs": [
-                    "--waves",
-                    "--compile-arg",
-                    "+compile_only",
-                    "--run-arg",
-                    "+run_only",
-                ],
                 "tests/vcs_filelist_validation/rtl_unit_xrun": ["--waves"],
             }
             for index, (relative_path, arguments) in enumerate(invocations.items()):
@@ -269,13 +243,6 @@ with open(os.environ["TOOL_LOG"], "a", encoding="utf-8") as log_file:
 
             records = [json.loads(line) for line in log_path.read_text(encoding="utf-8").splitlines()]
             self.assertTrue(any(record["tool"] == "runmod" for record in records))
-            self.assertTrue(any(record["tool"] == "vcs" for record in records))
-            self.assertTrue(any("+compile_only" in record["args"] for record in records if record["tool"] == "vcs"))
-            self.assertTrue(any("+run_only" in record["args"] for record in records if record["tool"] == "simv"))
-            self.assertTrue(
-                any("+UNIT_VCS_COMPILE_ARG" in record["args"] for record in records if record["tool"] == "vcs"))
-            self.assertTrue(any("+UNIT_VCS_RUN_ARG" in record["args"] for record in records
-                                if record["tool"] == "simv"))
             for record in records:
                 self.assertFalse(any(not argument.strip() for argument in record["args"]), record)
 
@@ -283,14 +250,14 @@ with open(os.environ["TOOL_LOG"], "a", encoding="utf-8") as log_file:
         with tempfile.TemporaryDirectory() as temporary_dir:
             bin_dir = Path(temporary_dir) / "bin"
             bin_dir.mkdir()
-            vcs_path = bin_dir / "vcs"
-            vcs_path.write_text("#!/usr/bin/env bash\nexit 23\n", encoding="utf-8")
-            vcs_path.chmod(0o755)
+            runmod_path = bin_dir / "runmod"
+            runmod_path.write_text("#!/usr/bin/env bash\nexit 23\n", encoding="utf-8")
+            runmod_path.chmod(0o755)
             environment = dict(os.environ)
             environment["PATH"] = "{}{}{}".format(bin_dir, os.pathsep, environment["PATH"])
 
             result = subprocess.run(
-                ["bash", str(find_runfile("tests/vcs_filelist_validation/dv_unit_vcs_run.sh"))],
+                ["bash", str(find_runfile("tests/vcs_filelist_validation/dv_unit_xrun_run.sh"))],
                 cwd=temporary_dir,
                 env=environment,
                 check=False,
@@ -300,7 +267,7 @@ with open(os.environ["TOOL_LOG"], "a", encoding="utf-8") as log_file:
             self.assertEqual(23, result.returncode)
             self.assertIn("ERROR: line", result.stderr)
             self.assertIn("exited 23", result.stderr)
-            self.assertIn("vcs", result.stderr)
+            self.assertIn("runmod", result.stderr)
 
 
 if __name__ == "__main__":

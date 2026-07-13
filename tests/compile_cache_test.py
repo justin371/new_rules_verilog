@@ -23,14 +23,28 @@ class CompileCacheTest(unittest.TestCase):
 
     def test_fingerprint_changes_with_source_or_compile_mode(self):
         project, source, compile_args = self._project()
-        initial = compile_fingerprint(project, "vcs -f compile.f", compile_args)
+        inventory = project / "compile_inputs.txt"
+        inventory.write_text("source\ttop.sv\n", encoding="utf-8")
+        initial = compile_fingerprint(project, "vcs -f compile.f", compile_args, inventory, project)
 
         source.write_text("module top; logic changed; endmodule\n", encoding="utf-8")
-        source_changed = compile_fingerprint(project, "vcs -f compile.f", compile_args)
-        mode_changed = compile_fingerprint(project, "vcs -debug_access -f compile.f", compile_args)
+        source_changed = compile_fingerprint(project, "vcs -f compile.f", compile_args, inventory, project)
+        mode_changed = compile_fingerprint(project, "vcs -debug_access -f compile.f", compile_args, inventory, project)
 
         self.assertNotEqual(initial, source_changed)
         self.assertNotEqual(source_changed, mode_changed)
+
+    def test_fingerprint_ignores_unrelated_tracked_changes(self):
+        project, _, compile_args = self._project()
+        inventory = project / "compile_inputs.txt"
+        inventory.write_text("source\ttop.sv\n", encoding="utf-8")
+        initial = compile_fingerprint(project, "vcs -f compile.f", compile_args, inventory, project)
+
+        (project / "README.md").write_text("documentation only\n", encoding="utf-8")
+        subprocess.run(["git", "add", "README.md"], cwd=project, check=True)
+        subprocess.run(["git", "commit", "-qm", "docs"], cwd=project, check=True)
+
+        self.assertEqual(initial, compile_fingerprint(project, "vcs -f compile.f", compile_args, inventory, project))
 
     def test_fingerprint_ignores_untracked_runtime_artifacts(self):
         project, _, compile_args = self._project()
