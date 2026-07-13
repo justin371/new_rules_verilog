@@ -22,11 +22,11 @@ COLOR_NC = '\033[0m'
 
 # pylint: disable=bad-whitespace
 LEVEL_TO_COLOR = {
-    'INFO': ("", ""),
-    'DEBUG': ("", ""),
-    'ERROR': (COLOR_RED, COLOR_NC),
-    'WARNING': (COLOR_RED, COLOR_NC),
-    'CRITICAL': (COLOR_RED, COLOR_NC)
+    INFO: ("", ""),
+    DEBUG: ("", ""),
+    ERROR: (COLOR_RED, COLOR_NC),
+    WARNING: (COLOR_RED, COLOR_NC),
+    CRITICAL: (COLOR_RED, COLOR_NC),
 }
 # pylint: enable=bad-whitespace
 
@@ -54,10 +54,13 @@ class CmnLogger(logging.getLoggerClass()):
         self._last_message_was_summary = False
         super(CmnLogger, self).info(*args, **kwargs)
 
-    def warn(self, *args, **kwargs): # pylint: disable=missing-docstring
+    def warning(self, *args, **kwargs): # pylint: disable=missing-docstring
         self.warn_count += 1
         self._last_message_was_summary = False
-        super(CmnLogger, self).warn(*args, **kwargs)
+        super(CmnLogger, self).warning(*args, **kwargs)
+
+    def warn(self, *args, **kwargs): # pylint: disable=missing-docstring
+        self.warning(*args, **kwargs)
 
     def error(self, *args, **kwargs): # pylint: disable=missing-docstring
         self.error_count += 1
@@ -124,7 +127,7 @@ class CmnFormatter(logging.Formatter):
 
     def format(self, record):
         if self.use_color:
-            record.color_start, record.color_end = LEVEL_TO_COLOR[record.levelname]
+            record.color_start, record.color_end = LEVEL_TO_COLOR.get(record.levelno, ("", ""))
         else:
             record.color_start, record.color_end = "", ""
         # record.levelname = LEVEL_NAMES[record.levelname]
@@ -145,6 +148,10 @@ def build_logger(name, level=logging.INFO, use_color=False, filehandler=None):
     logging.addLevelName(CRITICAL, "%F") # pylint: disable=bad-whitespace
 
     log = logging.getLogger(name)
+    for handler in list(log.handlers):
+        log.removeHandler(handler)
+        handler.close()
+    log.propagate = False
     if filehandler:
         log.setLevel(DEBUG)
     else:

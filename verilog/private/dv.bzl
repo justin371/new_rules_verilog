@@ -1,46 +1,44 @@
 # vim: set ft=bzl :
 """Rules for building DV infrastructure."""
 
-load(":verilog.bzl", "ToolEncapsulationInfo", "VerilogInfo", "flists_to_arguments", "gather_shell_defines", "get_transitive_srcs")
-load("@//deps:gatesim_modes_list.bzl","GATESIM_MODES")
+load("//deps:gatesim_modes_list.bzl", "GATESIM_MODES")
+load(":simulators/pldm.bzl", "pldm_dv_backend")
+load(":simulators/vcs.bzl", "vcs_dv_backend")
+load(":simulators/xcelium.bzl", "xcelium_dv_backend")
+load(":verilog.bzl", "ToolEncapsulationInfo", "VerilogInfo", "flists_to_arguments", "gather_shell_defines", "get_transitive_srcs", "merge_default_runfiles", "runfiles_relative_short_path", "verilog_input_inventory")
 
-DVTestInfo = provider(fields = {
+DVTestInfo = provider("Runtime configuration for a DV test.", fields = {
     "sim_opts": "Simulation :options to carry forward.",
     "uvm_testname": "UVM Test Name; passed to simulator via plusarg +UVM_TESTNAME.",
     "tb": "The verilog_dv_tb (verilog compile) associated with this test. Must be a Label of type verilog_dv_tb.",
     "simulator": "Simulator selected for this test configuration.",
     "tags": "Additional tags to be able to filter in simmer.",
-    "timeout": "Duration in minutes before the test will be killed due to timeout.",
+    "timeout": "Main simulation timeout in minutes, excluding socket and pre-run setup.",
     "pre_run": "Bazel run command that can be executed immediately before dv_tb simulation.",
     "description": "Test scenario descriptions.",
 })
 
-DVTBInfo = provider(fields = {
+DVTBInfo = provider("Simulator configuration for a DV testbench.", fields = {
     "ccf": "Coverage config file.",
+    "dut_instance": "DUT hierarchy used by coverage reports.",
+    "dut_top": "DUT module used to scope code coverage.",
+    "run_fail_patterns": "Project-specific simulation failure regexes.",
+    "run_pass_patterns": "Project-specific simulation pass regexes.",
     "simulator": "Simulator selected for this DV testbench.",
+    "vcs_cm_hier": "VCS coverage hierarchy configuration file.",
+    "xcelium_covfile": "Xcelium coverage configuration file.",
 })
 
-def _sanitize_vcs_defines(defines):
-    sanitized = {}
-    for key, value in defines.items():
-        if key in ["CADENCE", "XRUN"]:
-            continue
-        sanitized[key] = value
-    return sanitized
+def _dv_backend(simulator):
+    if simulator == "VCS":
+        return vcs_dv_backend
+    if simulator == "XRUN":
+        return xcelium_dv_backend
+    fail("simulator must be one of ['XRUN', 'VCS'], got '{}'".format(simulator))
 
-def _sanitize_vcs_compile_args(compile_args):
-    sanitized = []
-    for arg in compile_args:
-        if arg.startswith("+define+CADENCE") or arg.startswith("+define+XRUN"):
-            continue
-        if arg.startswith("-define CADENCE") or arg.startswith("-define XRUN"):
-            continue
-        sanitized.append(arg)
-    return sanitized
-
-def _build_test_runtime_options(simulator, uvm_testname, sim_opts, timeout, sockets, tags, pre_run):
+def _build_test_runtime_options(simulator, uvm_testname, sim_opts, timeout, sockets, tags, pre_run, run_pass_patterns, run_fail_patterns):
     timeout_minutes = None
-    if timeout and timeout > 0:
+    if timeout != None and timeout >= 0:
         timeout_minutes = timeout
     return {
         "schema_version": 1,
@@ -53,6 +51,8 @@ def _build_test_runtime_options(simulator, uvm_testname, sim_opts, timeout, sock
         "sockets": sockets,
         "tags": tags,
         "pre_run": pre_run if pre_run else "",
+        "run_pass_patterns": run_pass_patterns,
+        "run_fail_patterns": run_fail_patterns,
     }
 
 def _validate_runtime_args(runtime_args, simulator):
@@ -76,23 +76,10 @@ def _validate_runtime_args(runtime_args, simulator):
                     fail(
                         "{} runtime arg '{}' uses a sim-root-relative path. " +
                         "Use bazel_runfiles_main/... or an absolute path instead."
-                        .format(simulator, arg)
+                            .format(simulator, arg),
                     )
 
-def _select_simulator_args(ctx, base_attr, legacy_attr, simulator):
-    base_args = getattr(ctx.attr, base_attr)
-    legacy_args = getattr(ctx.attr, legacy_attr)
-    if base_args and legacy_args:
-        fail(
-            "{} sets both '{}' and legacy '{}'. Use '{}' only; each verilog_dv_tb target supports exactly one simulator."
-            .format(ctx.label, base_attr, legacy_attr, base_attr)
-        )
-    if legacy_args:
-        print("{}: '{}' is legacy; use '{}' with simulator = '{}' instead.".format(ctx.label, legacy_attr, base_attr, simulator))
-        return legacy_args
-    return base_args
-
-def _verilog_dv_test_base_cfg_impl(ctx):
+def _verilog_dv_test_cfg_impl(ctx):
     parent_uvm_testnames = [dep[DVTestInfo].uvm_testname for dep in reversed(ctx.attr.inherits) if hasattr(dep[DVTestInfo], "uvm_testname")]
     parent_tbs = [dep[DVTestInfo].tb for dep in reversed(ctx.attr.inherits) if hasattr(dep[DVTestInfo], "tb")]
     parent_simulators = [dep[DVTestInfo].simulator for dep in reversed(ctx.attr.inherits) if hasattr(dep[DVTestInfo], "simulator")]
@@ -119,7 +106,7 @@ def _verilog_dv_test_base_cfg_impl(ctx):
         uvm_testname = ctx.attr.name
 
     timeout = None
-    if ctx.attr.timeout:
+    if ctx.attr.timeout >= 0:
         timeout = ctx.attr.timeout
     elif len(parent_timeouts):
         timeout = parent_timeouts[0]
@@ -127,12 +114,18 @@ def _verilog_dv_test_base_cfg_impl(ctx):
     tb = None
     if ctx.attr.tb:
         tb = ctx.attr.tb
-    else:
+    elif len(parent_tbs):
         tb = parent_tbs[0]
+    else:
+        fail("verilog_dv_test_cfg {} requires tb directly or through inherits".format(ctx.label))
 
     tb_simulator = None
+    run_pass_patterns = []
+    run_fail_patterns = []
     if tb and DVTBInfo in tb:
         tb_simulator = tb[DVTBInfo].simulator
+        run_pass_patterns = tb[DVTBInfo].run_pass_patterns
+        run_fail_patterns = tb[DVTBInfo].run_fail_patterns
 
     simulator = None
     if ctx.attr.simulator:
@@ -149,7 +142,7 @@ def _verilog_dv_test_base_cfg_impl(ctx):
     if tb_simulator and simulator != tb_simulator:
         fail(
             "verilog_dv_test_cfg {} resolved simulator '{}' but tb {} uses '{}'."
-            .format(ctx.label, simulator, tb.label, tb_simulator)
+                .format(ctx.label, simulator, tb.label, tb_simulator),
         )
 
     pre_run = None
@@ -171,7 +164,11 @@ def _verilog_dv_test_base_cfg_impl(ctx):
     provider_args["pre_run"] = pre_run
     provider_args["description"] = description
 
+    socket_name_start = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz_"
+    socket_name_chars = socket_name_start + "0123456789"
     for socket_name, socket_command in ctx.attr.sockets.items():
+        if not socket_name or socket_name[0] not in socket_name_start or any([char not in socket_name_chars for char in socket_name.elems()]):
+            fail("socket name {} must match [A-Za-z_][A-Za-z0-9_]*".format(socket_name))
         if "{socket_file}" not in socket_command:
             fail("socket {} did not have {{socket_file}} in socket_command".format(socket_name))
 
@@ -183,6 +180,8 @@ def _verilog_dv_test_base_cfg_impl(ctx):
         sockets = ctx.attr.sockets,
         tags = ctx.attr.tags,
         pre_run = pre_run,
+        run_pass_patterns = run_pass_patterns,
+        run_fail_patterns = run_fail_patterns,
     )
     out = ctx.outputs.dynamic_args
     ctx.actions.write(
@@ -191,7 +190,7 @@ def _verilog_dv_test_base_cfg_impl(ctx):
     )
     return [DVTestInfo(**provider_args)]
 
-verilog_dv_test_base_cfg = rule(
+_verilog_dv_test_cfg_rule = rule(
     doc = """A DV test configuration.
 
     This is not a executable target. It generates multiple files which may then
@@ -200,7 +199,7 @@ verilog_dv_test_base_cfg = rule(
     The resolved simulator for the test configuration must match the simulator
     selected by the associated verilog_dv_tb.
     """,
-    implementation = _verilog_dv_test_base_cfg_impl,
+    implementation = _verilog_dv_test_cfg_impl,
     attrs = {
         "abstract": attr.bool(
             default = False,
@@ -209,6 +208,7 @@ verilog_dv_test_base_cfg = rule(
                   "See 'inherits' attribute.\n",
         ),
         "inherits": attr.label_list(
+            providers = [DVTestInfo],
             doc = "Inherit configurations from other verilog_dv_test_cfg targets.\n" +
                   "Entries later in the list will override arguments set by previous inherits entries.\n" +
                   "Only attributes noted as inheritable in documentation may be inherited.\n" +
@@ -219,6 +219,7 @@ verilog_dv_test_base_cfg = rule(
                   "This attribute is inheritable. See 'inherits' attribute.\n",
         ),
         "tb": attr.label(
+            providers = [DVTBInfo],
             doc = "The testbench to run this test on. This label must be a 'verilog_dv_tb' target." +
                   "This attribute is inheritable. See 'inherits' attribute.\n" +
                   "Future: Allow tb to be a list of labels to allow a test to run on multiple verilog_dv_tb",
@@ -248,9 +249,9 @@ verilog_dv_test_base_cfg = rule(
             doc = "Dictionary mapping of socket_name to socket_command.\n" +
                   "Simmer has the ability to spawn parallel processes to the primary simulation that are connected via sockets.\n" +
                   "For each entry in the dictionary, simmer will create a separate process and pass a unique temporary file path to both the simulator and the socket_command.\n" +
-                  "The socket name is a short identifier that will be passed as \"+SOCKET__<socket_name>=<socket_file>\" to the simulator.\n" +
+                  "The socket name must match [A-Za-z_][A-Za-z0-9_]* and is passed as \"+SOCKET__<socket_name>=<socket_file>\" to the simulator.\n" +
                   "The socket_file is a path to a unique temporary file in the simulation results directory created by simmer.\n" +
-                  "The socket_command is a bash command that must contain a python string formatter of \"{socket_file}\".\n" +
+                  "The socket_command is a bash command that must contain the literal placeholder \"{socket_file}\"; other shell braces are preserved.\n" +
                   "The socket_command will be run from the root of the project tree.",
         ),
         "pre_run": attr.string(
@@ -260,11 +261,11 @@ verilog_dv_test_base_cfg = rule(
         ),
         "timeout": attr.int(
             default = -1,
-            doc = "Duration in minutes before the test will be killed due to timeout.\n" +
-                  "This option is inheritable.",
+            doc = "Main simulation timeout in minutes, excluding socket and pre-run setup.\n" +
+                  "This option is inheritable. Use -1 to inherit, 0 to disable, or a positive value to set a timeout.",
         ),
         "description": attr.string(
-            doc = "The test scenario descriptions"
+            doc = "The test scenario descriptions",
         ),
     },
     outputs = {
@@ -272,7 +273,14 @@ verilog_dv_test_base_cfg = rule(
     },
 )
 
-def verilog_dv_test_cfg(name = None, tags = None, abstract = None, inherits = None, uvm_testname = None, tb = None, simulator = None, sim_opts = None, no_run = None, sockets = None, pre_run = None, timeout = None, description = None, gls_tb = None, pre_opts = None, post_opts = None):
+def _gatesim_target(label, corner):
+    value = str(label)
+    if ":" in value:
+        return value + "_" + corner
+    target = value.rsplit("/", 1)[-1]
+    return "{}:{}_{}".format(value, target, corner)
+
+def verilog_dv_test_cfg(name = None, tags = None, abstract = None, inherits = None, uvm_testname = None, tb = None, simulator = None, sim_opts = None, no_run = None, sockets = None, pre_run = None, timeout = None, description = None, gls_tb = None, pre_opts = None, post_opts = None, gatesim_modes = GATESIM_MODES):
     sim_opts = dict(sim_opts) if sim_opts != None else {}
     pre_opts = dict(pre_opts) if pre_opts != None else {}
     post_opts = dict(post_opts) if post_opts != None else {}
@@ -280,33 +288,33 @@ def verilog_dv_test_cfg(name = None, tags = None, abstract = None, inherits = No
     #get testcase arguments
     params = {}
     if name != None:
-        params['name'] = name
+        params["name"] = name
     if abstract != None:
-        params['abstract'] = abstract
+        params["abstract"] = abstract
     if inherits != None:
-        params['inherits'] = inherits
+        params["inherits"] = inherits
     if uvm_testname != None:
-        params['uvm_testname'] = uvm_testname
+        params["uvm_testname"] = uvm_testname
     if tb != None:
-        params['tb'] = tb
+        params["tb"] = tb
     if simulator != None:
-        params['simulator'] = simulator
+        params["simulator"] = simulator
     if no_run != None:
-        params['no_run'] = no_run
+        params["no_run"] = no_run
     if sockets != None:
-        params['sockets'] = sockets
+        params["sockets"] = sockets
     if pre_run != None:
-        params['pre_run'] = pre_run
+        params["pre_run"] = pre_run
     if timeout != None:
-        params['timeout'] = timeout
+        params["timeout"] = timeout
     if description != None:
-        params['description'] = description
+        params["description"] = description
 
     #bazel case for pre_sim
     pre_sim_opts = dict(sim_opts)
     pre_sim_opts.update(pre_opts)
 
-    params['sim_opts'] = pre_sim_opts
+    params["sim_opts"] = pre_sim_opts
 
     #bazel case for pre_sim
     #remove "gatesim" keyword in tags when pre_sim
@@ -315,38 +323,39 @@ def verilog_dv_test_cfg(name = None, tags = None, abstract = None, inherits = No
         for tag in tags:
             if tag != "gatesim":
                 temp_tags.append(tag)
+
     #replace temp_tags without "gatesim" with params['tags']
-    params['tags'] = temp_tags
-    verilog_dv_test_base_cfg(**params)
+    params["tags"] = temp_tags
+    _verilog_dv_test_cfg_rule(**params)
 
     #bazel case for post_sim
     if tags != None and "gatesim" in tags:
         post_sim_opts = dict(sim_opts)
         post_sim_opts.update(post_opts)
 
-        params['sim_opts'] = post_sim_opts
+        params["sim_opts"] = post_sim_opts
 
         #remove "ci_gate", "nightly", "weekly" keyword in tags when post_sim
         temp_tags = []
         for tag in tags:
             if tag != "ci_gate" and tag != "nightly" and tag != "weekly":
                 temp_tags.append(tag)
-        params['tags'] = temp_tags
+        params["tags"] = temp_tags
 
         #add suffix for name,tb,inherits according gatesim corner to create post_sim testcase
-        for corner in GATESIM_MODES:
-            params['name'] = name + "_" + corner
+        for corner in gatesim_modes:
+            params["name"] = name + "_" + corner
             if inherits != None:
-                for inherit in inherits:
-                    params['inherits'] = [inherit + "_" + corner]
+                params["inherits"] = [_gatesim_target(inherit, corner) for inherit in inherits]
+
             #determin gatesim tb when gls_tb is transmited
             if gls_tb != None:
-                params['tb'] = gls_tb + "_" + corner
+                params["tb"] = _gatesim_target(gls_tb, corner)
             elif tb != None:
-                params['tb'] = tb + "_" + corner
+                params["tb"] = _gatesim_target(tb, corner)
             if uvm_testname != None:
-                params['uvm_testname'] = uvm_testname
-            verilog_dv_test_base_cfg(**params)
+                params["uvm_testname"] = uvm_testname
+            _verilog_dv_test_cfg_rule(**params)
 
 def _is_dpi_shared_lib(path):
     return path.endswith(".so") or path.endswith(".dll") or path.endswith(".dylib")
@@ -354,7 +363,7 @@ def _is_dpi_shared_lib(path):
 def _verilog_dv_library_impl(ctx):
     if ctx.attr.incdir:
         # Using dirname may result in bazel-out included in path
-        directories = depset([f.short_path[:-len(f.basename) - 1] for f in ctx.files.srcs]).to_list()
+        directories = depset([runfiles_relative_short_path(f)[:-len(f.basename) - 1] for f in ctx.files.srcs]).to_list()
     else:
         directories = []
 
@@ -367,6 +376,7 @@ def _verilog_dv_library_impl(ctx):
         in_flist = ctx.files.srcs
 
     content = []
+
     # If using makelib, start here
     if ctx.attr.makelib:
         content.append("-makelib")
@@ -377,7 +387,7 @@ def _verilog_dv_library_impl(ctx):
             d = "."
         content.append("+incdir+{}".format(d))
     for f in in_flist:
-        content.append(f.short_path)
+        content.append(runfiles_relative_short_path(f))
 
     # if using makelib, terminate here
     if ctx.attr.makelib:
@@ -475,142 +485,156 @@ verilog_dv_library = rule(
 
 def _verilog_dv_tb_impl(ctx):
     simulator = ctx.attr.simulator
-    if simulator not in ["XRUN", "VCS"]:
-        fail("verilog_dv_tb simulator must be one of ['XRUN', 'VCS'], got '{}'".format(simulator))
+    backend = _dv_backend(simulator)
+    if len(ctx.files.ccf) > 1:
+        fail("verilog_dv_tb {} accepts only one ccf file".format(ctx.label))
+    if ctx.file.xcelium_covfile and ctx.files.ccf:
+        fail("verilog_dv_tb {} accepts either xcelium_covfile or legacy ccf, not both".format(ctx.label))
+    has_msie_primary = len(ctx.attr.msie_primary_deps) > 0
+    has_msie_incremental = len(ctx.attr.msie_incremental_deps) > 0
+    if has_msie_primary != has_msie_incremental:
+        fail("verilog_dv_tb {} must configure both msie_primary_deps and msie_incremental_deps".format(ctx.label))
+    has_msie_extras = (
+        ctx.attr.msie_primary_extra_compile_args or
+        ctx.attr.msie_incremental_extra_compile_args or
+        ctx.attr.msie_primary_extra_runfiles or
+        ctx.attr.msie_incremental_extra_runfiles
+    )
+    backend.validate_tb(ctx, has_msie_primary, has_msie_extras)
+
+    xcelium_covfile = ctx.file.xcelium_covfile
+    if not xcelium_covfile and ctx.files.ccf:
+        xcelium_covfile = ctx.files.ccf[0]
 
     defines = {}
     defines.update(ctx.attr.defines)
     defines.update(gather_shell_defines(ctx.attr.shells))
 
     top = "tb_top"
-    pldm_ice_extra_compile_args = []
-    pldm_sa_extra_compile_args = []
     compile_args = []
     if len(ctx.attr.verilog_config):
+        if len(ctx.attr.verilog_config) > 1:
+            fail("verilog_dv_tb {} accepts only one verilog_config entry".format(ctx.label))
         top = ctx.attr.verilog_config.keys()[0]
         cfg = ctx.attr.verilog_config[top]
-        if simulator == "VCS":
-            compile_args.append(cfg)
-        else:
-            compile_args.append("-compcnfg {}".format(cfg))
+        compile_args.append(backend.config_arg(cfg))
+
     #vcs_extra_compile_args.append("-top {}".format(top))
     #xrun_extra_compile_args.append("-top {}".format(top))
     #vcs_extra_compile_args.append("-top hdl_top -top hvl_top")
-    #xrun_extra_compile_args.append("-top hdl_top -top hvl_top")    
+    #xrun_extra_compile_args.append("-top hdl_top -top hvl_top")
     selected_compile_args = ctx.attr.extra_compile_args
-    if simulator == "VCS":
-        selected_compile_args = _select_simulator_args(ctx, "extra_compile_args", "extra_compile_args_vcs", simulator)
-        compile_args.extend(_sanitize_vcs_compile_args(selected_compile_args))
-    else:
-        compile_args.extend(selected_compile_args)
-    pldm_ice_extra_compile_args.extend(selected_compile_args)
-    pldm_sa_extra_compile_args.extend(selected_compile_args)
+    compile_args.extend(selected_compile_args)
 
-    if simulator == "VCS":
-        compile_template = ctx.file._compile_args_template_vcs
-        compile_defines = "\n".join(["+define+{}{}".format(key, value) for key, value in _sanitize_vcs_defines(defines).items()])
-        compile_flists = flists_to_arguments(ctx.attr.shells + ctx.attr.deps, VerilogInfo, "transitive_flists", "\n-file")
-    else:
-        compile_template = ctx.file._compile_args_template_xrun
-        compile_defines = "\n".join(["-define {}{}".format(key, value) for key, value in defines.items()])
-        compile_flists = flists_to_arguments(ctx.attr.deps + ctx.attr.shells, VerilogInfo, "transitive_flists", "\n-f")
+    compile_config = backend.compile_config(ctx, defines, compile_args)
 
     ctx.actions.expand_template(
-        template = compile_template,
+        template = compile_config.template,
         output = ctx.outputs.compile_args,
         substitutions = {
-            "{COMPILE_ARGS}": ctx.expand_location("\n".join(compile_args), targets = ctx.attr.extra_runfiles),
-            "{DEFINES}": compile_defines,
-            "{FLISTS}": compile_flists,
+            "{COMPILE_ARGS}": ctx.expand_location("\n".join(compile_config.args), targets = ctx.attr.extra_runfiles),
+            "{DEFINES}": compile_config.defines,
+            "{FLISTS}": compile_config.flists,
         },
     )
-    ctx.actions.expand_template(
-        template = ctx.file._compile_args_template_pldm_ice,
-        output = ctx.outputs.compile_args_pldm_ice,
-        substitutions = {
-            "{COMPILE_ARGS}": ctx.expand_location("\n".join(pldm_ice_extra_compile_args), targets = ctx.attr.extra_runfiles),
-            "{DEFINES}": "\n".join(["+define+{}{}".format(key, value) for key, value in defines.items()]),
-            "{FLISTS}": flists_to_arguments(ctx.attr.shells + ctx.attr.deps, VerilogInfo, "transitive_flists", "\n-f"),
-        },
-    )
-    if simulator == "VCS":
-        runtime_template = ctx.file._default_sim_opts_vcs
-        runtime_args = _select_simulator_args(ctx, "extra_runtime_args", "extra_runtime_args_vcs", simulator)
-        _validate_runtime_args(runtime_args, "VCS")
-        runtime_dpi = flists_to_arguments(
-            ctx.attr.shells + ctx.attr.deps,
-            VerilogInfo,
-            "transitive_dpi",
-            "-sv_lib",
-            "\n",
-            "vcs",
-            "bazel_runfiles_main/",
-        )
-    else:
-        runtime_template = ctx.file._default_sim_opts_xrun
-        runtime_args = ctx.attr.extra_runtime_args
-        _validate_runtime_args(runtime_args, "XRUN")
-        runtime_dpi = flists_to_arguments(
-            ctx.attr.shells + ctx.attr.deps,
-            VerilogInfo,
-            "transitive_dpi",
-            "-sv_lib",
-            "\n",
-            None,
-            "bazel_runfiles_main/",
-        )
+
+    # These legacy implicit outputs are declared for every simulator value.
+    pldm_dv_backend.materialize_declared_outputs(ctx, defines, selected_compile_args)
+    extra_compile_outputs = backend.extra_compile_outputs(ctx, defines, selected_compile_args, compile_config)
+
+    runtime_config = backend.runtime_config(ctx)
+    runtime_args = [ctx.expand_location(arg, targets = ctx.attr.extra_runfiles) for arg in ctx.attr.extra_runtime_args]
+    _validate_runtime_args(runtime_args, simulator)
 
     ctx.actions.expand_template(
-        template = runtime_template,
+        template = runtime_config.template,
         output = ctx.outputs.runtime_args,
         substitutions = {
-            "{RUNTIME_ARGS}": ctx.expand_location("\n".join(runtime_args), targets = ctx.attr.extra_runfiles),
-            "{DPI_LIBS}": runtime_dpi,
-        },
-    )
-    ctx.actions.expand_template(
-        template = ctx.file._compile_args_template_pldm_sa,
-        output = ctx.outputs.compile_args_pldm_sa,
-        substitutions = {
-            "{COMPILE_ARGS}": ctx.expand_location("\n".join(pldm_sa_extra_compile_args), targets = ctx.attr.extra_runfiles),
-            "{DEFINES}": "\n".join(["-define {}{}".format(key, value) for key, value in defines.items()]),
-            "{FLISTS}": flists_to_arguments(ctx.attr.shells + ctx.attr.deps, VerilogInfo, "transitive_flists", "\n-f"),
+            "{RUNTIME_ARGS}": "\n".join(runtime_args),
+            "{DPI_LIBS}": runtime_config.dpi,
         },
     )
     ctx.actions.write(
         output = ctx.outputs.compile_warning_waivers,
-        content = "[\n" + "\n".join(["re.compile('{}'),".format(ww) for ww in ctx.attr.warning_waivers]) + "\n]\n",
+        content = "[\n" + "\n".join(["re.compile({}),".format(repr(ww)) for ww in ctx.attr.warning_waivers]) + "\n]\n",
+    )
+    all_deps = ctx.attr.deps + ctx.attr.shells + ctx.attr.msie_primary_deps + ctx.attr.msie_incremental_deps
+    compile_input_files = (
+        ctx.files.ccf +
+        ctx.files.extra_runfiles +
+        ctx.files.msie_primary_extra_runfiles +
+        ctx.files.msie_incremental_extra_runfiles +
+        ([ctx.file.xcelium_covfile] if ctx.file.xcelium_covfile else []) +
+        ([ctx.file.vcs_cm_hier] if ctx.file.vcs_cm_hier else [])
+    )
+    ctx.actions.write(
+        output = ctx.outputs.compile_inputs,
+        content = verilog_input_inventory(all_deps, compile_input_files),
+    )
+    ctx.actions.write(
+        output = ctx.outputs.tb_options,
+        content = str({
+            "compile_inputs": runfiles_relative_short_path(ctx.outputs.compile_inputs),
+            "dut_instance": ctx.attr.dut_instance,
+            "dut_top": ctx.attr.dut_top,
+            "vcs_cm_hier": runfiles_relative_short_path(ctx.file.vcs_cm_hier) if ctx.file.vcs_cm_hier else "",
+            "xcelium_covfile": runfiles_relative_short_path(xcelium_covfile) if xcelium_covfile else "",
+            "msie_primary_compile_args": runfiles_relative_short_path(extra_compile_outputs.primary_compile_args) if extra_compile_outputs.primary_compile_args else "",
+            "msie_incremental_compile_args": runfiles_relative_short_path(extra_compile_outputs.incremental_compile_args) if extra_compile_outputs.incremental_compile_args else "",
+            "msie_primary_inputs": runfiles_relative_short_path(extra_compile_outputs.primary_inputs) if extra_compile_outputs.primary_inputs else "",
+        }),
     )
 
-    # Null action to trigger run?
-    ctx.actions.run_shell(
-        command = "echo \"Build compile tree directory in \"`pwd`; touch {}".format(ctx.outputs.executable.path),
-        outputs = [ctx.outputs.executable],
+    ctx.actions.write(
+        output = ctx.outputs.executable,
+        content = "",
+        is_executable = True,
     )
 
-    trans_srcs = get_transitive_srcs([], ctx.attr.deps + ctx.attr.shells, VerilogInfo, "transitive_sources", allow_other_outputs = True)
-    trans_flists = get_transitive_srcs([], ctx.attr.deps + ctx.attr.shells, VerilogInfo, "transitive_flists", allow_other_outputs = False)
-    out_deps = depset([
+    trans_srcs = get_transitive_srcs([], all_deps, VerilogInfo, "transitive_sources", allow_other_outputs = True)
+    trans_flists = get_transitive_srcs([], all_deps, VerilogInfo, "transitive_flists", allow_other_outputs = False)
+    generated_outputs = [
         ctx.outputs.compile_args,
-        ctx.outputs.compile_args_pldm_ice,
-        ctx.outputs.compile_args_pldm_sa,
+        ctx.outputs.compile_inputs,
         ctx.outputs.runtime_args,
         ctx.outputs.compile_warning_waivers,
-        ctx.outputs.executable
-    ])
+        ctx.outputs.tb_options,
+        ctx.outputs.executable,
+    ]
+    generated_outputs.extend(extra_compile_outputs.generated_outputs)
+    out_deps = depset(generated_outputs)
     all_files = depset([], transitive = [trans_srcs, trans_flists, out_deps])
+    runfile_targets = (
+        all_deps +
+        ctx.attr.ccf +
+        ctx.attr.extra_runfiles +
+        ctx.attr.msie_primary_extra_runfiles +
+        ctx.attr.msie_incremental_extra_runfiles
+    )
+    if ctx.attr.xcelium_covfile:
+        runfile_targets.append(ctx.attr.xcelium_covfile)
+    if ctx.attr.vcs_cm_hier:
+        runfile_targets.append(ctx.attr.vcs_cm_hier)
 
     return [
         DefaultInfo(
             files = all_files,
-            runfiles = ctx.runfiles(
-                files = ctx.files.ccf + ctx.files.extra_runfiles + [runtime_template],
+            runfiles = merge_default_runfiles(
+                ctx,
+                files = ctx.files.ccf + ctx.files.extra_runfiles + ctx.files.msie_primary_extra_runfiles + ctx.files.msie_incremental_extra_runfiles + ([ctx.file.xcelium_covfile] if ctx.file.xcelium_covfile else []) + ([ctx.file.vcs_cm_hier] if ctx.file.vcs_cm_hier else []) + [runtime_config.template],
+                targets = runfile_targets,
                 transitive_files = all_files,
             ),
         ),
         DVTBInfo(
             ccf = ctx.files.ccf,
+            dut_instance = ctx.attr.dut_instance,
+            dut_top = ctx.attr.dut_top,
+            run_fail_patterns = ctx.attr.run_fail_patterns,
+            run_pass_patterns = ctx.attr.run_pass_patterns,
             simulator = simulator,
+            vcs_cm_hier = ctx.file.vcs_cm_hier,
+            xcelium_covfile = xcelium_covfile,
         ),
     ]
 
@@ -636,10 +660,38 @@ verilog_dv_tb = rule(
             doc = "A list of verilog_dv_library or verilog_rtl_library labels that the testbench is dependent on.\n" +
                   "Dependency ordering within this label list is not necessary if dependencies are consistently declared in all other rules.",
         ),
+        "msie_primary_deps": attr.label_list(
+            doc = "Xcelium MSIE dependencies for the stable primary DUT/netlist partition. Configure together with msie_incremental_deps.",
+        ),
+        "msie_incremental_deps": attr.label_list(
+            doc = "Xcelium MSIE dependencies for the changing testbench/test partition. Configure together with msie_primary_deps.",
+        ),
+        "msie_primary_extra_compile_args": attr.string_list(
+            doc = "Xcelium compile/elaboration flags used only while building the MSIE primary snapshot.",
+        ),
+        "msie_incremental_extra_compile_args": attr.string_list(
+            doc = "Xcelium compile/elaboration flags used only while building the MSIE incremental snapshot.",
+        ),
+        "msie_primary_extra_runfiles": attr.label_list(
+            allow_files = True,
+            doc = "Files referenced only by msie_primary_extra_compile_args, such as primary SDF command files.",
+        ),
+        "msie_incremental_extra_runfiles": attr.label_list(
+            allow_files = True,
+            doc = "Files referenced only by msie_incremental_extra_compile_args.",
+        ),
         "defines": attr.string_dict(
             doc = "Additional preprocessor defines to throw for this testbench compile.\n" +
                   "Key, value pairs are joined without additional characters. If it is a unary flag, set the value portion to be the empty string.\n" +
                   "For binary flags, add an '=' as a suffix to the key.",
+        ),
+        "dut_instance": attr.string(
+            default = "hdl_top.dut",
+            doc = "DUT instance hierarchy used by coverage reports.",
+        ),
+        "dut_top": attr.string(
+            default = "dut",
+            doc = "DUT module name used to scope code coverage.",
         ),
         "simulator": attr.string(
             default = "XRUN",
@@ -667,23 +719,31 @@ verilog_dv_tb = rule(
             allow_files = True,
             doc = "Coverage configuration file to provide to simmer.",
         ),
+        "xcelium_covfile": attr.label(
+            allow_single_file = True,
+            doc = "Xcelium coverage configuration file. Replaces the legacy ccf attribute.",
+        ),
+        "vcs_cm_hier": attr.label(
+            allow_single_file = True,
+            doc = "VCS -cm_hier coverage configuration file.",
+        ),
         "extra_compile_args": attr.string_list(
             doc = "Additional flags to pass to the selected simulator compile/elaboration step.\n",
-        ),
-        "extra_compile_args_vcs": attr.string_list(
-            doc = "Legacy alias for extra_compile_args when simulator = VCS. Do not use in new targets.\n",
         ),
         "extra_runtime_args": attr.string_list(
             doc = "Additional flags to pass to selected simulator runs. These flags will not be provided to compilation.\n" +
                   "Simulation runs execute from the per-test sim directory, so path-bearing arguments should generally use absolute paths or bazel_runfiles_main/... paths.\n",
         ),
-        "extra_runtime_args_vcs": attr.string_list(
-            doc = "Legacy alias for extra_runtime_args when simulator = VCS. Do not use in new targets.\n",
-        ),
         "extra_runfiles": attr.label_list(
             allow_files = True,
             doc = "Additional files that need to be passed as runfiles to bazel. Most commonly used for files referred to by extra_compile_args or extra_runtime_args.\n" +
                   "Prefer passing labels here and referencing their runfiles-root-relative paths from generated filelists.",
+        ),
+        "run_pass_patterns": attr.string_list(
+            doc = "Regexes that identify a successful simulation. When set, at least one must match.",
+        ),
+        "run_fail_patterns": attr.string_list(
+            doc = "Additional regexes that identify a failed simulation.",
         ),
         "verilog_config": attr.string_dict(
             doc = "Key/value pair where the key represents the name of the config object,\n" +
@@ -719,18 +779,15 @@ verilog_dv_tb = rule(
             allow_single_file = True,
             doc = "Template to generate compilation arguments flist.",
         ),
-        "_runtime_args_template": attr.label(
-            default = Label("@rules_verilog//vendors/common:verilog_dv_tb_runtime_args.f.template"),
-            allow_single_file = True,
-            doc = "Template to generate runtime args form the 'extra_runtime_args' attribute.",
-        ),
     },
     outputs = {
         "runtime_args": "%{name}_runtime_args.f",
         "compile_args": "%{name}_compile_args.f",
+        "compile_inputs": "%{name}_compile_inputs.txt",
         "compile_args_pldm_ice": "%{name}_compile_args_pldm_ice.f",
         "compile_args_pldm_sa": "%{name}_compile_args_pldm_sa.f",
         "compile_warning_waivers": "%{name}_compile_warning_waivers",
+        "tb_options": "%{name}_tb_options.py",
     },
     # TODO does this still need to be executable with a empty command?
     executable = True,
@@ -741,34 +798,53 @@ def _verilog_dv_unit_test_impl(ctx):
     srcs_list = trans_srcs.to_list()
     flists = get_transitive_srcs([], ctx.attr.deps, VerilogInfo, "transitive_flists")
     flists_list = flists.to_list()
+    dpi = get_transitive_srcs([], ctx.attr.deps, VerilogInfo, "transitive_dpi")
     simulator = ctx.attr.simulator
     if simulator == "VCS":
         fail("verilog_dv_unit_test {} does not support simulator = 'VCS'. Use the VCS two-step flow via verilog_dv_tb + simmer instead.".format(ctx.label))
+    backend = _dv_backend(simulator)
     unit_test_template = ctx.file.ut_sim_template
     default_sim_opts = ctx.file.default_sim_opts
     simulator_command = ctx.attr._command_override[ToolEncapsulationInfo].command
+    filelist_flag = "-f"
+    dpi_tool = None
+    compile_args = ctx.attr.sim_args + ctx.attr.compile_args
+    run_args = ctx.attr.run_args
+    unit_test_config = backend.unit_test_config(
+        ctx,
+        unit_test_template,
+        default_sim_opts,
+        simulator_command,
+        filelist_flag,
+        dpi_tool,
+    )
 
     ctx.actions.expand_template(
-        template = unit_test_template,
+        template = unit_test_config.unit_test_template,
         output = ctx.outputs.out,
         substitutions = {
-            "{SIMULATOR_COMMAND}": simulator_command,
-            "{DEFAULT_SIM_OPTS}": "-f {}".format(default_sim_opts.short_path),
-            "{DPI_LIBS}": flists_to_arguments(ctx.attr.deps, VerilogInfo, "transitive_dpi", "-sv_lib", "", None),
-            "{FLISTS}": " ".join(["-f {}".format(f.short_path) for f in flists_list]),
+            "{SIMULATOR_COMMAND}": unit_test_config.simulator_command,
+            "{DEFAULT_SIM_OPTS}": "{} {}".format(unit_test_config.filelist_flag, runfiles_relative_short_path(unit_test_config.default_sim_opts)),
+            "{DPI_LIBS}": flists_to_arguments(ctx.attr.deps, VerilogInfo, "transitive_dpi", "-sv_lib", "", unit_test_config.dpi_tool),
+            "{FLISTS}": " ".join(["{} {}".format(unit_test_config.filelist_flag, runfiles_relative_short_path(f)) for f in flists_list]),
             "{SIM_ARGS}": " ".join(ctx.attr.sim_args),
+            "{COMPILE_ARGS}": " ".join(compile_args),
+            "{RUN_ARGS}": " ".join(run_args),
         },
         is_executable = True,
     )
 
-    runfiles = ctx.runfiles(files = flists_list + srcs_list + [default_sim_opts])
+    runfiles = merge_default_runfiles(
+        ctx,
+        files = flists_list + srcs_list + dpi.to_list() + [unit_test_config.default_sim_opts],
+        targets = ctx.attr.deps + [ctx.attr.default_sim_opts],
+    )
     return [DefaultInfo(
         runfiles = runfiles,
         executable = ctx.outputs.out,
     )]
 
 verilog_dv_unit_test = rule(
-    # TODO this could just be a specific use case of verilog_test
     doc = """Compiles and runs a small unit test for DV.
 
     This is typically a unit test for a single verilog_dv_library and its dependencies.
@@ -788,8 +864,7 @@ verilog_dv_unit_test = rule(
         "simulator": attr.string(
             default = "XRUN",
             values = ["XRUN", "VCS"],
-            doc = "Simulator to use for this unit test. Only XRUN is supported here.\n" +
-                  "For VCS, use the two-step flow via verilog_dv_tb and simmer.\n",
+            doc = "Simulator to use for this one-step unit test. Only XRUN is supported; VCS uses verilog_dv_tb + simmer.\n",
         ),
         "ut_sim_template": attr.label(
             allow_single_file = True,
@@ -803,8 +878,13 @@ verilog_dv_unit_test = rule(
             # TODO remove this and just make it part of the template?
         ),
         "sim_args": attr.string_list(
-            doc = "Additional arguments to pass on command line to the simulator.\n" +
-                  "Both compile and runtime arguments are allowed because dv_unit_test runs as a single step flow.",
+            doc = "Deprecated compile arguments. Use compile_args and run_args instead.",
+        ),
+        "compile_args": attr.string_list(
+            doc = "Additional arguments passed to compilation/elaboration.",
+        ),
+        "run_args": attr.string_list(
+            doc = "Additional arguments passed only to simulation runtime.",
         ),
         "_command_override": attr.label(
             default = Label("@rules_verilog//:verilog_dv_unit_test_command"),
@@ -832,18 +912,4 @@ def _verilog_dv_test_cfg_info_aspect_impl(target, ctx):
 verilog_dv_test_cfg_info_aspect = aspect(
     doc = """Gather information about the tb and tags related to a verilog_dv_test_config for use in simmer.""",
     implementation = _verilog_dv_test_cfg_info_aspect_impl,
-    attr_aspects = ["deps", "tags"],
-)
-
-def _verilog_dv_tb_ccf_aspect_impl(target, ctx):
-    # buildifier: disable=print
-    print("verilog_dv_tb_ccf({})".format([f.path for f in target[DVTBInfo].ccf]))
-
-    # buildifier: enable=print
-    return []
-
-verilog_dv_tb_ccf_aspect = aspect(
-    doc = """Find test to find ccf file mappings simmer.""",
-    implementation = _verilog_dv_tb_ccf_aspect_impl,
-    attr_aspects = ["ccf"],
 )

@@ -1,5 +1,7 @@
 """Helpers for the shared DV test runtime-options contract."""
 
+import re
+import shlex
 
 RUNTIME_OPTIONS_SCHEMA_VERSION = 1
 
@@ -34,6 +36,8 @@ def normalize_test_runtime_options(runtime_options):
         "sockets": dict(runtime_options.get("sockets", {})),
         "tags": list(runtime_options.get("tags", [])),
         "pre_run": pre_run,
+        "run_pass_patterns": list(runtime_options.get("run_pass_patterns", [])),
+        "run_fail_patterns": list(runtime_options.get("run_fail_patterns", [])),
     }
     return normalized
 
@@ -68,7 +72,55 @@ def merge_test_runtime_sim_opts(runtime_options, cli_sim_opts):
 
 def format_sim_opts_dict(sim_opts):
     """Format a normalized sim_opts dict into simulator command-line fragments."""
-    return " ".join("".join(item) for item in sim_opts.items()).replace('\"', ' ')
+    return shlex.join("{}{}".format(key, value) for key, value in sim_opts.items())
+
+
+def format_log_check_args(runtime_options):
+    """Return checker CLI arguments from the normalized test contract."""
+    normalized = normalize_test_runtime_options(runtime_options)
+    args = []
+    for pattern in normalized["run_pass_patterns"]:
+        args.extend(["--pass-pattern", pattern])
+    for pattern in normalized["run_fail_patterns"]:
+        args.extend(["--fail-pattern", pattern])
+    return shlex.join(args)
+
+
+def append_uvm_control_options(sim_opts, options):
+    """Append simulator-independent UVM controls to an option string."""
+    if options.uvm_set_int:
+        sim_opts += " " + shlex.join(["+uvm_set_config_int={}".format(value) for value in options.uvm_set_int])
+    if options.uvm_set_str:
+        sim_opts += " " + shlex.join(["+uvm_set_config_string={}".format(value) for value in options.uvm_set_str])
+    if options.sim_opts_file:
+        with open(options.sim_opts_file, "r", encoding="utf-8") as filep:
+            for line in filep:
+                sim_opts += " " + shlex.join(shlex.split(line, comments=True))
+
+    if options.verbosity:
+        if "UVM_VERBOSITY" in sim_opts:
+            sim_opts = re.sub(r" \+UVM_VERBOSITY=[A-Z_]+", " +UVM_VERBOSITY=" + options.verbosity, sim_opts)
+        else:
+            sim_opts += " +UVM_VERBOSITY=" + options.verbosity
+            if options.verbosity == "UVM_DEBUG":
+                sim_opts += " +UVM_TR_RECORD +UVM_LOG_RECORD "
+    elif "UVM_VERBOSITY" not in sim_opts:
+        sim_opts += " +UVM_VERBOSITY=UVM_MEDIUM"
+
+    if options.uvm_config_db_trace:
+        sim_opts += " +UVM_CONFIG_DB_TRACE"
+    if options.uvm_resource_db_trace:
+        sim_opts += " +UVM_RESOURCE_DB_TRACE"
+    if options.uvm_max_quit_count:
+        sim_opts += " +UVM_MAX_QUIT_COUNT={}".format(options.uvm_max_quit_count)
+    if options.uvm_set_verbosity:
+        sim_opts += " " + shlex.join(["+uvm_set_verbosity={}".format(value) for value in options.uvm_set_verbosity])
+    if options.uvm_set_config_int:
+        sim_opts += " " + shlex.join(["+uvm_set_config_int={}".format(value) for value in options.uvm_set_config_int])
+    if options.uvm_set_config_string:
+        sim_opts += " " + shlex.join(
+            ["+uvm_set_config_string={}".format(value) for value in options.uvm_set_config_string])
+    return sim_opts
 
 
 def resolve_test_timeout_hours(runtime_options, default_timeout_hours, cli_timeout_was_explicit):
@@ -82,6 +134,6 @@ def resolve_test_timeout_hours(runtime_options, default_timeout_hours, cli_timeo
 
     normalized_runtime_options = normalize_test_runtime_options(runtime_options)
     timeout_minutes = normalized_runtime_options.get("timeout_minutes")
-    if timeout_minutes is None or timeout_minutes <= 0:
+    if timeout_minutes is None or timeout_minutes < 0:
         return default_timeout_hours
     return float(timeout_minutes) / 60.0

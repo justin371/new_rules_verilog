@@ -1,9 +1,11 @@
-# vim: set ft=bzl :
-load("//verilog:defs.bzl", "verilog_tool_encapsulation")
-load("@com_github_bazelbuild_buildtools//buildifier:def.bzl", "buildifier")
 load("@buildifier_prebuilt//:rules.bzl", "buildifier", "buildifier_test")
 
+# vim: set ft=bzl :
+load("//verilog:defs.bzl", "verilog_tool_encapsulation")
+
 package(default_visibility = ["//visibility:public"])
+
+exports_files(["README.md"])
 
 verilog_tool_encapsulation(
     name = "verilog_dv_unit_test_command",
@@ -76,24 +78,4 @@ buildifier(
     exclude_patterns = BUILDIFIER_EXCLUDE,
     lint_mode = "fix",
     mode = "fix",
-)
-
-# Test to ensure all Bazel build files are properly formatted.
-buildifier_test(
-    name = "buildifier_test",
-    srcs = glob(
-        [
-            "**/*.bazel",
-            "**/*.bzl",
-            "**/*.oss",
-            "**/*.sky",
-            "**/BUILD",
-        ],
-        # Node modules do not play nice with buildifier. Exclude these
-        # generated Bazel files from format testing.
-        #exclude = ["**/node_modules/**/*"],
-    ) + ["WORKSPACE"],
-    diff_command = "diff -u",
-    mode = "diff",
-    verbose = True,
 )

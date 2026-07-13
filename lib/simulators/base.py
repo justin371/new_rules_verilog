@@ -1,5 +1,12 @@
 # lib/simulators/base.py
 import abc
+import os
+
+
+class ValidationErrorParser:
+
+    def error(self, message):
+        raise ValueError(message)
 
 
 class SimulatorInterface(abc.ABC):
@@ -102,8 +109,8 @@ class SimulatorInterface(abc.ABC):
 
     @abc.abstractmethod
     def run_report_coverage_merge(self, vcomp_jobs):
-        """Run any coverage merge commands needed before report generation."""
-        pass
+        """Run coverage merges and return whether any merge failed."""
+        return False
 
     @abc.abstractmethod
     def get_log_parsing_info(self):
@@ -123,6 +130,14 @@ class SimulatorInterface(abc.ABC):
         """
         return
 
+    def prepare_compile_job(self, vcomp_job):
+        """Resolve and validate simulator-specific compile inputs."""
+        return
+
+    def record_compile_artifacts(self, vcomp_job):
+        """Record simulator-specific outputs after a successful compile."""
+        return
+
     def cleanup_shared_runtime_artifacts(self, vcomp_jobs):
         """Clean simulator scratch files created under shared runfiles dirs.
 
@@ -131,9 +146,61 @@ class SimulatorInterface(abc.ABC):
         """
         return
 
-    def get_vso_build_name(self, vcomp_job):
-        """Return the VSO.ai buildname for a compile job.
+    def cleanup_test_coverage(self, test_job):
+        """Remove one failed test's simulator-specific coverage database."""
+        return
 
-        The default implementation keeps the job name unchanged.
-        """
-        return vcomp_job.name
+    def get_scheduler_threads_per_test(self):
+        """Return the effective thread cost of one simulation for job limiting."""
+        return 1
+
+    def validate_resolved_options(self):
+        """Validate options after test cfgs choose the final simulator."""
+        return
+
+    def validate_run_options(self, vcomp_count):
+        """Validate simulator capabilities needed by the selected run."""
+        return
+
+    def uses_dynamic_test_plan(self):
+        """Return whether the backend selects test iterations after compilation."""
+        return False
+
+    def create_regression_jobs(self, vcomp_jobs):
+        """Create backend-owned jobs and attach their dependencies."""
+        return []
+
+    def finalize_regression_workflow(self):
+        """Finalize a backend-owned workflow and report whether it failed."""
+        return False
+
+    def prepare_test_job(self, test_job):
+        """Prepare backend-owned state and optionally return a seed override."""
+        return None
+
+    def should_spawn_test_job(self, test_job):
+        """Return whether a dynamically planned test needs another iteration."""
+        return False
+
+    def coverage_enabled(self):
+        """Return whether this backend requested coverage collection."""
+        return False
+
+    def get_compile_template_context(self, vcomp_job):
+        """Return backend-owned values needed by its compile template."""
+        return {}
+
+    def get_compile_fingerprint_inputs(self, vcomp_job):
+        """Return common external files and environment affecting compilation."""
+        compile_args_file = self.options.compile_args_file
+        return {
+            "extra_input_paths": [compile_args_file] if compile_args_file else [],
+            "environment": {
+                key: os.environ.get(key, "")
+                for key in ("LOADEDMODULES", "MODULEPATH", "PATH")
+            },
+        }
+
+    def collect_coverage_data(self, vcomp_jobs):
+        """Return dashboard coverage summaries keyed by testbench name."""
+        return {vcomp.split(":")[-1]: {"cc": {}, "cf": {}} for vcomp in vcomp_jobs}

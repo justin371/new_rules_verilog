@@ -10,7 +10,7 @@ import uuid
 from contextlib import contextmanager
 
 RESULTS_FILENAME = ".simmer_results.json"
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
 MAX_RUNS = 100
 COLOR_GREEN = "\033[0;32m"
 COLOR_RED = "\033[0;31m"
@@ -82,6 +82,7 @@ def create_run(argv, rcfg, planned_tests):
         },
         "compile": [],
         "tests": [],
+        "launch_failures": [],
     }
 
 
@@ -102,6 +103,7 @@ def record_compile_job(run, vcomp_job):
         "status": vcomp_job.jobstatus.name,
         "compile_dir": vcomp_job.job_dir,
         "cmp_log": vcomp_job.log_path,
+        "error_message": getattr(vcomp_job, "error_message", None),
     }
     _upsert_by_key(run["compile"], "vcomp_target", compile_record)
 
@@ -118,7 +120,9 @@ def record_test_job(run, test_job, waves_script=None, waves_path=None):
             "exists": bool(waves_path and os.path.exists(waves_path)),
         })
 
-    run["tests"].append({
+    wall_duration_s = int(getattr(test_job, "duration_s", 0) or 0)
+    simulation_duration_s = getattr(test_job, "simulation_duration_s", None)
+    test_record = {
         "bench": test_job.vcomper.name,
         "test": test_job.name,
         "target": test_job.target,
@@ -126,17 +130,23 @@ def record_test_job(run, test_job, waves_script=None, waves_path=None):
         "iteration": test_job.iteration,
         "seed": getattr(test_job, "seed", None),
         "status": test_job.jobstatus.name,
-        "duration_s": int(getattr(test_job, "duration_s", 0) or 0),
+        "duration_s": int(simulation_duration_s) if simulation_duration_s is not None else None,
+        "wall_duration_s": wall_duration_s,
         "compile_dir": test_job.vcomper.job_dir,
         "sim_dir": test_job.job_dir,
         "stdout_log": test_job._log_path,
         "cmp_log": test_job.vcomper.log_path,
         "waves": waves,
         "error_message": getattr(test_job, "error_message", None),
-    })
+    }
+    for index, existing in enumerate(run["tests"]):
+        if all(existing.get(key) == test_record.get(key) for key in ("target", "iteration", "seed")):
+            run["tests"][index] = test_record
+            return
+    run["tests"].append(test_record)
 
 
-def finalize_run(run, regression_log_path=None, vso_finalize_merge_failed=False):
+def finalize_run(run, regression_log_path=None, backend_finalize_failed=False):
     if run is None:
         return
     run["finished_at"] = _timestamp()
@@ -155,8 +165,12 @@ def finalize_run(run, regression_log_path=None, vso_finalize_merge_failed=False)
         "total": planned_tests,
     }
 
+    if backend_finalize_failed:
+        run["status"] = "FAILED"
+        return
+
     if tests:
-        if failed or vso_finalize_merge_failed:
+        if failed:
             run["status"] = "FAILED"
         elif skipped:
             run["status"] = "PARTIAL"
@@ -166,6 +180,8 @@ def finalize_run(run, regression_log_path=None, vso_finalize_merge_failed=False)
 
     if any(item.get("status") == "FAILED" for item in run.get("compile", [])):
         run["status"] = "COMPILE_FAILED"
+    elif run.get("launch_failures"):
+        run["status"] = "FAILED"
     else:
         run["status"] = "NO_SIM_RUN"
 
@@ -194,8 +210,6 @@ def load_store(project_dir):
 
 
 def save_run(project_dir, run, max_runs=MAX_RUNS):
-    if not run.get("tests"):
-        return
     stored_run = dict(run)
     if int(run.get("planned_tests") or len(run["tests"])) > 1 and len(run["tests"]) > 1:
         representative = next((test for test in run["tests"] if test.get("status") == "FAILED"), run["tests"][0])
@@ -299,7 +313,7 @@ def format_history(project_dir, count, use_color=None):
         store = load_store(project_dir)
     except (OSError, ValueError) as exc:
         return "Unable to read simmer history: {}".format(exc)
-    runs = [run for run in store.get("runs", []) if run.get("tests")]
+    runs = store.get("runs", [])
     if not runs:
         return "No simmer history found."
 

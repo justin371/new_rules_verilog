@@ -160,6 +160,18 @@ class Job():
         self.log.debug("post_run %s %s duration %s", self.__class__.__name__, self.name, self.duration_s)
         #self.completed = True
 
+    def launch_failed(self, exc):
+        """Record a failure that occurs before the subprocess starts."""
+        run = getattr(self.rcfg, "simmer_results_run", None)
+        if run is not None:
+            run.setdefault("launch_failures", []).append({
+                "job": repr(self),
+                "error_message": str(exc),
+            })
+
+    def post_run_failed(self, exc):
+        self.error_message = str(exc)
+
     @property
     def duration_s(self):
         try:
@@ -213,11 +225,23 @@ class SubprocessJobRunner(JobRunner):
         self._start_time = datetime.datetime.now()
         try:
             self._p = subprocess.Popen(self.job.main_cmdline, **kwargs)
+            self._process_group_id = self._p.pid
         except Exception:
             for stream in (getattr(self, "stdout_fp", None), getattr(self, "stderr_fp", None)):
                 if stream:
                     stream.close()
             raise
+
+    def _signal_process_group(self, sig):
+        try:
+            os.killpg(self._process_group_id, sig)
+        except ProcessLookupError:
+            pass
+
+    def _close_output_streams(self):
+        for stream in (getattr(self, "stdout_fp", None), getattr(self, "stderr_fp", None)):
+            if stream and not stream.closed:
+                stream.close()
 
     def _get_stdout_capture_path(self):
         """Avoid clobbering simulator-owned stdout.log files.
@@ -240,6 +264,9 @@ class SubprocessJobRunner(JobRunner):
             result = self._check_for_done()
         except Exception as exc:
             self.log.error("Job failed %s:\n%s", self.job, exc)
+            self._signal_process_group(signal.SIGKILL)
+            self._p.wait()
+            self._close_output_streams()
             result = True
         if result:
             self.done = result
@@ -247,31 +274,35 @@ class SubprocessJobRunner(JobRunner):
 
     def _check_for_done(self):
         if self._p.poll() is not None:
-            if self.job.suppress_output or self.job.rcfg.options.no_stdout:
-                self.stdout_fp.close()
-                self.stderr_fp.close()
+            if self._timed_out and not self._kill_sent:
+                self._signal_process_group(signal.SIGKILL)
+                self._kill_sent = True
+            self._close_output_streams()
             return True
 
         now = datetime.datetime.now()
         if self._timed_out:
             if not self._kill_sent and now >= self._term_deadline:
                 self.log.error("%s did not exit after SIGTERM; sending SIGKILL", self.job)
-                try:
-                    os.killpg(os.getpgid(self._p.pid), signal.SIGKILL)
-                except ProcessLookupError:
-                    pass
+                self._signal_process_group(signal.SIGKILL)
                 self._kill_sent = True
             return False
 
-        delta = now - self._start_time
+        timeout_start = self._start_time
+        timeout_start_path = getattr(self.job, "timeout_start_path", None)
+        if timeout_start_path:
+            try:
+                timeout_start = datetime.datetime.fromtimestamp(os.path.getmtime(timeout_start_path))
+            except OSError:
+                timeout_start = None
+        if timeout_start is None:
+            return False
+        delta = now - timeout_start
         if self.job.timeout > 0 and delta > datetime.timedelta(hours=self.job.timeout):
             self.log.error("%s exceeded timeout value of %s; sending SIGTERM", self.job, self.job.timeout)
             self._timed_out = True
             self._term_deadline = now + datetime.timedelta(seconds=self.TERM_GRACE_SECONDS)
-            try:
-                os.killpg(os.getpgid(self._p.pid), signal.SIGTERM)
-            except ProcessLookupError:
-                pass
+            self._signal_process_group(signal.SIGTERM)
             stderr_log_path = getattr(self, "stderr_log_path", os.path.join(self.job.job_dir, "stderr.log"))
             stdout_log_path = getattr(self, "stdout_log_path", os.path.join(self.job.job_dir, "stdout.log"))
             with open(stderr_log_path, 'a') as filep:
@@ -288,7 +319,7 @@ class SubprocessJobRunner(JobRunner):
         return self._p.returncode
 
     def kill(self):
-        os.killpg(os.getpgid(self._p.pid), signal.SIGTERM)
+        self._signal_process_group(signal.SIGTERM)
         # None of the following variants seemed to work (due to shell=True ?)
         # process = psutil.Process(self._p.pid)
         # for proc in process.children(recursive=True):
@@ -362,6 +393,10 @@ class JobManager():
                             self.log.error("%s  post_run_failed()\n:%s", job, exc)
                             job.job_stop_time = datetime.datetime.now()
                             job.jobstatus = JobStatus.FAILED
+                            try:
+                                job.post_run_failed(exc)
+                            except (Exception, SystemExit) as record_exc:
+                                self.log.error("%s failed to record post_run failure:\n%s", job, record_exc)
                         if not job.jobstatus.successful:
                             self._error_count += 1
                             if self._error_count >= self._quit_count:
@@ -457,6 +492,10 @@ class JobManager():
                     self.log.error("%s launch_failed(): %s", job, exc)
                     job.job_stop_time = datetime.datetime.now()
                     job.jobstatus = JobStatus.FAILED
+                    try:
+                        job.launch_failed(exc)
+                    except Exception as record_exc:
+                        self.log.error("Could not record launch failure for %s: %s", job, record_exc)
                     self._error_count += 1
                     self._move_children_to_skipped(job)
                     if self._error_count >= self._quit_count:
@@ -510,10 +549,10 @@ class JobManager():
     def stop(self):
         """Stop the job runner thread (cpu intenstive). This is really more of a pause than a full stop&exit."""
         self._run_jobs_thread_active = False
-        self.exited_prematurely = True
         self._jobs_added.set()
 
     def kill(self):
+        self.exited_prematurely = True
         self.stop()
         for job in self._active:
             job.job_lib.kill()
@@ -545,6 +584,7 @@ class BazelTBJob(Job):
 
     def __repr__(self):
         return 'Bazel("{}")'.format(self.bazel_target)
+
 
 class BazelTestCfgJob(Job):
     """Build all selected test configs for one vcomp in a single Bazel invocation."""

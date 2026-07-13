@@ -1,4 +1,21 @@
 #!/usr/bin/env bash
-set -e
+set -Eeuo pipefail
 
-simmer -t {{ job.vcomper.name }}:{{ job.name }} --seed {{ seed }} {{ reproduce_args }} "$@"
+_simmer_error=0
+trap 'rc=$?; _simmer_error=1; printf "ERROR: rerun failed at line %s (exit %s): %s\n" "$LINENO" "$rc" "$BASH_COMMAND" >&2' ERR
+_simmer_on_exit() {
+  local rc=$?
+  if (( rc != 0 && _simmer_error == 0 )); then
+    printf 'ERROR: rerun exited %s\n' "$rc" >&2
+  fi
+  if (( rc != 0 )) && [[ "${SIMMER_KEEP_TERMINAL:-0}" == 1 && -t 0 ]]; then
+    read -r -p "Press Enter to close this terminal..." || true
+  fi
+}
+trap _simmer_on_exit EXIT
+
+SIMMER_BIN="${SIMMER_BIN:-simmer}"
+PROJECT_DIR={{ project_dir }}
+cd "$PROJECT_DIR"
+export PROJ_DIR="$PROJECT_DIR"
+"$SIMMER_BIN" -t {{ rerun_target }} --seed {{ seed }} {{ reproduce_args }} "$@"

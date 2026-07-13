@@ -1,114 +1,28 @@
-# To contribute improvements to CI/CD templates, please follow the Development guide at:
-# https://docs.gitlab.com/ee/development/cicd/templates.html
-# This specific template is located at:
-# https://gitlab.com/gitlab-org/gitlab/-/blob/master/lib/gitlab/ci/templates/Bash.gitlab-ci.yml
-
-# See https://docs.gitlab.com/ee/ci/yaml/index.html for all available options
-
-# you can delete this line if you're not using Docker
-#image: busybox:latest
-
 stages:
-  - pre
-  - build
   - test
-  - simmer
 
 default:
-  # All jobs are interruptible by default
   interruptible: true
-  # https://docs.gitlab.com/ee/ci/yaml/#timeout
-  timeout: 10m
-  before_script:
-    - set -e
-    - echo "Source the env"
-    - source env.sh
-    - module list
+  timeout: 30m
   tags:
     - sh-grun
-
+  before_script:
+    - source env.sh
+    - module list
 
 workflow:
-  # when to create a CI pipeline
   rules:
-    # trigger a pipeline each time whenever a Merge-Request is created/updated
-    - if: $CI_COMMIT_REF_NAME != $CI_DEFAULT_BRANCH && $CI_PIPELINE_SOURCE == "push"
-      when: never
     - if: $CI_PIPELINE_SOURCE == "merge_request_event"
-    #- if: $CI_PIPELINE_SOURCE == "merge_request_event" && $CI_COMMIT_BRANCH == $CI_MERGE_REQUEST_TARGET_BRANCH_NAME && $CI_MERGE_REQUEST_SOURCE_BRANCH_NAME != "master"
-      when: always
-    - if: $CI_COMMIT_BRANCH && $CI_OPEN_MERGE_REQUESTS
-      when: never # avoids duplicate jobs for branch and MR
-    - if: $CI_COMMIT_BRANCH
+    - if: $CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH
     - if: $CI_COMMIT_TAG
 
 variables:
   GIT_DEPTH: "1"
-  # GIT_STRATEGY: clone # optimizes the pack-objects cache hit ratio
   GIT_STRATEGY: fetch
-  GIT_CLEAN_FLAGS: none
-  # CI_DEBUG_TRACE: "true"
   GIT_SUBMODULE_STRATEGY: recursive
   GIT_SUBMODULE_DEPTH: 1
-  # GIT_SUBMODULE_FORCE_HTTPS: "true"
-  TGT_BRANCH: main
 
-.info-before_script: &info-before_script
-  - echo "CI DEBUG INFO:"
-  - echo "\$GITLAB_USER_NAME:" $GITLAB_USER_NAME
-  - echo "\$GITLAB_USER_ID:" $GITLAB_USER_ID
-  - echo "\$CI_PIPELINE_SOURCE:" $CI_PIPELINE_SOURCE
-  - echo "\$CI_COMMIT_BRANCH:" $CI_COMMIT_BRANCH
-  - echo "\$CI_MERGE_REQUEST_SOURCE_BRANCH_NAME:" $CI_MERGE_REQUEST_SOURCE_BRANCH_NAME
-  - echo "\$CI_MERGE_REQUEST_TARGET_BRANCH_NAME:" $CI_MERGE_REQUEST_TARGET_BRANCH_NAME
-  - echo "\$CI_OPEN_MERGE_REQUESTS:" $CI_OPEN_MERGE_REQUESTS
-  - echo "\$CI_COMMIT_TAG:" $CI_COMMIT_TAG
-  - echo "\$CI_DEFAULT_BRANCH:" $CI_DEFAULT_BRANCH
-  - echo "\$CI_COMMIT_REF_NAME:" $CI_COMMIT_REF_NAME
-  - echo "\$CI_PROJECT_URL:" $CI_PROJECT_URL
-  - echo "\$CI_PROJECT_ID:" $CI_PROJECT_ID
-  - echo "\$CI_MERGE_REQUEST_TARGET_BRANCH_NAME:" $CI_MERGE_REQUEST_TARGET_BRANCH_NAME
-  - echo "\$CI_COMMIT_REF_NAME:" $CI_COMMIT_REF_NAME
-
-info:
-  stage: pre
-  before_script: *info-before_script
+redhat-no-license:
+  stage: test
   script:
-    - echo "HOST:" `hostname`
-    - git config --list
-    - echo "USER:" `whoami`
-    - echo "SHELL:" $SHELL
-    - echo "PWD:" $PWD
-    - echo "PID:" $$
-
-bazel_git_clean:
-  stage: pre
-  rules:
-    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
-  script:
-    - echo "Cleaning Bazel cache"
-    - bazel clean --expunge
-    - echo "Cleaning Git working tree"
-    - /global/tools/freeware/git/2.33/bin/git clean -dxf
-
-yapf-bin-check:
-  stage: build
-  rules:
-    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
-  script:
-    - echo "python yapf check"
-    # Do an automatic regen with
-    # 'yapf --in-place --recursive --style .style.yapf ./'
-    # - bsub -I -q syn yapf --diff --recursive --style .style.yapf ./
-    # - bsub -I -q syn bazel run //bin:simmer
-
-      #build-diff-lint:
-      #  stage: build
-      #  rules:
-      #    - if: $CI_PIPELINE_SOURCE == "merge_request_event"
-      #  script:
-      #    # Do an auto fix with
-      #    # 'bazel run //:buildifier_fix'
-      #    - bsub -I -q syn bazel run --nokeep_state_after_build //:buildifier_diff 2>&1
-      #    - bsub -I -q syn bazel run --nokeep_state_after_build //:buildifier_lint 2>&1
-      #    - echo "BUILD Diff & Lint Check"
+    - ./tests/redhat_smoke.sh

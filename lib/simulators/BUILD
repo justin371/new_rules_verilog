@@ -1,5 +1,7 @@
 # vim: set ft=bzl :
 # lib/simulators/BUILD
+load("@pip_deps//:requirements.bzl", "requirement")
+
 package(default_visibility = ["//visibility:public"])
 
 py_library(
@@ -13,8 +15,10 @@ py_library(
     srcs = ["xcelium.py"],
     deps = [
         ":base",
-        # Add deps needed by xcelium.py, e.g., from project root if needed
-        # "//lib:cmn_logging", # Example if needed, but likely not directly
+        ":options",
+        ":xcelium_options",
+        "//lib:coverage_data",
+        requirement("jinja2"),
     ],
 )
 
@@ -23,8 +27,38 @@ py_library(
     srcs = ["vcs.py"],
     deps = [
         ":base",
-        # Add deps needed by vcs.py
+        ":options",
+        ":vcs_jobs",
+        ":vcs_options",
+        ":vso",
+        "//lib:coverage_data",
     ],
+)
+
+py_library(
+    name = "vcs_jobs",
+    srcs = ["vcs_jobs.py"],
+    deps = ["//lib:job_lib"],
+)
+
+py_library(
+    name = "vso",
+    srcs = ["vso.py"],
+)
+
+py_library(
+    name = "options",
+    srcs = ["options.py"],
+)
+
+py_library(
+    name = "vcs_options",
+    srcs = ["vcs_options.py"],
+)
+
+py_library(
+    name = "xcelium_options",
+    srcs = ["xcelium_options.py"],
 )
 
 # Add other simulators here (e.g., questa)

@@ -1,7 +1,7 @@
 # vim: set ft=bzl :
 """Rules to gather and compile RTL."""
 
-load(":verilog.bzl", "CUSTOM_SHELL", "ShellInfo", "ToolEncapsulationInfo", "VerilogInfo", "gather_shell_defines", "get_transitive_srcs")
+load(":verilog.bzl", "CUSTOM_SHELL", "ShellInfo", "ToolEncapsulationInfo", "VerilogInfo", "gather_shell_defines", "get_transitive_srcs", "merge_default_runfiles", "runfiles_relative_short_path")
 
 _SHELLS_DOC = """List of verilog_rtl_shell Labels.
 For each Label, a gumi define will be placed on the command line to use this shell instead of the original module.
@@ -33,7 +33,7 @@ def _resolve_label_default_file(simulator, selected_label, xrun_default_label, x
         return vcs_default_file
     return xrun_default_file
 
-def create_flist_content(ctx, gumi_path, allow_library_discovery, no_synth = False, makelib = ""):
+def create_flist_content(ctx, gumi_path, allow_library_discovery, makelib = ""):
     """Create the content of a '.f' file.
 
     Args:
@@ -49,11 +49,6 @@ def create_flist_content(ctx, gumi_path, allow_library_discovery, no_synth = Fal
         handle -y correctly when invoked many times. As a workaround for these
         tools, setting allow_library_discovery to false will put all module
         files and library files directly onto the command line.
-      no_synth: When true, filter any target that sets no_synth=True
-
-        This is an extra precaution to ensure that nonsynthesizable libraries
-        are not passed to the synthesis tool.
-
     Returns:
       List of strings representing flist content.
     """
@@ -65,32 +60,31 @@ def create_flist_content(ctx, gumi_path, allow_library_discovery, no_synth = Fal
         flist_content.append(makelib)
 
     # Using dirname may result in bazel-out included in path
-    incdir = depset([f.short_path[:-len(f.basename) - 1] for f in ctx.files.headers]).to_list()
+    incdir = depset([runfiles_relative_short_path(f)[:-len(f.basename) - 1] for f in ctx.files.headers]).to_list()
     for d in incdir:
         flist_content.append("+incdir+{}".format(d))
 
     # Using dirname may result in bazel-out included in path
-    libdir = depset([f.short_path[:-len(f.basename) - 1] for f in ctx.files.modules]).to_list()
+    libdir = depset([runfiles_relative_short_path(f)[:-len(f.basename) - 1] for f in ctx.files.modules]).to_list()
 
     flist_content.append(gumi_path)
 
-    if not no_synth:
+    if allow_library_discovery:
+        for d in libdir:
+            if d == "":
+                d = "."
+            flist_content.append("-y {}".format(d))
+    else:
+        flist_content += [runfiles_relative_short_path(f) for f in ctx.files.modules]
+
+    for f in ctx.files.lib_files:
         if allow_library_discovery:
-            for d in libdir:
-                if d == "":
-                    d = "."
-                flist_content.append("-y {}".format(d))
+            flist_content.append("-v {}".format(runfiles_relative_short_path(f)))
         else:
-            flist_content += [f.short_path for f in ctx.files.modules]
+            flist_content.append(runfiles_relative_short_path(f))
 
-        for f in ctx.files.lib_files:
-            if allow_library_discovery:
-                flist_content.append("-v {}".format(f.short_path))
-            else:
-                flist_content.append(f.short_path)
-
-        for f in ctx.files.direct:
-            flist_content.append(f.short_path)
+    for f in ctx.files.direct:
+        flist_content.append(runfiles_relative_short_path(f))
 
     # if using makelib, terminate here
     if len(makelib):
@@ -100,6 +94,10 @@ def create_flist_content(ctx, gumi_path, allow_library_discovery, no_synth = Fal
     return flist_content
 
 def _verilog_rtl_library_impl(ctx):
+    if ctx.attr.no_synth:
+        fail(("{} sets no_synth=True, but rules_verilog has no synthesis consumer that can honor it. " +
+              "Filter this target in the synthesis rule instead.").format(ctx.label))
+
     srcs = ctx.files.headers + ctx.files.modules + ctx.files.lib_files + ctx.files.direct
 
     if ctx.attr.is_pkg:
@@ -161,9 +159,9 @@ def _verilog_rtl_library_impl(ctx):
         )
 
         srcs = [gumi] + srcs
-        gumi_path = gumi.short_path
+        gumi_path = runfiles_relative_short_path(gumi)
     elif not (ctx.attr.gumi_file_override == None):
-        gumi_path = ctx.file.gumi_file_override.short_path
+        gumi_path = runfiles_relative_short_path(ctx.file.gumi_file_override)
 
     flist_content = create_flist_content(ctx, gumi_path = gumi_path, allow_library_discovery = False, makelib = ctx.attr.makelib)
 
@@ -238,9 +236,7 @@ verilog_rtl_library = rule(
         ),
         "no_synth": attr.bool(
             default = False,
-            doc = "When True, do not allow the contents of this library to be exposed to synthesis.\n" +
-                  "TODO: This currently enforced via an Aspect which is not included in this repository.\n" +
-                  "The aspect creates a parallel set of 'synth__*.f' which have the filtered views which are passed to the synthesis tool.",
+            doc = "Reserved compatibility attribute. Setting it to True fails analysis because this repository has no synthesis consumer that can honor it. Filter simulation-only targets in the synthesis rule instead.",
         ),
         "is_pkg": attr.bool(
             default = False,
@@ -301,7 +297,8 @@ def verilog_rtl_pkg(
         See verilog_rtl_library::direct.
       no_synth: Default False.
 
-        See verilog_rtl_library::no_synth.
+        Reserved for compatibility. True is rejected because this repository
+        cannot enforce synthesis filtering.
       deps: Other packages this target is dependent on.
 
         See verilog_rtl_library::deps.
@@ -342,7 +339,7 @@ def verilog_rtl_shell(
         power.
       shell_module_label: The Label or file containing the shell.
 
-        See verilog_rtl_library::no_synth.
+        The shell is selected explicitly by simulation consumers.
       deps: Other packages this target is dependent on.
 
         In general. shells should avoid having dependencies. Exceptions include
@@ -358,7 +355,6 @@ def verilog_rtl_shell(
         modules = [shell_module_label],
         # Intentionally do not set deps here
         is_shell_of = module_to_shell_name,
-        no_synth = True,
         enable_gumi = False,
         deps = deps,
     )
@@ -370,12 +366,12 @@ def _verilog_rtl_unit_test_impl(ctx):
     flists_list = flists.to_list()
     simulator = ctx.attr.simulator
     if simulator == "VCS":
-        fail("verilog_rtl_unit_test {} does not support simulator = 'VCS'. Use the VCS two-step flow via simmer instead.".format(ctx.label))
+        fail("verilog_rtl_unit_test {} does not support simulator = 'VCS'. Use the VCS two-step flow via verilog_dv_tb + simmer instead.".format(ctx.label))
 
     top = ""
     for dep in ctx.attr.deps:
         if VerilogInfo in dep and dep[VerilogInfo].last_module:
-            top = dep[VerilogInfo].last_module.short_path
+            top = runfiles_relative_short_path(dep[VerilogInfo].last_module)
             top_base_name = dep[VerilogInfo].last_module.basename.split(".")[0]
 
     if top == "":
@@ -390,15 +386,13 @@ def _verilog_rtl_unit_test_impl(ctx):
 
     pre_fa.append("   \\")
 
-    if len(ctx.attr.post_flist_args):
-        post_fa = "\n".join(["{} \\".format(pfa) for pfa in ctx.attr.post_flist_args]) + "\n"
-    else:
-        post_fa = " \\"
+    post_fa = " ".join(ctx.attr.post_flist_args)
 
     ut_sim_template = ctx.file.ut_sim_template
     ut_sim_waves_template = ctx.file.ut_sim_waves_template
     simulator_command = ctx.attr.command_override[ToolEncapsulationInfo].command
     wave_viewer_command = ctx.attr.wave_viewer_command[ToolEncapsulationInfo].command
+    filelist_flag = "-f"
 
     waves_cmd = ctx.actions.declare_file(ctx.label.name + "_waves.tcl")
     ctx.actions.expand_template(
@@ -415,21 +409,24 @@ def _verilog_rtl_unit_test_impl(ctx):
         substitutions = {
             "{SIMULATOR_COMMAND}": simulator_command,
             "{WAVE_VIEWER_COMMAND}": wave_viewer_command,
-            "{FLISTS}": " ".join(["-f {}".format(f.short_path) for f in flists_list]),
+            "{FLISTS}": " ".join(["{} {}".format(filelist_flag, runfiles_relative_short_path(f)) for f in flists_list]),
             "{TOP}": top,
             "{PRE_FLIST_ARGS}": "\n".join(pre_fa),
             "{POST_FLIST_ARGS}": post_fa,
-            "{WAVES_RENDER_CMD_PATH}": waves_cmd.short_path,
+            "{WAVES_RENDER_CMD_PATH}": runfiles_relative_short_path(waves_cmd),
         },
     )
 
-    runfiles = ctx.runfiles(files = flists_list + srcs_list + ctx.files.data + ctx.files.shells + [waves_cmd])
+    runfiles = merge_default_runfiles(
+        ctx,
+        files = flists_list + srcs_list + ctx.files.data + ctx.files.shells + [waves_cmd],
+        targets = ctx.attr.shells + ctx.attr.deps + ctx.attr.data,
+    )
     return [DefaultInfo(
         runfiles = runfiles,
     )]
 
 verilog_rtl_unit_test = rule(
-    # TODO: this could eventually be a specific use case of verilog_test
     doc = """Compile and simulate a verilog_rtl_library.
 
     Allows a designer to write small unit/directed tests which can be included in regression.
@@ -455,8 +452,7 @@ verilog_rtl_unit_test = rule(
         "simulator": attr.string(
             default = "XRUN",
             values = ["XRUN", "VCS"],
-            doc = "Simulator to use for this RTL unit test. Only XRUN is supported here.\n" +
-                  "For VCS, use the two-step flow via simmer.\n",
+            doc = "Simulator to use for this one-step RTL unit test. Only XRUN is supported; VCS uses verilog_dv_tb + simmer.\n",
         ),
         "ut_sim_template": attr.label(
             allow_single_file = True,
@@ -549,7 +545,7 @@ def _verilog_rtl_lint_test_impl(ctx):
     # See github issue #24
     shell_defines_string = "-define {}{}"
     attr_defines_string = "-define {}{}"
-    if str(ctx.attr.run_template.label) == "@rules_verilog//vendors/real_intent:verilog_rtl_lint_test.sh.template":
+    if simulator == "VCS" or str(ctx.attr.run_template.label) == "@rules_verilog//vendors/real_intent:verilog_rtl_lint_test.sh.template":
         shell_defines_string = "+define+{}{}"
         attr_defines_string = "+define+{}{}"
 
@@ -560,7 +556,7 @@ def _verilog_rtl_lint_test_impl(ctx):
     top_path = ""
     for dep in ctx.attr.deps:
         if VerilogInfo in dep and dep[VerilogInfo].last_module:
-            top_path = dep[VerilogInfo].last_module.short_path
+            top_path = runfiles_relative_short_path(dep[VerilogInfo].last_module)
 
     if top_path == "":
         fail("verilog_rtl_lint_test {} could not determine the top module from the target's dependencies".format(ctx.label))
@@ -569,12 +565,12 @@ def _verilog_rtl_lint_test_impl(ctx):
         template = command_template,
         output = ctx.outputs.command_script,
         substitutions = {
-            "{RULEFILE}": rulefile.short_path,
+            "{RULEFILE}": runfiles_relative_short_path(rulefile),
             "{DEFINES}": " ".join(defines),
-            "{FLISTS}": " ".join(["{} {}".format("-file" if simulator == "VCS" else "-f", f.short_path) for f in trans_flists.to_list()]),
+            "{FLISTS}": " ".join(["{} {}".format("-file" if simulator == "VCS" else "-f", runfiles_relative_short_path(f)) for f in trans_flists.to_list()]),
             "{TOP_PATH}": top_path,
             "{INST_TOP}": ctx.attr.top,
-            "{LINT_PARSER}": lint_parser.short_path,
+            "{LINT_PARSER}": runfiles_relative_short_path(lint_parser),
         },
     )
 
@@ -587,15 +583,15 @@ def _verilog_rtl_lint_test_impl(ctx):
         output = ctx.outputs.executable,
         substitutions = {
             "{SIMULATOR_COMMAND}": simulator_command,
-            "{COMMAND_SCRIPT}": ctx.outputs.command_script.short_path,
+            "{COMMAND_SCRIPT}": runfiles_relative_short_path(ctx.outputs.command_script),
             "{DEFINES}": " ".join(defines),
-            "{FLISTS}": " ".join(["{} {}".format("-file" if simulator == "VCS" else "-f", f.short_path) for f in trans_flists.to_list()]),
+            "{FLISTS}": " ".join(["{} {}".format("-file" if simulator == "VCS" else "-f", runfiles_relative_short_path(f)) for f in trans_flists.to_list()]),
             "{TOP_PATH}": top_path,
-            "{DESIGN_INFO}": " ".join(["{}".format(design_info.short_path) for design_info in ctx.files.design_info]),
-            "{RULEFILE}": rulefile.short_path,
+            "{DESIGN_INFO}": " ".join([runfiles_relative_short_path(design_info) for design_info in ctx.files.design_info]),
+            "{RULEFILE}": runfiles_relative_short_path(rulefile),
             "{INST_TOP}": ctx.attr.top,
-            "{LINT_PARSER}": lint_parser.short_path,
-            "{LINT_PARSER_LIB}": ctx.files._lint_parser_lib[0].dirname,
+            "{LINT_PARSER}": runfiles_relative_short_path(lint_parser),
+            "{LINT_PARSER_LIB}": runfiles_relative_short_path(ctx.files._lint_parser_lib[0])[:-len(ctx.files._lint_parser_lib[0].basename) - 1],
             "{WAIVER_DIRECT}": ctx.attr.waiver_direct,
         },
     )
@@ -603,7 +599,19 @@ def _verilog_rtl_lint_test_impl(ctx):
     trans_flists = get_transitive_srcs([], ctx.attr.shells + ctx.attr.deps, VerilogInfo, "transitive_flists", allow_other_outputs = False)
     trans_srcs = get_transitive_srcs([], ctx.attr.shells + ctx.attr.deps, VerilogInfo, "transitive_sources", allow_other_outputs = True)
 
-    runfiles = ctx.runfiles(files = trans_srcs.to_list() + trans_flists.to_list() + ctx.files.design_info + [rulefile, lint_parser] + ctx.files._lint_parser_lib + [ctx.outputs.command_script])
+    lint_runfile_targets = ctx.attr.shells + ctx.attr.deps + ctx.attr.design_info + [
+        ctx.attr.lint_parser,
+        ctx.attr._lint_parser_lib,
+        ctx.attr._lint_parser_vcs_default,
+        ctx.attr._rulefile_vcs_default,
+    ]
+    if ctx.attr.rulefile:
+        lint_runfile_targets.append(ctx.attr.rulefile)
+    runfiles = merge_default_runfiles(
+        ctx,
+        files = trans_srcs.to_list() + trans_flists.to_list() + ctx.files.design_info + [rulefile, lint_parser] + ctx.files._lint_parser_lib + [ctx.outputs.command_script],
+        targets = lint_runfile_targets,
+    )
 
     return [
         DefaultInfo(runfiles = runfiles),
@@ -755,22 +763,22 @@ def _verilog_rtl_cdc_test_impl(ctx):
         output = ctx.outputs.executable,
         substitutions = {
             "{CDC_COMMAND}": ctx.attr._command_override[ToolEncapsulationInfo].command,
-            "{PREAMBLE_CMDS}": ctx.outputs.preamble_cmds.short_path,
-            "{CMD_FILES}": " ".join([cmd_file.short_path for cmd_file in ctx.files.cmd_files]),
-            "{EPILOGUE_CMDS}": ctx.outputs.epilogue_cmds.short_path,
+            "{PREAMBLE_CMDS}": runfiles_relative_short_path(ctx.outputs.preamble_cmds),
+            "{CMD_FILES}": " ".join([runfiles_relative_short_path(cmd_file) for cmd_file in ctx.files.cmd_files]),
+            "{EPILOGUE_CMDS}": runfiles_relative_short_path(ctx.outputs.epilogue_cmds),
         },
     )
 
-    defines = ["+define+LINT+CDC"]
+    defines = ["+define+LINT", "+define+CDC"]
 
-    defines.extend(["+{}{}".format(key, value) for key, value in ctx.attr.defines.items()])
+    defines.extend(["+define+{}{}".format(key, value) for key, value in ctx.attr.defines.items()])
     for key, value in gather_shell_defines(ctx.attr.shells).items():
-        defines.append("+{}{}".format(key, value))
+        defines.append("+define+{}{}".format(key, value))
 
     top_path = ""
     for dep in ctx.attr.deps:
         if VerilogInfo in dep and dep[VerilogInfo].last_module:
-            top_path = "  {}".format(dep[VerilogInfo].last_module.short_path)
+            top_path = "  {}".format(runfiles_relative_short_path(dep[VerilogInfo].last_module))
     if top_path == "":
         fail("verilog_rtl_cdc_test {} could not determine the top module from the target's dependencies".format(ctx.label))
 
@@ -788,8 +796,8 @@ def _verilog_rtl_cdc_test_impl(ctx):
         template = ctx.file.preamble_template,
         output = ctx.outputs.preamble_cmds,
         substitutions = {
-            "{DEFINES}": "".join(defines),
-            "{FLISTS}": " ".join(["-f {}".format(f.short_path) for f in trans_flists.to_list()]),
+            "{DEFINES}": " ".join(defines),
+            "{FLISTS}": " ".join(["-f {}".format(runfiles_relative_short_path(f)) for f in trans_flists.to_list()]),
             "{TOP_PATH}": top_path,
             "{INST_TOP}": ctx.attr.top,
             "{BBOX_MODULES_CMD}": bbox_modules_cmd,
@@ -803,7 +811,11 @@ def _verilog_rtl_cdc_test_impl(ctx):
         substitutions = {},
     )
 
-    runfiles = ctx.runfiles(files = [ctx.outputs.preamble_cmds, ctx.outputs.epilogue_cmds] + trans_srcs.to_list() + trans_flists.to_list() + ctx.files.cmd_files)
+    runfiles = merge_default_runfiles(
+        ctx,
+        files = [ctx.outputs.preamble_cmds, ctx.outputs.epilogue_cmds] + trans_srcs.to_list() + trans_flists.to_list() + ctx.files.cmd_files,
+        targets = ctx.attr.shells + ctx.attr.deps + ctx.attr.cmd_files,
+    )
 
     return [
         DefaultInfo(runfiles = runfiles),
@@ -817,11 +829,6 @@ verilog_rtl_cdc_test = rule(
             mandatory = True,
             doc = "Other verilog libraries this target is dependent upon.\n" +
                   "All Labels specified here must provide a VerilogInfo provider.",
-        ),
-        "run_template": attr.label(
-            allow_single_file = True,
-            default = Label("@rules_verilog//vendors/cadence:verilog_rtl_cdc_test.sh.template"),
-            doc = "The template to generate the script to run the cdc test.\n",
         ),
         "preamble_template": attr.label(
             allow_single_file = True,

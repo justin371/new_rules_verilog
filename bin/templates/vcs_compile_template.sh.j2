@@ -1,13 +1,15 @@
 #!/usr/bin/env bash
+set -Eeuo pipefail
 
-mkdir -p {{ VCOMP_DIR }}/csrc && \
+trap 'rc=$?; printf "ERROR: VCS compile failed at line %s (exit %s): %s\n" "$LINENO" "$rc" "$BASH_COMMAND" >&2' ERR
 
-cd {{ bazel_runfiles_main }} && \
+mkdir -p {{ (VCOMP_DIR ~ '/csrc')|shell_quote }}
+cd {{ bazel_runfiles_main|shell_quote }}
 
 {{ vcs_runner }} vcs \
   -full64 \
-  -Mdir={{ VCOMP_DIR }}/csrc \
-  -Mlib={{ VCOMP_DIR }}/csrc \
+  -Mdir={{ (VCOMP_DIR ~ '/csrc')|shell_quote }} \
+  -Mlib={{ (VCOMP_DIR ~ '/csrc')|shell_quote }} \
   -p1800_macro_expansion \
   {% if options.fgp is not none -%}
     -fgp \
@@ -15,22 +17,28 @@ cd {{ bazel_runfiles_main }} && \
   {% if options.vcs_profile -%}
     -pcmakeprof -reportstats \
   {% endif -%}
+  {% if partcomp_opts -%}
+    {{ partcomp_opts }} \
+  {% endif -%}
   {% if options.dtl -%}
-    -dir={{ VCOMP_DIR }}/dtl_static \
     -enable_dynamic_tb \
   {% endif -%}
 
   {% if options.compile_args_file -%}
-    -file {{ options.compile_args_file }} \
+    -file {{ options.compile_args_file|shell_quote }} \
   {% endif -%}
 
   {% if options.vso -%}
     -vso cso \
-    -vso_opts buildname={{ vso_build_name }} \
-    -vso_opts workdir={{ vso_workdir }} \
+    -vso_opts buildname={{ vso_build_name|shell_quote }} \
+    {% if options.vso_cbv -%}
+      -vso_opts workdir={{ vso_workdir|shell_quote }} \
+    {% endif -%}
+  {% elif options.vso_ccex -%}
+    -vso ccex \
   {% endif -%}
 
-  -file {{ bazel_compile_args }} \
+  -file {{ bazel_compile_args|shell_quote }} \
   {% for define in additional_defines -%}
     +define+{{ define }} \
   {% endfor -%}
@@ -58,5 +66,5 @@ cd {{ bazel_runfiles_main }} && \
   {% if options.smartlog or options.waves is not none or options.gui -%}
     -sml \
   {% endif -%}
-  -l {{ VCOMP_DIR }}/cmp.log \
-  -o {{ VCOMP_DIR }}/simv
+  -l {{ (VCOMP_DIR ~ '/cmp.log')|shell_quote }} \
+  -o {{ (VCOMP_DIR ~ '/simv')|shell_quote }}

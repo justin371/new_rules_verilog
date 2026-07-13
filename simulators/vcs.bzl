@@ -1,7 +1,7 @@
 # vim: set ft=bzl :
 """Repository setup for Synopsys VCS."""
 
-load("//simulators:common.bzl", "VARS", "dpi_headers_build")
+load("//simulators:common.bzl", "dpi_headers_build", "simulator_environment")
 
 VCS_DPI_HEADERS = ["svdpi.h", "svdpi_src.h"]
 
@@ -10,7 +10,7 @@ def _vcs_setup_impl(repository_ctx):
         fail("Name vcs_setup rule: 'VCS'!")
     result = repository_ctx.execute(
         ["runmod", "vcs", "--", "printenv", "VCS_HOME"],
-        environment = repository_ctx.os.environ,
+        environment = simulator_environment(repository_ctx),
         # working_directory="..",
     )
     if result.return_code:
@@ -25,5 +25,4 @@ def _vcs_setup_impl(repository_ctx):
 vcs_setup = repository_rule(
     implementation = _vcs_setup_impl,
     local = True,
-    environ = VARS,
 )

@@ -10,49 +10,30 @@ rules_verilog_public_repositories()
 # Swap the load/call above if that environment needs to be restored.
 
 load("@rules_python//python:repositories.bzl", "py_repositories")
+
 py_repositories()
 
-load("@io_bazel_rules_go//go:deps.bzl", "go_download_sdk", "go_register_toolchains", "go_rules_dependencies")
+load("@rules_python//python:pip.bzl", "pip_parse")
 
-## The Go programming language
-## https://github.com/golang/go
-GO_SDK_VERSION = "1.19.1"
-## Linux local SDK path:
-## /nfs/dv/shared/dv_repos/go/go_{}.linux-amd64
-go_download_sdk(
-    name = "go_sdk",
-    version = GO_SDK_VERSION,
-    register_toolchains = False,
+pip_parse(
+    name = "pip_deps",
+    python_interpreter = "python3.12",
+    requirements_lock = "//:requirements.txt",
 )
 
-go_rules_dependencies()
+load("@pip_deps//:requirements.bzl", "install_deps")
 
-go_register_toolchains()
+install_deps()
 
 load("@bazel_skylib//:workspace.bzl", "bazel_skylib_workspace")
 
 bazel_skylib_workspace()
 
-load("@bazel_gazelle//:deps.bzl", "gazelle_dependencies")
-
-gazelle_dependencies()
-
-load("@io_bazel_stardoc//:setup.bzl", "stardoc_repositories")
-
-stardoc_repositories()
-
-load("@rules_jvm_external//:repositories.bzl", "rules_jvm_external_deps")
-load("@io_bazel_stardoc//:deps.bzl", "stardoc_external_deps")
-
-rules_jvm_external_deps()
-
-load("@rules_jvm_external//:setup.bzl", "rules_jvm_external_setup")
-
-rules_jvm_external_setup()
-stardoc_external_deps()
-
-load("@stardoc_maven//:defs.bzl", stardoc_pinned_maven_install = "pinned_maven_install")
-stardoc_pinned_maven_install()
-
 load("@buildifier_prebuilt//:defs.bzl", "buildifier_prebuilt_register_toolchains")
+
 buildifier_prebuilt_register_toolchains()
+
+local_repository(
+    name = "filelist_external_fixture",
+    path = "tests/external_fixture",
+)

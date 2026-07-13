@@ -1,8 +1,12 @@
-#!/usr/bin/bash
+#!/usr/bin/env bash
 # This is a template for the bazel verilog_rtl_lint_test rule
 # It is not intended to be run stand-alone
-mv xrun.log xrun.log.bak 2> /dev/null
-mv xrun.log.xml xrun.log.xml.bak 2> /dev/null
+set -Eeuo pipefail
+
+trap 'rc=$?; printf "ERROR: Xcelium lint script failed at line %s (exit %s): %s\n" "$LINENO" "$rc" "$BASH_COMMAND" >&2' ERR
+
+mv xrun.log xrun.log.bak 2> /dev/null || true
+mv xrun.log.xml xrun.log.xml.bak 2> /dev/null || true
 {SIMULATOR_COMMAND} \
   -sv \
   -hal  \
@@ -17,5 +21,5 @@ mv xrun.log.xml xrun.log.xml.bak 2> /dev/null
   -halargs '"-RULEFILE {RULEFILE} -inst_top {INST_TOP} -design_info {DESIGN_INFO} -XML xrun.log.xml"' \
   -logfile xrun.log
 
-export PYTHONPATH="{LINT_PARSER_LIB}:$PYTHONPATH"
-./{LINT_PARSER} $@ --waiver-direct "{WAIVER_DIRECT}"
+export PYTHONPATH="{LINT_PARSER_LIB}:${PYTHONPATH:-}"
+./{LINT_PARSER} "$@" --waiver-direct "{WAIVER_DIRECT}"

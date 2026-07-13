@@ -1,6 +1,9 @@
 # Cadence Xcelium requires $HOME to be set
 test --action_env=HOME
 
+# Keep local and CI Python behavior aligned with the supported Red Hat setup.
+build --python_path=python3.12
+
 # Lightelligence Specific
 build --//:verilog_dv_unit_test_command="runmod -t xrun --"
 build --//:verilog_rtl_cdc_test_command="runmod -t jg --"

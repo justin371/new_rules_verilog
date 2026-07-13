@@ -11,45 +11,55 @@ from .common import (
     argument_explicitly_requested,
     simulator_explicitly_requested,
 )
-from .vcs import add_vcs_arguments, validate_vcs_runtime_options, validate_vcs_switches_for_xcelium
+from .vcs import add_vcs_arguments
 from .xcelium import (
-    add_xcelium_arguments,
-    apply_xcelium_postprocess,
-    validate_xcelium_runtime_options,
-    validate_xcelium_switches_for_vcs,
-)
+    add_xcelium_arguments, )
+
+_RERUN_OMITTED_OPTIONS = {
+    '-t',
+    '--tests',
+    '--tag',
+    '--ntag',
+    '--seed',
+    '--global-tag',
+    '--global-ntag',
+}
 
 
-def validate_simulator_specific_options(options, parser):
-    if options.simulator == 'VCS':
-        validate_xcelium_switches_for_vcs(options, parser)
-        validate_vcs_runtime_options(options, parser)
-        return
+def reproduction_args(argv):
+    """Keep original options except selectors replaced by rerun.sh."""
+    result = []
+    index = 0
+    while index < len(argv):
+        argument = argv[index]
+        option_name = argument.split('=', 1)[0]
+        if option_name in _RERUN_OMITTED_OPTIONS:
+            index += 1 if '=' in argument else 2
+            continue
+        if argument.startswith('-t') and not argument.startswith('--'):
+            index += 1
+            continue
+        result.append(argument)
+        index += 1
+    return result
 
-    if options.simulator == 'XRUN':
-        validate_vcs_switches_for_xcelium(options, parser)
-        validate_xcelium_runtime_options(options, parser)
 
-
-def parse_args(argv):
-    """
-    simmer configuration is handled through a series of command
-    line arguments and a handful of environment variables
-
-    historically, simmer has been dependant on an environment
-    variable PROJ_DIR.  to remove this scrict dependency, simmer
-    will now check if env(PROJ_DIR) is defined, and if not,
-    will use the current working directory
-
-    simmer defaults to using Xcelium for model compiles and
-    simulations.  however, the user and/or project can define
-    an environement varible SIM_PLATFORM to effectively change
-    the default.  the use of --vcs or --xrun on the command line
-    will always take precedence over env(SIM_PLATFORM)
-
-    simmer schedules compile and simulation jobs internally.
-    """
-    parser = argparse.ArgumentParser(description="Runs simulations!", formatter_class=argparse.RawTextHelpFormatter)
+def create_parser():
+    parser = argparse.ArgumentParser(
+        prog="simmer",
+        description=(
+            "Discover, compile, run, retain, and report Verilog/SystemVerilog regressions with VCS or XRUN.\n"
+            "Preparation: run from a configured project checkout with Bazel 7.7.1, Python 3.12, and the selected "
+            "EDA environment sourced. Quote all test globs."),
+        epilog=
+        ("Start safely with: simmer -t 'bench:test@1' --simulator VCS --discovery-only\n"
+         "Then run without --discovery-only. Use --simmer-profile and the per-job logs to diagnose performance.\n"
+         "XRUN gatesim MSIE, after configuring verilog_dv_tb MSIE deps, uses the same target/SIMRESULTS/suffix:\n"
+         "  simmer -t 'gate_tb:test@1' --simulator XRUN --msie-href dut\n"
+         "  simmer -t 'gate_tb:test@1' --simulator XRUN --msie-prim dut --msie-primary-name dut_wc --msie-primary-key KEY\n"
+         "  simmer -t 'gate_tb:test@1' --simulator XRUN --msie-incr dut_wc --msie-primary-key KEY"),
+        formatter_class=argparse.RawTextHelpFormatter,
+    )
 
     add_debug_arguments(parser)
     add_test_configuration_arguments(parser)
@@ -58,6 +68,12 @@ def parse_args(argv):
     add_regression_arguments(parser)
     add_flow_control_arguments(parser)
     add_basic_arguments(parser)
+    return parser
+
+
+def parse_args(argv):
+    """Parse and validate simmer command-line options."""
+    parser = create_parser()
 
     options = parser.parse_args(argv)
     if options.jobs is not None and options.jobs < 1:
@@ -67,25 +83,107 @@ def parse_args(argv):
     options.simulator_was_explicit = simulator_explicitly_requested(argv)
     options.xprop_was_explicit = argument_explicitly_requested(argv, '--xprop')
     options.timeout_was_explicit = argument_explicitly_requested(argv, '--timeout')
+    options.covfile_was_explicit = argument_explicitly_requested(argv, '--covfile')
+    options.mce_detail_was_explicit = any(
+        argument_explicitly_requested(argv, argument) for argument in [
+            '--mce-build-count',
+            '--mce-build-cfg',
+            '--mce-sim-count',
+            '--mce-sim-cfg',
+            '--mce-split-max-size',
+        ])
+    options.xcelium_explicit_switches = [
+        argument for argument in [
+            '--wave-delta',
+            '--probe-packed',
+            '--probe-unpacked',
+            '--profile',
+            '--mce',
+            '--mce-build-count',
+            '--mce-build-cfg',
+            '--mce-sim-count',
+            '--mce-sim-cfg',
+            '--mce-split-max-size',
+            '--coverage',
+            '--covfile',
+            '--msie',
+            '--msie-href',
+            '--msie-prim',
+            '--msie-incr',
+            '--msie-primary-name',
+            '--msie-primary-top',
+            '--msie-primary-key',
+            '--emulator',
+        ] if argument_explicitly_requested(argv, argument)
+    ]
+    options.vcs_partcomp_explicit_switches = [
+        argument for argument in [
+            '--vcs-partcomp-mode',
+            '--vcs-partcomp-jobs',
+            '--vcs-partcomp-dir',
+            '--vcs-partcomp-sharedlib',
+        ] if argument_explicitly_requested(argv, argument)
+    ]
+    options.vcs_explicit_switches = [
+        argument for argument in [
+            '--cm',
+            '--gui',
+            '--vcs-cm-line',
+            '--vcs-cm-report',
+            '--vcs-cm-cond',
+            '--vcs-cm-tgl',
+            '--vcs-cm-hier',
+            '--vcs-profile',
+            '--vcs-urg-parallel',
+            '--vcs-urg-show-tests',
+            '--vcs-partcomp-mode',
+            '--vcs-partcomp-jobs',
+            '--vcs-partcomp-dir',
+            '--vcs-partcomp-sharedlib',
+            '--smartlog',
+            '--vcs-runner',
+            '--dtl',
+            '--fgp',
+            '--vcs-xprop-flowctrl',
+            '--vcs-xprop-mmsopt',
+            '--vcs-xprop-banner',
+            '--vcs-xprop-report',
+            '--ico',
+            '--ico-workdir',
+            '--ico-shared-record',
+            '--vso',
+            '--vso-workdir',
+            '--vso-dbdir',
+            '--vso-buildname',
+            '--vso-target-metric',
+            '--vso-phase',
+            '--vso-cbv',
+            '--vso-ccex',
+            '--vso-ccex-rca',
+            '--vso-ccex-auto-merge-dir',
+        ] if argument_explicitly_requested(argv, argument)
+    ]
 
-    skip_list = ['-t', '--tag', '--ntag', '--seed', '--global-tag', '--global-ntag']
-    skip_list.append(str(options.seed))
-    for test in options.tests:
-        skip_list.append(test.btiglob)
-        for tag in test.tag:
-            skip_list.append(tag)
-        for ntag in test.ntag:
-            skip_list.append(ntag)
-    reproduce_args = [arg for arg in argv if arg not in skip_list]
-    setattr(options, 'reproduce_args', reproduce_args)
+    options.reproduce_args = reproduction_args(argv)
 
-    if options.simulator_was_explicit:
-        options.simulator = options.simulator.upper()
-        validate_simulator_specific_options(options, parser)
-    else:
-        options.simulator = SIM_PLATFORM.upper()
-
-    apply_xcelium_postprocess(options)
-
+    options.simulator = (options.simulator if options.simulator_was_explicit else SIM_PLATFORM).upper()
+    wave_detail_switches = [
+        '--wave-type',
+        '--wave-tcl',
+        '--wave-start',
+        '--wave-end',
+        '--wave-depth',
+    ]
+    requested_wave_details = [
+        argument for argument in wave_detail_switches if argument_explicitly_requested(argv, argument)
+    ]
+    if options.waves is None and requested_wave_details:
+        parser.error("{} require --waves.".format(", ".join(requested_wave_details)))
+    if options.wave_start < 0:
+        parser.error("--wave-start must be non-negative.")
+    if options.wave_end != 99999999 and options.wave_end <= options.wave_start:
+        parser.error("--wave-end must be greater than --wave-start.")
+    if options.wave_depth <= 0:
+        parser.error("--wave-depth must be positive.")
     options.proj_dir = PROJ_DIR
     return options

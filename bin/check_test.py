@@ -15,19 +15,36 @@ from collections import deque
 # Error signatures from log files
 # Note: These are treated as Regex patterns.
 default_error_signatures = [
-    r'%E-', r'%F-', r'%W-', r'#E',
-    r"\*ERROR\*", r"\*FAILED\*",
-    r"SVA_CHECKER_ERROR", r"Assertion FAILURE", r"Solver failed",
+    r'%E-',
+    r'%F-',
+    r'%W-',
+    r'#E',
+    r"\*ERROR\*",
+    r"\*FAILED\*",
+    r"SVA_CHECKER_ERROR",
+    r"Assertion FAILURE",
+    r"Solver failed",
     r"VIRL_MEM_ERR",
-    r"Warning-.FCIBR", r"Warning-.FCPSBU", r"Warning-.STASKW_CO",
-    r"Warning-.SVART-NAFRLTS", r"Warning-.FCIELIE",
+    r"Warning-.FCIBR",
+    r"Warning-.FCPSBU",
+    r"Warning-.STASKW_CO",
+    r"Warning-.SVART-NAFRLTS",
+    r"Warning-.FCIELIE",
     r"Warning:.*AxiPC.sv",
-    r"Error!!", r"Error:", r"ERROR..FAILURE", r"FATAL..FAILURE",
+    r"Error!!",
+    r"Error:",
+    r"ERROR..FAILURE",
+    r"FATAL..FAILURE",
     r"Error-",
-    r"UVM_ERROR [@/]", r"UVM_FATAL [@/]",
-    r"UVM_ERROR .*[@/]", r"UVM_FATAL .*[@/]",
+    r"UVM_ERROR [@/]",
+    r"UVM_FATAL [@/]",
+    r"UVM_ERROR .*[@/]",
+    r"UVM_FATAL .*[@/]",
+    r"^UVM_ERROR\s*:\s*[1-9][0-9]*\s*$",
+    r"^UVM_FATAL\s*:\s*[1-9][0-9]*\s*$",
     r"WARNING.FAILURE",
-    r" \*E,", r" \*F,",
+    r" \*E,",
+    r" \*F,",
     r"VIRL_MEM_WARNING",
     r": Assertion .* failed\.",
     r"UVM_WARNING .*uvm_reg_map.*RegModel.*In map .*overlaps with address of existing register",
@@ -42,15 +59,12 @@ default_error_signatures = [
 
 # Signatures indicating a successful test completion
 finish_signatures = [
-    r"#I Final Report",
-    r"finish at simulation time",
-    r"Simulation complete via",
-    r"--- UVM Report Summary ---"
+    r"#I Final Report", r"finish at simulation time", r"Simulation complete via", r"--- UVM Report Summary ---"
 ]
 
 # Compile static regexes once
 # Using non-capturing groups (?:) is slightly faster than capturing groups
-finish_regex = re.compile(r"(?:" + ")|(?:".join(finish_signatures) + r")")
+finish_regex = re.compile(r"(?:" + ")|(?:".join(finish_signatures) + r")", re.MULTILINE)
 enable_regex = re.compile(r".*TEST_CHECK_ENABLE: (.*)")
 disable_regex = re.compile(r".*TEST_CHECK_DISABLE: (.*)")
 
@@ -58,24 +72,29 @@ disable_regex = re.compile(r".*TEST_CHECK_DISABLE: (.*)")
 err_regex = None
 active_signatures = list(default_error_signatures)
 
+
+def compile_patterns(patterns):
+    """Compile a list of independent patterns into one multiline regex."""
+    if not patterns:
+        return re.compile(r"(?!x)x")
+    return re.compile(r"(?:" + ")|(?:".join(patterns) + r")", re.MULTILINE)
+
+
 def compile_error_regex():
     """Compiles the list of error signatures into a single regex object."""
     global err_regex
     if not active_signatures:
         # Match nothing if list is empty
-        err_regex = re.compile(r"(?!x)x") 
+        err_regex = compile_patterns([])
     else:
-        # Use non-capturing groups for performance
-        pattern = r"(?:" + ")|(?:".join(active_signatures) + r")"
-        err_regex = re.compile(pattern)
+        err_regex = compile_patterns(active_signatures)
+
 
 def update_signatures(line):
     """
     Parses line for Enable/Disable commands.
     Returns True if signatures were updated.
     """
-    global active_signatures
-    
     # Fast string check before running regex
     if "TEST_CHECK_ENABLE" in line:
         match = enable_regex.match(line)
@@ -85,7 +104,7 @@ def update_signatures(line):
                 active_signatures.append(new_sig)
                 compile_error_regex()
                 return True
-                
+
     elif "TEST_CHECK_DISABLE" in line:
         match = disable_regex.match(line)
         if match:
@@ -94,8 +113,9 @@ def update_signatures(line):
                 active_signatures.remove(rem_sig)
                 compile_error_regex()
                 return True
-                
+
     return False
+
 
 def get_file_tail(filepath, n_lines=25):
     """Returns the last n_lines of a file using a deque."""
@@ -106,8 +126,9 @@ def get_file_tail(filepath, n_lines=25):
         return []
 
 
-def scan_static_log(filepath, error_limit):
+def scan_static_log(filepath, error_limit, extra_error_regex=None, required_finish_regex=None):
     """Scan logs without dynamic signature directives using mmap."""
+
     def decode_line(line):
         return line.decode('utf-8', errors='replace').replace('\r\n', '\n')
 
@@ -141,7 +162,10 @@ def scan_static_log(filepath, error_limit):
 
             error_lines = []
             seen_line_starts = set()
-            byte_error_regex = re.compile(err_regex.pattern.encode('utf-8'))
+            error_patterns = [err_regex.pattern]
+            if extra_error_regex is not None:
+                error_patterns.append(extra_error_regex.pattern)
+            byte_error_regex = re.compile(compile_patterns(error_patterns).pattern.encode('utf-8'), re.MULTILINE)
             for match in byte_error_regex.finditer(data):
                 line_start = data.rfind(b'\n', 0, match.start()) + 1
                 if line_start in seen_line_starts:
@@ -154,25 +178,39 @@ def scan_static_log(filepath, error_limit):
                     break
             seed_lines = find_lines(data, [b"SVSEED", b"random seed used"])
             run_time_lines = find_lines(data, [b"real\t"], required_marker=b"user\t")
-            found_finish = any(data.find(signature.encode('utf-8')) != -1 for signature in finish_signatures)
+            if required_finish_regex is None:
+                found_finish = any(data.find(signature.encode('utf-8')) != -1 for signature in finish_signatures)
+            else:
+                required_bytes = re.compile(required_finish_regex.pattern.encode('utf-8'), re.MULTILINE)
+                found_finish = required_bytes.search(data) is not None
             return error_lines, seed_lines, run_time_lines, found_finish
+
 
 def main():
     # 1. Initialize Regex
     compile_error_regex()
-    
+
     # 2. Parse Arguments
     parser = argparse.ArgumentParser(description="Check a simulation logfile for errors.")
     parser.add_argument("logfile", help="Logfile to parse")
-    parser.add_argument("--file-size-limit", type=float, default=0,
+    parser.add_argument("--file-size-limit",
+                        type=float,
+                        default=0,
                         help='Maximum logfile size (MB). Default 0 (no limit)')
-    parser.add_argument("--error-limit", type=int, default=25, 
-                        help='Stop parsing logfile at this number of errors')
+    parser.add_argument("--error-limit", type=int, default=25, help='Stop parsing logfile at this number of errors')
+    parser.add_argument("--pass-pattern", action="append", default=[], help="Require this project pass regex")
+    parser.add_argument("--fail-pattern",
+                        action="append",
+                        default=[],
+                        help="Treat this project failure regex as an error")
     options = parser.parse_args()
+
+    project_pass_regex = compile_patterns(options.pass_pattern) if options.pass_pattern else None
+    project_fail_regex = compile_patterns(options.fail_pattern) if options.fail_pattern else None
 
     logfile = options.logfile
     output_base = os.path.basename(logfile)
-    
+
     # 3. Check File Size (MB)
     if options.file_size_limit > 0:
         size_mb = os.path.getsize(logfile) / (1024 * 1024.0)
@@ -182,7 +220,12 @@ def main():
             sys.exit(1)
 
     try:
-        scan_result = scan_static_log(logfile, options.error_limit)
+        scan_result = scan_static_log(
+            logfile,
+            options.error_limit,
+            extra_error_regex=project_fail_regex,
+            required_finish_regex=project_pass_regex,
+        )
         if scan_result is None:
             error_lines = []
             seed_lines = []
@@ -192,11 +235,12 @@ def main():
                 for line in f:
                     if "TEST_CHECK_" in line and update_signatures(line):
                         continue
-                    if err_regex.search(line):
+                    if err_regex.search(line) or (project_fail_regex is not None and project_fail_regex.search(line)):
                         error_lines.append(line)
                         if len(error_lines) >= options.error_limit:
                             break
-                    elif not found_finish and finish_regex.search(line):
+                    elif not found_finish and (project_pass_regex.search(line)
+                                               if project_pass_regex is not None else finish_regex.search(line)):
                         found_finish = True
                     elif "SVSEED" in line or "random seed used" in line:
                         seed_lines.append(line)
@@ -225,7 +269,7 @@ def main():
             err_log.writelines(run_time_lines)
             err_log.write('******Did not find finish encountered!!!\n\n')
             err_log.write(f'{platform.node()}\n')
-            
+
             # Use Python to get tail instead of subprocess (faster/safer)
             tail_lines = get_file_tail(logfile, 25)
             err_log.writelines(tail_lines)
@@ -239,6 +283,7 @@ def main():
             pass_log.writelines(seed_lines)
             pass_log.writelines(run_time_lines)
         sys.exit(0)
+
 
 if __name__ == '__main__':
     main()

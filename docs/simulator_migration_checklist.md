@@ -41,9 +41,9 @@ bazel build //docs:defs_docs
 
 5. Confirm the generated filelists for a testbench are the unified names above, and that their contents match the selected simulator only.
 
-6. Run one `verilog_dv_unit_test` with default settings under `XRUN`. VCS is not supported for this single-step rule; use `verilog_dv_tb` plus `simmer --simulator VCS` for the two-step flow.
+6. Run one `verilog_dv_unit_test` target under `XRUN`. VCS simulations use `verilog_dv_tb` plus `simmer` instead.
 
-7. Run one `verilog_rtl_unit_test` with default settings under `XRUN`. VCS is not supported for this single-step rule; use the VCS two-step `simmer` flow instead.
+7. Run one `verilog_rtl_unit_test` target under `XRUN`.
 
 ## Failure cases worth testing
 

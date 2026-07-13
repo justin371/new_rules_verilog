@@ -10,6 +10,7 @@ from lib.regression import RegressionConfig
 
 
 class _Log:
+
     def debug(self, *_args, **_kwargs):
         pass
 
@@ -19,6 +20,9 @@ class _Log:
     def summary(self, *_args, **_kwargs):
         pass
 
+    def warning(self, *_args, **_kwargs):
+        pass
+
     def critical(self, message, *args):
         if args:
             message = message % args
@@ -26,6 +30,7 @@ class _Log:
 
 
 class _Timer:
+
     def __init__(self, _log):
         pass
 
@@ -37,6 +42,7 @@ class _Timer:
 
 
 class RegressionDiscoveryTest(unittest.TestCase):
+
     def _options(self, proj_dir):
         return SimpleNamespace(
             proj_dir=str(proj_dir),
@@ -61,41 +67,59 @@ class RegressionDiscoveryTest(unittest.TestCase):
         config.max_test_name_length = 20
         return config
 
-    def test_cache_freshness_tracks_build_and_bzl_files(self):
+    def test_cache_manifest_tracks_content_changes_and_deleted_files(self):
         proj_dir = Path(tempfile.mkdtemp())
         build_file = proj_dir / "benches" / "soc_tb" / "BUILD"
         build_file.parent.mkdir(parents=True)
         build_file.write_text("filegroup(name='x')\n", encoding="utf-8")
+        bazel_version = proj_dir / ".bazelversion"
+        bazel_version.write_text("7.7.1\n", encoding="utf-8")
 
         config = self._config(proj_dir)
+        cache_dir = proj_dir / ".simmer" / "cache"
+        cache_dir.mkdir(parents=True)
         for filename in ("all_vcomp.json", "tests_to_tags.json", "tests_to_simulator.json"):
-            path = proj_dir / filename
+            path = cache_dir / filename
             path.write_text("{}", encoding="utf-8")
-            path.touch()
-
-        cache_time = build_file.stat().st_mtime + 10
-        for filename in ("all_vcomp.json", "tests_to_tags.json", "tests_to_simulator.json"):
-            path = proj_dir / filename
-            path.touch()
-            os.utime(path, (cache_time, cache_time))
+        config._write_discovery_manifest()
 
         self.assertTrue(config._discovery_cache_is_fresh())
 
-        newer_time = cache_time + 10
-        os.utime(build_file, (newer_time, newer_time))
+        original_mtime = bazel_version.stat().st_mtime
+        bazel_version.write_text("8.0.0\n", encoding="utf-8")
+        os.utime(bazel_version, (original_mtime, original_mtime))
+        self.assertFalse(config._discovery_cache_is_fresh())
+
+        config._write_discovery_manifest()
+        build_file.unlink()
         self.assertFalse(config._discovery_cache_is_fresh())
 
     @mock.patch("lib.regression.os.walk", side_effect=AssertionError("walk should not run"))
     @mock.patch("lib.regression.subprocess.run")
     def test_cache_uses_git_file_index_when_available(self, run, _walk):
         proj_dir = Path(tempfile.mkdtemp())
-        run.return_value = SimpleNamespace(returncode=0, stdout="pkg/BUILD\npkg/file.py\nrules/tool.bzl\n")
+        run.return_value = SimpleNamespace(
+            returncode=0,
+            stdout="pkg/BUILD\npkg/file.py\nrules/tool.bzl\n.bazelversion\nMODULE.bazel.lock\n",
+        )
         config = self._config(proj_dir)
 
         self.assertEqual(
-            [str(proj_dir / "pkg/BUILD"), str(proj_dir / "rules/tool.bzl")],
+            [
+                str(proj_dir / "pkg/BUILD"),
+                str(proj_dir / "rules/tool.bzl"),
+                str(proj_dir / ".bazelversion"),
+                str(proj_dir / "MODULE.bazel.lock"),
+            ],
             list(config._iter_discovery_dependency_paths()),
         )
+
+    def test_no_bazel_rejects_stale_cache(self):
+        config = self._config(Path(tempfile.mkdtemp()))
+        config.options.no_bazel = True
+        config._discovery_cache_is_fresh = lambda: False
+
+        self.assertFalse(config._should_use_cached_discovery())
 
     def test_requested_bench_query_is_scoped(self):
         config = self._config(Path(tempfile.mkdtemp()))
@@ -103,6 +127,31 @@ class RegressionDiscoveryTest(unittest.TestCase):
         query = config._build_vcomp_discovery_query()
 
         self.assertIn('filter(":soc_tb$", kind(dv_tb, //benches/...))', query)
+
+    def test_cache_manifest_tracks_requested_bench_query(self):
+        config = self._config(Path(tempfile.mkdtemp()))
+        initial = config._discovery_dependency_manifest()
+
+        config.options.tests[0].btiglob = "other_tb:*"
+
+        self.assertNotEqual(initial, config._discovery_dependency_manifest())
+
+    def test_cache_manifest_tracks_allow_no_run(self):
+        config = self._config(Path(tempfile.mkdtemp()))
+        initial = config._discovery_dependency_manifest()
+
+        config.options.allow_no_run = True
+
+        self.assertNotEqual(initial, config._discovery_dependency_manifest())
+
+    def test_test_cfg_query_uses_the_public_macro_identity(self):
+        config = self._config(Path(tempfile.mkdtemp()))
+
+        query = config._build_test_cfg_query("//benches/soc_tb:soc_tb")
+
+        self.assertIn("attr(generator_function, verilog_dv_test_cfg,", query)
+        self.assertNotIn("dv_test_cfg_rule", query)
+        self.assertNotIn("base_cfg", query)
 
     def test_discovery_batches_cquery_and_build(self):
         proj_dir = Path(tempfile.mkdtemp())
@@ -119,10 +168,8 @@ class RegressionDiscoveryTest(unittest.TestCase):
             if cmd[:2] == ["bazel", "cquery"]:
                 return 0, "//benches/soc_tb/tests:dma_single_transfer (abc1234)\n", ""
             if cmd[:2] == ["bazel", "build"]:
-                return 0, "", (
-                    "verilog_dv_test_cfg_info(@//benches/soc_tb/tests:dma_single_transfer, "
-                    "@//benches/soc_tb:soc_tb, ['smoke'], VCS)\n"
-                )
+                return 0, "", ("verilog_dv_test_cfg_info(@//benches/soc_tb/tests:dma_single_transfer, "
+                               "@//benches/soc_tb:soc_tb, ['smoke'], VCS)\n")
             raise AssertionError("Unexpected command: {!r}".format(cmd))
 
         config._run_command = fake_run_command
@@ -150,8 +197,47 @@ class RegressionDiscoveryTest(unittest.TestCase):
             config.tests_to_simulator,
         )
         self.assertEqual(
-            {"//benches/soc_tb:soc_tb": {"//benches/soc_tb/tests:dma_single_transfer": 0}},
+            {"//benches/soc_tb:soc_tb": {
+                "//benches/soc_tb/tests:dma_single_transfer": 0
+            }},
             config.all_vcomp,
+        )
+
+    @mock.patch("lib.regression.subprocess.run")
+    def test_profiled_bazel_command_records_repositories_and_cleans_trace(self, run):
+        proj_dir = Path(tempfile.mkdtemp())
+        config = self._config(proj_dir)
+        config.options.simmer_profile = True
+        config.regression_dir = str(proj_dir)
+        config.profile_events = []
+        config._bazel_profile_index = 0
+
+        def create_profile(command, **_kwargs):
+            profile_arg = next(argument for argument in command if argument.startswith("--profile="))
+            profile_path = profile_arg.split("=", 1)[1]
+            Path(profile_path).write_text(json.dumps({
+                "traceEvents": [{
+                    "ph": "X",
+                    "cat": "repository",
+                    "name": "Repository rule @third_party_ip",
+                    "dur": 1_250_000,
+                }],
+            }),
+                                          encoding="utf-8")
+            return SimpleNamespace(returncode=0, stdout="ok", stderr="")
+
+        run.side_effect = create_profile
+
+        self.assertEqual((0, "ok", ""), config._run_command(["bazel", "query", "//..."]))
+
+        command = run.call_args.args[0]
+        self.assertEqual("query", command[1])
+        self.assertTrue(command[2].startswith("--profile="))
+        self.assertFalse(Path(command[2].split("=", 1)[1]).exists())
+        self.assertTrue(any(name == "bazel_query" for _, name, _ in config.profile_events))
+        self.assertIn(
+            (1.25, "external_repo: third_party_ip", "query; 1 repository event(s)"),
+            config.profile_events,
         )
 
     def test_missing_discovery_cache_fails(self):
@@ -164,12 +250,23 @@ class RegressionDiscoveryTest(unittest.TestCase):
     def test_init_creates_deferred_messages_with_cached_discovery(self):
         proj_dir = Path(tempfile.mkdtemp())
         results_dir = proj_dir / "results"
+        cache_dir = proj_dir / ".simmer" / "cache"
+        cache_dir.mkdir(parents=True)
         for filename, payload in {
-            "all_vcomp.json": {"//benches/soc_tb:soc_tb": {"//benches/soc_tb/tests:dma_single_transfer": 1}},
-            "tests_to_tags.json": {"//benches/soc_tb/tests:dma_single_transfer": []},
-            "tests_to_simulator.json": {"//benches/soc_tb/tests:dma_single_transfer": "VCS"},
+                "all_vcomp.json": {
+                    "//benches/soc_tb:soc_tb": {
+                        "//benches/soc_tb/tests:dma_single_transfer": 1
+                    }
+                },
+                "tests_to_tags.json": {
+                    "//benches/soc_tb/tests:dma_single_transfer": []
+                },
+                "tests_to_simulator.json": {
+                    "//benches/soc_tb/tests:dma_single_transfer": "VCS"
+                },
         }.items():
-            (proj_dir / filename).write_text(json.dumps(payload), encoding="utf-8")
+            (cache_dir / filename).write_text(json.dumps(payload), encoding="utf-8")
+        self._config(proj_dir)._write_discovery_manifest()
 
         options = self._options(proj_dir)
         options.no_bazel = True

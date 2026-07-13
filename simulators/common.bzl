@@ -1,7 +1,11 @@
 # vim: set ft=bzl :
 """Common helpers for simulator repository setup rules."""
 
-VARS = ["PROJ_DIR", "MODULEPATH"]
+def simulator_environment(repository_ctx):
+    return {
+        name: repository_ctx.getenv(name, "")
+        for name in ["MODULEPATH", "PATH", "PROJ_DIR"]
+    }
 
 def dpi_headers_build(headers):
     return """

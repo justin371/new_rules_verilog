@@ -4,7 +4,6 @@ import unittest
 import datetime
 import os
 import signal
-import subprocess
 from pathlib import Path
 from types import SimpleNamespace
 from unittest import mock
@@ -14,11 +13,13 @@ from lib.job_lib import BazelTBJob, BazelTestCfgJob, Job, JobManager, JobStatus,
 
 
 class _Logger:
+
     def __getattr__(self, _):
         return lambda *args, **kwargs: None
 
 
 class _SummaryLogger(_Logger):
+
     def __init__(self):
         self.messages = []
 
@@ -29,14 +30,16 @@ class _SummaryLogger(_Logger):
 
 
 class _FakeTimedJob:
+
     def __init__(self, name, status, seconds=0):
         self.name = name
         self.jobstatus = status
         self.job_time = seconds
+        self.simulation_duration_s = seconds
         self.vcomper = None
         self.log_path = ""
 
-    def _get_total_time_str(self):
+    def _get_job_time_str(self):
         return "0:00:{:02d}".format(self.job_time)
 
 
@@ -53,19 +56,40 @@ class _RecordingRunner:
 
 
 class _FailingPreRunJob(Job):
+
     def pre_run(self):
         super().pre_run()
         raise SystemExit("missing simv")
 
 
 class _FailingRunner:
+
     def __init__(self, _job, _manager):
         raise OSError("failed to launch")
 
 
 class _FailingPostRunJob(Job):
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.recorded_post_run_failure = None
+
     def post_run(self):
         raise RuntimeError("failed to collect results")
+
+    def post_run_failed(self, exc):
+        self.recorded_post_run_failure = str(exc)
+
+
+class _ExitedProcess:
+    pid = 123
+    returncode = 0
+
+    def poll(self):
+        return self.returncode
+
+    def wait(self):
+        return self.returncode
 
 
 class _RunningProcess:
@@ -77,6 +101,15 @@ class _RunningProcess:
 
 
 class JobManagerLaunchTest(unittest.TestCase):
+
+    def test_default_results_directory_uses_xdg_state_home(self):
+        project_dir = tempfile.mkdtemp()
+        state_dir = tempfile.mkdtemp()
+        with mock.patch.dict(os.environ, {"XDG_STATE_HOME": state_dir, "SIMRESULTS": ""}, clear=False):
+            result_dir = rv_utils.calc_simresults_location(project_dir)
+
+        self.assertTrue(result_dir.startswith(os.path.join(state_dir, "simmer")))
+
     def test_bazel_tb_job_builds_runfiles_without_running_dummy_executable(self):
         log = _Logger()
         rcfg = SimpleNamespace(options=SimpleNamespace(timeout=1, no_compile=False, no_bazel=False), log=log)
@@ -135,6 +168,8 @@ class JobManagerLaunchTest(unittest.TestCase):
         finally:
             manager.stop()
 
+        self.assertFalse(manager.exited_prematurely)
+
     def test_pre_run_failure_fails_job_without_killing_scheduler(self):
         log = _Logger()
         rcfg = SimpleNamespace(options=SimpleNamespace(timeout=1), log=log)
@@ -159,7 +194,8 @@ class JobManagerLaunchTest(unittest.TestCase):
 
     def test_runner_launch_failure_fails_job_without_killing_scheduler(self):
         log = _Logger()
-        rcfg = SimpleNamespace(options=SimpleNamespace(timeout=1), log=log)
+        result_run = {"launch_failures": []}
+        rcfg = SimpleNamespace(options=SimpleNamespace(timeout=1), log=log, simmer_results_run=result_run)
         job = Job(rcfg, "vcomp")
         job.job_dir = str(Path(tempfile.mkdtemp()) / "vcomp")
         manager = JobManager({"idle_print_seconds": 60, "quit_count": 1}, log)
@@ -170,6 +206,7 @@ class JobManagerLaunchTest(unittest.TestCase):
             manager.wait()
             self.assertEqual(JobStatus.FAILED, job.jobstatus)
             self.assertIn(job, manager._done)
+            self.assertEqual("failed to launch", result_run["launch_failures"][0]["error_message"])
         finally:
             manager.stop()
 
@@ -185,6 +222,7 @@ class JobManagerLaunchTest(unittest.TestCase):
             manager.add_job(job)
             manager.wait()
             self.assertEqual(JobStatus.FAILED, job.jobstatus)
+            self.assertEqual("failed to collect results", job.recorded_post_run_failure)
         finally:
             manager.stop()
 
@@ -200,14 +238,15 @@ class JobManagerLaunchTest(unittest.TestCase):
         runner.job = job
         runner.log = _Logger()
         runner._p = _RunningProcess()
+        runner._process_group_id = 456
         runner._start_time = datetime.datetime.now() - datetime.timedelta(hours=1)
         runner._timed_out = False
         runner._term_deadline = None
         runner._kill_sent = False
 
-        with mock.patch("lib.job_lib.os.getpgid", return_value=456, create=True), mock.patch(
-            "lib.job_lib.os.killpg", create=True
-        ) as killpg, mock.patch("lib.job_lib.signal.SIGKILL", 9, create=True):
+        with mock.patch("lib.job_lib.os.killpg", create=True) as killpg, mock.patch("lib.job_lib.signal.SIGKILL",
+                                                                                    9,
+                                                                                    create=True):
             self.assertFalse(runner._check_for_done())
             runner._term_deadline = datetime.datetime.now() - datetime.timedelta(seconds=1)
             self.assertFalse(runner._check_for_done())
@@ -217,6 +256,61 @@ class JobManagerLaunchTest(unittest.TestCase):
             killpg.call_args_list,
         )
         self.assertEqual(-signal.SIGTERM, runner.returncode)
+
+    def test_timed_out_runner_kills_process_group_after_shell_exits(self):
+        runner = SubprocessJobRunner.__new__(SubprocessJobRunner)
+        runner.job = SimpleNamespace(suppress_output=False,
+                                     rcfg=SimpleNamespace(options=SimpleNamespace(no_stdout=False)))
+        runner.log = _Logger()
+        runner._p = _ExitedProcess()
+        runner._process_group_id = 456
+        runner._timed_out = True
+        runner._term_deadline = datetime.datetime.now() - datetime.timedelta(seconds=1)
+        runner._kill_sent = False
+
+        with mock.patch("lib.job_lib.os.killpg") as killpg:
+            self.assertTrue(runner._check_for_done())
+
+        killpg.assert_called_once_with(456, signal.SIGKILL)
+
+    def test_runner_exception_kills_and_reaps_process_group(self):
+        runner = SubprocessJobRunner.__new__(SubprocessJobRunner)
+        runner.done = False
+        runner.job = SimpleNamespace(suppress_output=False,
+                                     rcfg=SimpleNamespace(options=SimpleNamespace(no_stdout=False)))
+        runner.log = _Logger()
+        runner._p = _ExitedProcess()
+        runner._process_group_id = 456
+        runner._check_for_done = mock.Mock(side_effect=RuntimeError("poll failed"))
+
+        with mock.patch("lib.job_lib.os.killpg") as killpg, mock.patch.object(runner._p, "wait",
+                                                                              wraps=runner._p.wait) as wait:
+            self.assertTrue(runner.check_for_done())
+
+        killpg.assert_called_once_with(456, signal.SIGKILL)
+        wait.assert_called_once_with()
+
+    def test_test_timeout_waits_for_simulation_start_marker(self):
+        job_dir = Path(tempfile.mkdtemp())
+        marker = job_dir / "simulation_started"
+        job = SimpleNamespace(
+            timeout=0.001,
+            timeout_start_path=str(marker),
+            suppress_output=False,
+            job_dir=str(job_dir),
+            rcfg=SimpleNamespace(options=SimpleNamespace(no_stdout=False)),
+        )
+        runner = SubprocessJobRunner.__new__(SubprocessJobRunner)
+        runner.job = job
+        runner.log = _Logger()
+        runner._p = _RunningProcess()
+        runner._start_time = datetime.datetime.now() - datetime.timedelta(hours=1)
+        runner._timed_out = False
+        runner._term_deadline = None
+        runner._kill_sent = False
+
+        self.assertFalse(runner._check_for_done())
+        self.assertFalse(runner._timed_out)
 
     def test_simmer_profile_prints_phase_and_job_details(self):
         log = _SummaryLogger()
@@ -242,24 +336,7 @@ class JobManagerLaunchTest(unittest.TestCase):
         self.assertIn("cmd: echo profiled", output)
         self.assertIn("test_discovery_match", output)
 
-    def test_coverage_imc_command_preserves_paths_with_spaces(self):
-        log = _Logger()
-        rcfg = SimpleNamespace(options=SimpleNamespace(coverage=True), log=log)
-        job = SimpleNamespace(cov_work_dir="/tmp/path with spaces")
-        failed = SimpleNamespace(returncode=1, stderr="failed")
-
-        with mock.patch("lib.rv_utils.subprocess.run", return_value=failed) as run:
-            rv_utils.get_coverage_data(rcfg, {"//pkg:sys_tb": job})
-
-        run.assert_called_once_with(
-            ["runmod", "xrun", "--", "imc", "-exec",
-             os.path.join(job.cov_work_dir, "imc_report.tcl"), "-verbose"],
-            stdout=subprocess.PIPE,
-            stderr=subprocess.PIPE,
-            text=True,
-        )
-
-    def test_summary_leaves_max_job_time_blank_for_skipped_tests(self):
+    def test_summary_leaves_max_sim_time_blank_for_skipped_tests(self):
         log = _SummaryLogger()
         vcomp = SimpleNamespace(name="sys_tb", jobstatus=JobStatus.PASSED, log_path="cmp.log")
         skipped = _FakeTimedJob("skipped_test", JobStatus.SKIPPED)
@@ -277,6 +354,97 @@ class JobManagerLaunchTest(unittest.TestCase):
         rv_utils.print_summary(rcfg, {"//pkg:sys_tb": vcomp}, manager, trd)
 
         self.assertIn(("", "skipped_test", "", "", "1", "", "1", "", ""), trd)
+
+    def test_simulation_summary_does_not_count_compile_job(self):
+        log = _SummaryLogger()
+        vcomp = SimpleNamespace(name="sys_tb", jobstatus=JobStatus.PASSED, log_path="cmp.log")
+        passed = _FakeTimedJob("smoke", JobStatus.PASSED, seconds=1)
+        passed.vcomper = vcomp
+        passed.target = "//pkg/tests:smoke"
+        icfg = SimpleNamespace(target=1, jobs=[passed])
+        rcfg = SimpleNamespace(
+            all_vcomp={"//pkg:sys_tb": ([icfg], [passed])},
+            options=SimpleNamespace(no_run=False, report=False, nt=False),
+            tests_to_tags={},
+            category_total_cases={},
+            log=log,
+        )
+
+        trd = []
+        rv_utils.print_summary(rcfg, {"//pkg:sys_tb": vcomp}, SimpleNamespace(exited_prematurely=False), trd)
+
+        simulation_summary = next(message for message in log.messages if message.startswith("Simulation Summary"))
+        self.assertRegex(simulation_summary, r"\b1\s+0\s+0\s+1\b")
+        self.assertIn(("", "smoke", "0:00:01", "1", "", "", "1", "", ""), trd)
+
+    def test_category_stats_use_full_target_and_preserve_numeric_test_names(self):
+        matching = _FakeTimedJob("reset_1", JobStatus.PASSED)
+        matching.target = "//block_a/tests:reset_1"
+        other = _FakeTimedJob("reset_1", JobStatus.FAILED)
+        other.target = "//block_b/tests:reset_1"
+        rcfg = SimpleNamespace(
+            all_vcomp={
+                "//block_a:tb": ([SimpleNamespace(jobs=[matching])], [matching]),
+                "//block_b:tb": ([SimpleNamespace(jobs=[other])], [other]),
+            },
+            category_total_cases={"smoke": {
+                "total": 1,
+                "tags": ["smoke"]
+            }},
+            options=SimpleNamespace(no_run=False),
+            tests_to_tags={
+                matching.target: ["smoke"],
+                other.target: ["nightly"],
+            },
+        )
+
+        self.assertEqual({"smoke": {"total": 1, "executed": 1, "passed": 1}}, rv_utils.calc_category_stats(rcfg))
+
+    def test_category_stats_do_not_count_skipped_test_as_executed(self):
+        skipped = _FakeTimedJob("smoke", JobStatus.SKIPPED)
+        skipped.target = "//block/tests:smoke"
+        rcfg = SimpleNamespace(
+            all_vcomp={"//block:tb": ([SimpleNamespace(jobs=[skipped])], [skipped])},
+            category_total_cases={"smoke": {
+                "total": 1,
+                "tags": ["smoke"]
+            }},
+            options=SimpleNamespace(no_run=False),
+            tests_to_tags={skipped.target: ["smoke"]},
+        )
+
+        self.assertEqual({"smoke": {"total": 1, "executed": 0, "passed": 0}}, rv_utils.calc_category_stats(rcfg))
+
+    def test_missing_category_config_does_not_fabricate_totals(self):
+        with tempfile.TemporaryDirectory() as temporary_dir:
+            missing = os.path.join(temporary_dir, "missing.json")
+
+            with self.assertRaises(FileNotFoundError):
+                rv_utils.load_category_total_cases(missing)
+
+    def test_report_header_tolerates_missing_tags_and_normalizes_git_suffix(self):
+        rcfg = SimpleNamespace(
+            current_time="20260711_120000_000001",
+            options=SimpleNamespace(simulator="VCS"),
+            proj_dir="/tmp/fallback_project",
+        )
+
+        def git_output(_cwd, *args):
+            values = {
+                ("rev-parse", "HEAD"): "deadbeef",
+                ("remote", "get-url", "origin"): "git@github.com:example/digit.git",
+                ("rev-parse", "--abbrev-ref", "HEAD"): "main",
+                ("describe", "--tags", "--exact-match"): "",
+                ("rev-parse", "--short", "HEAD"): "deadbee",
+            }
+            return values.get(args, "")
+
+        with mock.patch("lib.rv_utils._git_output", side_effect=git_output):
+            header = rv_utils.get_report_header(rcfg)
+
+        self.assertEqual("digit", header["project_name"])
+        self.assertEqual("", header["tag"])
+        self.assertEqual("https://github.com/example/digit/commit/deadbeef", header["commit"])
 
 
 if __name__ == "__main__":

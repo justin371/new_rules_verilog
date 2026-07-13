@@ -4,10 +4,14 @@ on:
   pull_request:
     paths:
       - ".bazelrc"
+      - ".bazelversion"
       - ".github/workflows/**"
+      - "README.md"
       - "BUILD"
       - "WORKSPACE"
+      - "docs/**"
       - "requirements.txt"
+      - "env.sh"
       - "**/*.bzl"
       - "**/BUILD"
       - "bin/**"
@@ -23,18 +27,15 @@ jobs:
     name: Bazel Tests
     runs-on: ubuntu-latest
     env:
-      USE_BAZEL_VERSION: "6.5.0"
+      USE_BAZEL_VERSION: "7.7.1"
     steps:
       - name: checkout
         uses: actions/checkout@v4
 
       - uses: actions/setup-python@v5
         with:
-          python-version: "3.11"
+          python-version: "3.12"
 
-      - name: install-python-dependencies
-        run: python -m pip install -r requirements.txt
-      
       - name: install-bazelisk
         uses: vsco/bazelisk-action@170327f90b7b6c4364a97741d6e64f888d76bcb5
         with:
@@ -43,4 +44,32 @@ jobs:
           os: 'linux'
 
       - name: run-bazel-checks
-        run: bazel test --test_output=errors //:buildifier_test //tests:all //tests/vcs_filelist_validation:all
+        run: |
+          bazel test --test_output=errors //:buildifier_diff //tests/... //examples/dpi:dpi_c_test
+          bazel run //:buildifier_lint
+
+      - name: check-generated-docs
+        run: ./tests/doc_test.sh
+
+  redhat-smoke:
+    name: Red Hat-compatible smoke
+    runs-on: ubuntu-latest
+    container: rockylinux:9
+    env:
+      USE_BAZEL_VERSION: "7.7.1"
+    steps:
+      - name: install-system-dependencies
+        run: dnf install -y gcc gcc-c++ git gzip python3.12 tar unzip which zip
+
+      - name: checkout
+        uses: actions/checkout@v4
+
+      - name: install-bazelisk
+        uses: vsco/bazelisk-action@170327f90b7b6c4364a97741d6e64f888d76bcb5
+        with:
+          version: '1.7.5'
+          bazel-install-path: '${{ runner.temp }}/bazelisk-bin'
+          os: 'linux'
+
+      - name: run-redhat-smoke
+        run: ./tests/redhat_smoke.sh

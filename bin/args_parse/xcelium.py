@@ -4,135 +4,123 @@ from .common import COVFILE
 
 
 def add_xcelium_arguments(parser):
-    gxrun = parser.add_argument_group("Xcelium arguments")
-    gxrun.add_argument('--profile',
-                       default=False,
-                       action='store_true',
-                       help='Dump simulation profiling information to file. (Cadence only.)')
-    gxrun.add_argument('--mce',
-                       default=False,
-                       action='store_true',
-                       help='Multicore license enable for XRUN. Only used for Gatesim!')
+    gxrun = parser.add_argument_group(
+        "Xcelium arguments",
+        "XRUN-only controls. Source the Cadence environment first. Explicit XRUN options are rejected when the selected backend is VCS."
+    )
+    gxrun.add_argument(
+        '--wave-delta',
+        default=False,
+        action='store_true',
+        help='Include delta-cycle activity in generated XRUN SHM waveform probes. Requires --waves --wave-type shm.')
+    gxrun.add_argument(
+        '--probe-packed',
+        type=int,
+        default=128,
+        help='Set the XRUN probe limit for packed arrays (default: 128). Used only with generated waveform probes.')
+    gxrun.add_argument(
+        '--probe-unpacked',
+        type=int,
+        default=128,
+        help='Set the XRUN probe limit for unpacked arrays (default: 128). Used only with generated waveform probes.')
+    gxrun.add_argument(
+        '--profile',
+        default=False,
+        action='store_true',
+        help='Pass -profile to XRUN simulation and retain the Cadence profiling output in the test result directory.')
+    gxrun.add_argument(
+        '--mce',
+        default=False,
+        action='store_true',
+        help=('Enable XRUN Multicore Engine for compile and simulation. Requires MCE licenses; xprop is ignored and '
+              'MSIE or emulator modes are rejected.'))
     gxrun.add_argument('--mce-build-count',
                        type=int,
                        default=4,
-                       help=("Number of threads to be used for mce elaboration. "
-                             "0 means a full range, used with --mce"))
+                       help=('Set XRUN MCE build thread count (default: 4; 0 lets XRUN use the configuration range). '
+                             'Requires --mce.'))
     gxrun.add_argument('--mce-build-cfg',
                        type=str,
                        default='single-socket',
                        choices=['single-socket', 'all-cores'],
-                       help="The number of cores to be used for build, used with --mce")
-    gxrun.add_argument('--mce-sim-count',
-                       type=int,
-                       default=4,
-                       help=("Number of threads to be used for mce simulation. "
-                             "0 means a full range, used with --mce"))
+                       help='Select the XRUN MCE build CPU topology (default: single-socket). Requires --mce.')
+    gxrun.add_argument(
+        '--mce-sim-count',
+        type=int,
+        default=4,
+        help=('Set XRUN MCE simulation thread count (default: 4; 0 lets XRUN use the configuration range). '
+              'Requires --mce; simmer adjusts job concurrency for this count.'))
     gxrun.add_argument('--mce-sim-cfg',
                        type=str,
                        default='single-socket',
                        choices=['single-socket', 'single-threaded', 'partial-socket', 'all-cores'],
-                       help="The number of cores to be used for sim, used with --mce")
+                       help='Select the XRUN MCE simulation CPU topology (default: single-socket). Requires --mce.')
     gxrun.add_argument('--mce-split-max-size',
                        type=int,
                        default=500000,
-                       help=("Size of spilt to be used for mce sim. "
-                             "used with --mce"))
+                       help='Set the positive XRUN MCE partition split-size limit (default: 500000). Requires --mce.')
     gxrun.add_argument('--coverage',
                        action=parser_actions.CovAction,
-                       help=f'Enable Code Coverage for xcelium only.\n{parser_actions.CovAction.format_options(indent=0)}')
-    gxrun.add_argument('--covfile', default=COVFILE, help='Path to Coverage configuration file')
-    gxrun.add_argument('--msie',
-                       type=str,
-                       default=None,
-                       nargs='?',
-                       const='tb_top',
-                       help='Incremental compile single_step(auto) mode\n'
-                       'Need user create incr_pkg.sv in benches/tb_name/tests \n'
-                       'incr_pkg.svh is used to include tests. eg: \n'
-                       'module incr_pkg;\n'
-                       '  import uvm_pkg::*;\n'
-                       '  `include"base_test.svh"\n'
-                       '  `include"sw_test.svh"\n'
-                       'endmodule\n')
-    gxrun.add_argument('--msie-href',
-                       type=str,
-                       nargs='?',
-                       const='tb_top',
-                       default=None,
-                       help='Gen href in benches/tb_name/hdl/href.txt \n'
-                       'Need define prim top, default is tb_top'
-                       'eg. --msie-href pcpu')
-    gxrun.add_argument('--msie-prim',
-                       type=str,
-                       nargs='?',
-                       const='tb_top',
-                       default=None,
-                       help='Compile prim lib, need define prim top, default is tb_top')
-    gxrun.add_argument('--msie-incr',
-                       type=str,
-                       nargs='?',
-                       default=None,
-                       help='Compile incr, need define prim top, default is tb_top')
-    gxrun.add_argument('--emulator',
-                       type=str,
-                       default='',
-                       choices=['pldm_sa', 'pldm_sim', 'sim', 'clean'],
-                       help=('Declares the platform to use for compile and emulation.\n'
-                             'pldm_sa: clean the database, run palladium synthesis, tb compilation, then run the cases\n'
-                             'pldm_sim: kept the synthesis database, run palladium tb compilation, then run the cases\n'
-                             'sim: without palladium synthesis, compile the emualtion env with simulator, then run the cases with simulator\n'
-                             'clean: clean the synthesis database\n'))
-
-
-def validate_xcelium_switches_for_vcs(options, parser):
-    xcelium_only_switches = []
-    if options.profile:
-        xcelium_only_switches.append('--profile')
-    if options.mce:
-        xcelium_only_switches.append('--mce')
-    if options.mce_build_count != 4:
-        xcelium_only_switches.append('--mce-build-count')
-    if options.mce_build_cfg != 'single-socket':
-        xcelium_only_switches.append('--mce-build-cfg')
-    if options.mce_sim_count != 4:
-        xcelium_only_switches.append('--mce-sim-count')
-    if options.mce_sim_cfg != 'single-socket':
-        xcelium_only_switches.append('--mce-sim-cfg')
-    if options.mce_split_max_size != 500000:
-        xcelium_only_switches.append('--mce-split-max-size')
-    if options.coverage:
-        xcelium_only_switches.append('--coverage')
-    if options.covfile != COVFILE:
-        xcelium_only_switches.append('--covfile')
-    if options.msie is not None:
-        xcelium_only_switches.append('--msie')
-    if options.msie_href is not None:
-        xcelium_only_switches.append('--msie-href')
-    if options.msie_prim is not None:
-        xcelium_only_switches.append('--msie-prim')
-    if options.msie_incr is not None:
-        xcelium_only_switches.append('--msie-incr')
-    if options.emulator:
-        xcelium_only_switches.append('--emulator')
-    if xcelium_only_switches:
-        parser.error(
-            "The following switches are Xcelium-only and cannot be used with VCS: {}. "
-            "Stopping before Bazel starts.".format(", ".join(xcelium_only_switches)))
-
-
-def validate_xcelium_runtime_options(options, parser):
-    if options.gui:
-        parser.error("Xcelium supports batch mode only; --gui is allowed only with VCS. Stopping before Bazel starts.")
-    if options.waves is not None:
-        if options.wave_type is None:
-            options.wave_type = 'vwdb'
-        if options.wave_type not in ['shm', 'vcd', 'vwdb']:
-            parser.error("Xcelium supports only --wave-type shm, vcd, or vwdb. Stopping before Bazel starts.")
-
-
-def apply_xcelium_postprocess(options):
-    if options.msie_href is not None:
-        options.no_run = True
-    if options.msie_prim is not None:
-        options.no_run = True
+                       help=(f'Enable XRUN coverage collection and generate the IMC merge/report flow.\n'
+                             f'Use A for all metrics or join metrics with a colon, for example B:E:F:T:U.\n'
+                             f'{parser_actions.CovAction.format_options(indent=0)}'))
+    gxrun.add_argument(
+        '--covfile',
+        default=COVFILE,
+        help=('Pass an existing Xcelium coverage configuration file. An explicitly supplied path requires '
+              '--coverage and is validated before Bazel starts; otherwise the testbench xcelium_covfile is preferred.'))
+    gxrun.add_argument(
+        '--msie',
+        metavar='PRIMARY_TOP',
+        help=('Enable XRUN single-step MSIE for the named stable primary top. Preparation: configure the complete '
+              'testbench in verilog_dv_tb.deps; XRUN partitions that command automatically. This mode does not use '
+              'the multi-step primary/incremental deps; xprop is ignored and MCE or emulator modes are rejected.'))
+    gxrun.add_argument(
+        '--msie-href',
+        metavar='PRIMARY_TOP',
+        help=('Run the first multi-step MSIE stage for the named stable DUT/netlist top, generate href and externs '
+              'under <tb>__XRUN_VCOMP_MSIE, then stop. Preparation: configure the complete model in '
+              'verilog_dv_tb.deps. Run this before --msie-prim; xprop is ignored and other MSIE modes, MCE, or '
+              'emulator are rejected.'))
+    gxrun.add_argument(
+        '--msie-prim',
+        metavar='PRIMARY_TOP',
+        help=('Run the second multi-step MSIE stage for the named stable DUT/netlist top, then stop. Preparation: '
+              'configure verilog_dv_tb.msie_primary_deps and complete --msie-href for the same target first. The '
+              'snapshot name defaults to PRIMARY_TOP and can be changed with --msie-primary-name.'))
+    gxrun.add_argument(
+        '--msie-incr',
+        type=str,
+        metavar='PRIMARY_SNAPSHOT',
+        default=None,
+        help=('Run the final multi-step MSIE stage and simulations against PRIMARY_SNAPSHOT. Preparation: configure '
+              'verilog_dv_tb.msie_incremental_deps and complete matching href/primary stages in the same regression '
+              'directory. Simmer validates the primary manifest before XRUN starts.'))
+    gxrun.add_argument(
+        '--msie-primary-name',
+        metavar='SNAPSHOT',
+        help=('Name the snapshot created by --msie-prim independently from its HDL top. Use the same value as the '
+              'later --msie-incr argument; for example, top dut with snapshot dut_sdf_wc.'))
+    gxrun.add_argument(
+        '--msie-primary-top',
+        metavar='PRIMARY_TOP',
+        help=('Override the primary HDL top expected by --msie-incr. The default is the selected verilog_dv_tb '
+              'dut_top value; set this only when the primary build used a different top.'))
+    gxrun.add_argument(
+        '--msie-primary-key',
+        metavar='KEY',
+        default='',
+        help=('Add an immutable site key to the primary compatibility manifest for --msie-prim/--msie-incr. Include '
+              'the Xcelium release, netlist release and gatesim corner when those identities are not encoded by the '
+              'Bazel target, for example XCELIUM-25.03:netlist-r42:sdf_wc.'))
+    gxrun.add_argument(
+        '--emulator',
+        type=str,
+        default='',
+        choices=['pldm_sa', 'pldm_sim', 'sim', 'clean'],
+        help=
+        ('Select the project-provided Xcelium/Palladium template flow. Requires EMU_JINJA2_PATH and site runtime libraries.\n'
+         'pldm_sa: clean the database, run Palladium synthesis and TB compile, then run tests.\n'
+         'pldm_sim: reuse synthesis output, compile the Palladium TB, then run tests.\n'
+         'sim: compile and run the emulation environment with XRUN without Palladium synthesis.\n'
+         'clean: run the project clean flow. Emulator modes cannot be combined with MCE or MSIE.'))

@@ -1,7 +1,14 @@
+load("@pip_deps//:requirements.bzl", "requirement")
+
 # vim: set ft=bzl :
 load("@rules_python//python:defs.bzl", "py_binary", "py_library")
 
 package(default_visibility = ["//visibility:public"])
+
+filegroup(
+    name = "regression_report_templates",
+    srcs = glob(["templates/regression_report_templates/*.html.j2"]),
+)
 
 exports_files([
     "lint_parser_vcs.py",
@@ -12,7 +19,10 @@ exports_files([
 py_binary(
     name = "lint_parser_hal",
     srcs = ["lint_parser_hal.py"],
-    deps = ["//lib:cmn_logging"],
+    deps = [
+        "//lib:cmn_logging",
+        requirement("beautifulsoup4"),
+    ],
 )
 
 py_binary(
@@ -29,47 +39,61 @@ py_binary(
 
 py_binary(
     name = "simmer",
-    data = glob(["templates/**"]),
     srcs = ["simmer.py"],
+    data = glob(["templates/**"]),
     deps = [
-        "//bin:check_test",
         "//bin:args_parser",
+        "//bin:check_test",
         "//lib:cmn_logging",
+        "//lib:compile_cache",
         "//lib:job_lib",
         "//lib:parser_actions",
         "//lib:regression",
-        "//lib:rv_utils",
-        "//lib:runtime_options",
-        "//lib:simmer_results",
-        "//lib/simulators:simulators",
         "//lib:regression_report",
+        "//lib:runtime_options",
+        "//lib:rv_utils",
+        "//lib:seed_plan",
+        "//lib:sim_artifacts",
+        "//lib:simmer_results",
+        "//lib/simulators",
+        requirement("jinja2"),
     ],
 )
 
 py_library(
     name = "args_parser_lib",
     srcs = [
-        "args_parser.py",
         "args_parse/__init__.py",
         "args_parse/common.py",
         "args_parse/parser.py",
         "args_parse/vcs.py",
         "args_parse/xcelium.py",
+        "args_parser.py",
     ],
-    deps = ["//lib:parser_actions"],
+    deps = [
+        "//lib:parser_actions",
+        "//lib/simulators:options",
+        "//lib/simulators:vcs_options",
+        "//lib/simulators:xcelium_options",
+    ],
 )
 
 py_binary(
     name = "args_parser",
     srcs = [
-        "args_parser.py",
         "args_parse/__init__.py",
         "args_parse/common.py",
         "args_parse/parser.py",
         "args_parse/vcs.py",
         "args_parse/xcelium.py",
+        "args_parser.py",
     ],
-    deps = ["//lib:parser_actions"],
+    deps = [
+        "//lib:parser_actions",
+        "//lib/simulators:options",
+        "//lib/simulators:vcs_options",
+        "//lib/simulators:xcelium_options",
+    ],
 )
 
 py_binary(
@@ -84,5 +108,10 @@ py_library(
 
 py_binary(
     name = "normalize_runfiles_flist",
+    srcs = ["normalize_runfiles_flist.py"],
+)
+
+py_library(
+    name = "normalize_runfiles_flist_lib",
     srcs = ["normalize_runfiles_flist.py"],
 )

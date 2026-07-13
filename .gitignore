@@ -1,6 +1,7 @@
 *~
-bazel-*/
+bazel-*
 __pycache__
 *.pdf
 .bazel_output/**
 .simmer_results.json*
+.simmer/

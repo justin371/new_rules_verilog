@@ -1,4 +1,4 @@
-<!-- Generated with Stardoc: http://skydoc.bazel.build -->
+<!-- Maintained with the public rule definitions in verilog/defs.bzl. -->
 
 Public entry point to all supported Verilog rules and APIs
 
@@ -53,8 +53,8 @@ verilog_dv_library(
 ## verilog_dv_tb
 
 <pre>
-verilog_dv_tb(<a href="#verilog_dv_tb-name">name</a>, <a href="#verilog_dv_tb-ccf">ccf</a>, <a href="#verilog_dv_tb-defines">defines</a>, <a href="#verilog_dv_tb-deps">deps</a>, <a href="#verilog_dv_tb-extra_compile_args">extra_compile_args</a>, <a href="#verilog_dv_tb-extra_runfiles">extra_runfiles</a>, <a href="#verilog_dv_tb-extra_runtime_args">extra_runtime_args</a>,
-              <a href="#verilog_dv_tb-shells">shells</a>, <a href="#verilog_dv_tb-simulator">simulator</a>, <a href="#verilog_dv_tb-warning_waivers">warning_waivers</a>)
+verilog_dv_tb(<a href="#verilog_dv_tb-name">name</a>, <a href="#verilog_dv_tb-ccf">ccf</a>, <a href="#verilog_dv_tb-defines">defines</a>, <a href="#verilog_dv_tb-deps">deps</a>, <a href="#verilog_dv_tb-dut_instance">dut_instance</a>, <a href="#verilog_dv_tb-dut_top">dut_top</a>, <a href="#verilog_dv_tb-extra_compile_args">extra_compile_args</a>, <a href="#verilog_dv_tb-extra_runfiles">extra_runfiles</a>,
+              <a href="#verilog_dv_tb-extra_runtime_args">extra_runtime_args</a>, <a href="#verilog_dv_tb-msie_incremental_deps">msie_incremental_deps</a>, <a href="#verilog_dv_tb-msie_incremental_extra_compile_args">msie_incremental_extra_compile_args</a>, <a href="#verilog_dv_tb-msie_incremental_extra_runfiles">msie_incremental_extra_runfiles</a>, <a href="#verilog_dv_tb-msie_primary_deps">msie_primary_deps</a>, <a href="#verilog_dv_tb-msie_primary_extra_compile_args">msie_primary_extra_compile_args</a>, <a href="#verilog_dv_tb-msie_primary_extra_runfiles">msie_primary_extra_runfiles</a>, <a href="#verilog_dv_tb-run_fail_patterns">run_fail_patterns</a>, <a href="#verilog_dv_tb-run_pass_patterns">run_pass_patterns</a>, <a href="#verilog_dv_tb-shells">shells</a>, <a href="#verilog_dv_tb-simulator">simulator</a>, <a href="#verilog_dv_tb-vcs_cm_hier">vcs_cm_hier</a>, <a href="#verilog_dv_tb-warning_waivers">warning_waivers</a>, <a href="#verilog_dv_tb-xcelium_covfile">xcelium_covfile</a>)
 </pre>
 
 A DV Testbench.
@@ -79,15 +79,27 @@ A DV Testbench.
 | Name  | Description | Type | Mandatory | Default |
 | :------------- | :------------- | :------------- | :------------- | :------------- |
 | <a id="verilog_dv_tb-name"></a>name |  A unique name for this target.   | <a href="https://bazel.build/docs/build-ref.html#name">Name</a> | required |  |
-| <a id="verilog_dv_tb-ccf"></a>ccf |  Coverage configuration file to provider to simmer.   | <a href="https://bazel.build/docs/build-ref.html#labels">List of labels</a> | optional | [] |
+| <a id="verilog_dv_tb-ccf"></a>ccf |  Xcelium coverage configuration file. At most one file is accepted; VCS coverage uses `-cm` options instead.   | <a href="https://bazel.build/docs/build-ref.html#labels">List of labels</a> | optional | [] |
 | <a id="verilog_dv_tb-defines"></a>defines |  Additional preprocessor defines to throw for this testbench compile. Key, value pairs are joined without additional characters. If it is a unary flag, set the value portion to be the empty string. For binary flags, add an '=' as a suffix to the key.   | <a href="https://bazel.build/docs/skylark/lib/dict.html">Dictionary: String -> String</a> | optional | {} |
 | <a id="verilog_dv_tb-deps"></a>deps |  A list of verilog_dv_library or verilog_rtl_library labels that the testbench is dependent on. Dependency ordering within this label list is not necessary if dependencies are consistently declared in all other rules.   | <a href="https://bazel.build/docs/build-ref.html#labels">List of labels</a> | required |  |
+| <a id="verilog_dv_tb-dut_instance"></a>dut_instance |  DUT instance hierarchy used by coverage reports.   | String | optional | `"hdl_top.dut"` |
+| <a id="verilog_dv_tb-dut_top"></a>dut_top |  DUT module name used to scope code coverage.   | String | optional | `"dut"` |
 | <a id="verilog_dv_tb-extra_compile_args"></a>extra_compile_args |  Additional flags to pass to the selected simulator compile/elaboration step.   | List of strings | optional | [] |
 | <a id="verilog_dv_tb-extra_runfiles"></a>extra_runfiles |  Additional files that need to be passed as runfiles to bazel. Most commonly used for files referred to by extra_compile_args or extra_runtime_args.   | <a href="https://bazel.build/docs/build-ref.html#labels">List of labels</a> | optional | [] |
-| <a id="verilog_dv_tb-extra_runtime_args"></a>extra_runtime_args |  Additional flags to pass to selected simulator runs. These flags will not be provided to compilation.   | List of strings | optional | [] |
+| <a id="verilog_dv_tb-extra_runtime_args"></a>extra_runtime_args |  Additional flags passed only to simulator runs. Runtime path arguments should use absolute paths or `bazel_runfiles_main/...` paths.   | List of strings | optional | [] |
+| <a id="verilog_dv_tb-msie_incremental_deps"></a>msie_incremental_deps |  Xcelium MSIE dependencies for the changing testbench/test partition. Configure together with msie_primary_deps.   | <a href="https://bazel.build/docs/build-ref.html#labels">List of labels</a> | optional | [] |
+| <a id="verilog_dv_tb-msie_incremental_extra_compile_args"></a>msie_incremental_extra_compile_args |  Xcelium compile/elaboration flags used only while building the MSIE incremental snapshot.   | List of strings | optional | [] |
+| <a id="verilog_dv_tb-msie_incremental_extra_runfiles"></a>msie_incremental_extra_runfiles |  Files referenced only by msie_incremental_extra_compile_args.   | <a href="https://bazel.build/docs/build-ref.html#labels">List of labels</a> | optional | [] |
+| <a id="verilog_dv_tb-msie_primary_deps"></a>msie_primary_deps |  Xcelium MSIE dependencies for the stable primary DUT/netlist partition. Configure together with msie_incremental_deps.   | <a href="https://bazel.build/docs/build-ref.html#labels">List of labels</a> | optional | [] |
+| <a id="verilog_dv_tb-msie_primary_extra_compile_args"></a>msie_primary_extra_compile_args |  Xcelium compile/elaboration flags used only while building the MSIE primary snapshot.   | List of strings | optional | [] |
+| <a id="verilog_dv_tb-msie_primary_extra_runfiles"></a>msie_primary_extra_runfiles |  Files referenced only by msie_primary_extra_compile_args, such as primary SDF command files.   | <a href="https://bazel.build/docs/build-ref.html#labels">List of labels</a> | optional | [] |
+| <a id="verilog_dv_tb-run_fail_patterns"></a>run_fail_patterns |  Additional regular expressions that identify a failed simulation.   | List of strings | optional | [] |
+| <a id="verilog_dv_tb-run_pass_patterns"></a>run_pass_patterns |  Regular expressions that identify a successful simulation. When set, at least one must match.   | List of strings | optional | [] |
 | <a id="verilog_dv_tb-shells"></a>shells |  List of shells to use. Each label must be a verilog_rtl_shell instance. Each shell thrown will create two defines:  \<code>define gumi_{module} {module}_shell  \</code>define gumi_use_{module}_shell The shell module declaration must be guarded by the gumi_use_{module}_shell define:  \<code>ifdef gumi_use_{module}_shell     module {module}_shell(/*AUTOARGS*/);       ...     endmodule  \</code>endif   | <a href="https://bazel.build/docs/build-ref.html#labels">List of labels</a> | optional | [] |
 | <a id="verilog_dv_tb-simulator"></a>simulator |  Simulator to use for this DV testbench. Supported values are XRUN and VCS. The selected simulator determines which compile/runtime filelists are generated.   | String | optional | `"XRUN"` |
+| <a id="verilog_dv_tb-vcs_cm_hier"></a>vcs_cm_hier |  VCS `-cm_hier` coverage configuration file.   | <a href="https://bazel.build/docs/build-ref.html#labels">Label</a> | optional | None |
 | <a id="verilog_dv_tb-warning_waivers"></a>warning_waivers |  Waive warnings in the compile. By default, simmer promotes all compile warnings to errors. This list is converted to python regular expressions which are imported by simmer to waive warning. All warnings may be waived by using '\*W'   | List of strings | optional | [] |
+| <a id="verilog_dv_tb-xcelium_covfile"></a>xcelium_covfile |  Xcelium coverage configuration file. Replaces the legacy `ccf` attribute.   | <a href="https://bazel.build/docs/build-ref.html#labels">Label</a> | optional | None |
 
 
 <a id="verilog_dv_test_cfg"></a>
@@ -115,9 +127,9 @@ A DV test configuration.
 | <a id="verilog_dv_test_cfg-no_run"></a>no_run |  Set to True to skip running this test. This flag is not used by bazel but is used as a query filter by simmer.TODO: Deprecate this flag in favor of using built-in tags.   | Boolean | optional | False |
 | <a id="verilog_dv_test_cfg-sim_opts"></a>sim_opts |  Additional simulation options. These are 'runtime' arguments. Preprocessor or compiler directives will not take effect. The (key, value) pairs are joined without additional characters.For unary arguments (e.g. +DISABLE_SCOREBOARD), set the value to be the empty string. For arguments with a value (e.g. +UVM_VERBOSITY=UVM_MEDIUM), add an '=' as a suffix to the key. This attribute is inheritable. See 'inherits' attribute. Unlike other inheritable attributes, values in sim_opts are not entirely overridden. Instead, the dictionary is 'updated' with new values at each successive level. This allows for the override of individual simopts for finer-grained control.   | <a href="https://bazel.build/docs/skylark/lib/dict.html">Dictionary: String -> String</a> | optional | {} |
 | <a id="verilog_dv_test_cfg-simulator"></a>simulator |  Simulator to use for this test configuration. Supported values are XRUN and VCS. This attribute is inheritable. If left unspecified, XRUN is used unless the selected tb already fixes the simulator. The resolved simulator must match the associated `verilog_dv_tb`.   | String | optional | `""` |
-| <a id="verilog_dv_test_cfg-sockets"></a>sockets |  Dictionary mapping of socket_name to socket_command. Simmer has the ability to spawn parallel processes to the primary simulation that are connected via sockets. For each entry in the dictionary, simmer will create a separate process and pass a unique temporary file path to both the simulator and the socket_command. The socket name is a short identifier that will be passed as "+SOCKET__&lt;socket_name&gt;=&lt;socket_file&gt;" to the simulator. The socket_file is a path to a unique temporary file in the simulation results directory created by simmer. The socket_command is a bash command that must contain a python string formatter of "{socket_file}". The socket_command will be run from the root of the project tree.   | <a href="https://bazel.build/docs/skylark/lib/dict.html">Dictionary: String -> String</a> | optional | {} |
+| <a id="verilog_dv_test_cfg-sockets"></a>sockets |  Dictionary mapping of socket_name to socket_command. Simmer has the ability to spawn parallel processes to the primary simulation that are connected via sockets. For each entry in the dictionary, simmer will create a separate process and pass a unique temporary file path to both the simulator and the socket_command. The socket name must match [A-Za-z_][A-Za-z0-9_]* and is passed as "+SOCKET__&lt;socket_name&gt;=&lt;socket_file&gt;" to the simulator. The socket_file is a path to a unique temporary file in the simulation results directory created by simmer. The socket_command is a bash command that must contain the literal placeholder "{socket_file}"; other shell braces are preserved. The socket_command will be run from the root of the project tree.   | <a href="https://bazel.build/docs/skylark/lib/dict.html">Dictionary: String -> String</a> | optional | {} |
 | <a id="verilog_dv_test_cfg-tb"></a>tb |  The testbench to run this test on. This label must be a 'verilog_dv_tb' target.This attribute is inheritable. See 'inherits' attribute. Future: Allow tb to be a list of labels to allow a test to run on multiple verilog_dv_tb   | <a href="https://bazel.build/docs/build-ref.html#labels">Label</a> | optional | None |
-| <a id="verilog_dv_test_cfg-timeout"></a>timeout |  Duration in minutes before the test will be killed due to timeout. This option is inheritable.   | Integer | optional | -1 |
+| <a id="verilog_dv_test_cfg-timeout"></a>timeout |  Main simulation timeout in minutes, excluding socket and pre-run setup. This option is inheritable. Use -1 to inherit, 0 to disable, or a positive value to set a timeout.   | Integer | optional | -1 |
 | <a id="verilog_dv_test_cfg-uvm_testname"></a>uvm_testname |  UVM testname eventually passed to simulator via plusarg +UVM_TESTNAME. This attribute is inheritable. See 'inherits' attribute.   | String | optional | "" |
 | <a id="verilog_dv_test_cfg-description"></a>description |  The test simulation scenarios. (e.g. description = """ This is the test description """, )  | String | optional | None |
 
@@ -127,7 +139,7 @@ A DV test configuration.
 ## verilog_dv_unit_test
 
 <pre>
-verilog_dv_unit_test(<a href="#verilog_dv_unit_test-name">name</a>, <a href="#verilog_dv_unit_test-default_sim_opts">default_sim_opts</a>, <a href="#verilog_dv_unit_test-deps">deps</a>, <a href="#verilog_dv_unit_test-sim_args">sim_args</a>, <a href="#verilog_dv_unit_test-simulator">simulator</a>, <a href="#verilog_dv_unit_test-ut_sim_template">ut_sim_template</a>)
+verilog_dv_unit_test(<a href="#verilog_dv_unit_test-name">name</a>, <a href="#verilog_dv_unit_test-compile_args">compile_args</a>, <a href="#verilog_dv_unit_test-default_sim_opts">default_sim_opts</a>, <a href="#verilog_dv_unit_test-deps">deps</a>, <a href="#verilog_dv_unit_test-run_args">run_args</a>, <a href="#verilog_dv_unit_test-sim_args">sim_args</a>, <a href="#verilog_dv_unit_test-simulator">simulator</a>, <a href="#verilog_dv_unit_test-ut_sim_template">ut_sim_template</a>)
 </pre>
 
 Compiles and runs a small unit test for DV.
@@ -146,10 +158,12 @@ Compiles and runs a small unit test for DV.
 | Name  | Description | Type | Mandatory | Default |
 | :------------- | :------------- | :------------- | :------------- | :------------- |
 | <a id="verilog_dv_unit_test-name"></a>name |  A unique name for this target.   | <a href="https://bazel.build/docs/build-ref.html#name">Name</a> | required |  |
+| <a id="verilog_dv_unit_test-compile_args"></a>compile_args |  Additional arguments passed to compilation/elaboration.   | List of strings | optional | [] |
 | <a id="verilog_dv_unit_test-default_sim_opts"></a>default_sim_opts |  Default simulator options to pass to the simulator.   | <a href="https://bazel.build/docs/build-ref.html#labels">Label</a> | optional | @rules_verilog//vendors/cadence:verilog_dv_unit_test_opts.f |
 | <a id="verilog_dv_unit_test-deps"></a>deps |  verilog_dv_library or verilog_rtl_library labels that the testbench is dependent on. Dependency ordering within this label list is not necessary if dependencies are consistently declared in all other rules.   | <a href="https://bazel.build/docs/build-ref.html#labels">List of labels</a> | required |  |
-| <a id="verilog_dv_unit_test-sim_args"></a>sim_args |  Additional arguments to pass on command line to the simulator. Both compile and runtime arguments are allowed because dv_unit_test runs as a single step flow.   | List of strings | optional | [] |
-| <a id="verilog_dv_unit_test-simulator"></a>simulator |  Simulator to use for this unit test. Only XRUN is supported here. For VCS, use the two-step flow via `verilog_dv_tb` and `simmer`.   | String | optional | `"XRUN"` |
+| <a id="verilog_dv_unit_test-run_args"></a>run_args |  Additional arguments passed only to simulation runtime.   | List of strings | optional | [] |
+| <a id="verilog_dv_unit_test-sim_args"></a>sim_args |  Deprecated compile arguments. Use `compile_args` and `run_args` instead.   | List of strings | optional | [] |
+| <a id="verilog_dv_unit_test-simulator"></a>simulator |  Simulator to use for this one-step unit test. Only XRUN is supported; VCS uses verilog_dv_tb + simmer.   | String | optional | `"XRUN"` |
 | <a id="verilog_dv_unit_test-ut_sim_template"></a>ut_sim_template |  The template to generate the bash script to run the simulation.   | <a href="https://bazel.build/docs/build-ref.html#labels">Label</a> | optional | @rules_verilog//vendors/cadence:verilog_dv_unit_test.sh.template |
 
 
@@ -159,7 +173,7 @@ Compiles and runs a small unit test for DV.
 
 <pre>
 verilog_rtl_cdc_test(<a href="#verilog_rtl_cdc_test-name">name</a>, <a href="#verilog_rtl_cdc_test-bash_template">bash_template</a>, <a href="#verilog_rtl_cdc_test-bbox_array_size">bbox_array_size</a>, <a href="#verilog_rtl_cdc_test-bbox_modules">bbox_modules</a>, <a href="#verilog_rtl_cdc_test-cmd_files">cmd_files</a>, <a href="#verilog_rtl_cdc_test-defines">defines</a>, <a href="#verilog_rtl_cdc_test-deps">deps</a>,
-                     <a href="#verilog_rtl_cdc_test-epilogue_template">epilogue_template</a>, <a href="#verilog_rtl_cdc_test-preamble_template">preamble_template</a>, <a href="#verilog_rtl_cdc_test-run_template">run_template</a>, <a href="#verilog_rtl_cdc_test-shells">shells</a>, <a href="#verilog_rtl_cdc_test-top">top</a>)
+                     <a href="#verilog_rtl_cdc_test-epilogue_template">epilogue_template</a>, <a href="#verilog_rtl_cdc_test-preamble_template">preamble_template</a>, <a href="#verilog_rtl_cdc_test-shells">shells</a>, <a href="#verilog_rtl_cdc_test-top">top</a>)
 </pre>
 
 Run Jaspergold CDC on a verilog_rtl_library.
@@ -178,7 +192,6 @@ Run Jaspergold CDC on a verilog_rtl_library.
 | <a id="verilog_rtl_cdc_test-deps"></a>deps |  Other verilog libraries this target is dependent upon. All Labels specified here must provide a VerilogInfo provider.   | <a href="https://bazel.build/docs/build-ref.html#labels">List of labels</a> | required |  |
 | <a id="verilog_rtl_cdc_test-epilogue_template"></a>epilogue_template |  The template to generate the final reporting commands for this cdc test.   | <a href="https://bazel.build/docs/build-ref.html#labels">Label</a> | optional | @rules_verilog//vendors/cadence:verilog_rtl_cdc_epilogue_cmds.tcl.template |
 | <a id="verilog_rtl_cdc_test-preamble_template"></a>preamble_template |  The template to generate the initial commands (the preamble) for this cdc test.   | <a href="https://bazel.build/docs/build-ref.html#labels">Label</a> | optional | @rules_verilog//vendors/cadence:verilog_rtl_cdc_preamble_cmds.tcl.template |
-| <a id="verilog_rtl_cdc_test-run_template"></a>run_template |  The template to generate the script to run the cdc test.   | <a href="https://bazel.build/docs/build-ref.html#labels">Label</a> | optional | @rules_verilog//vendors/cadence:verilog_rtl_cdc_test.sh.template |
 | <a id="verilog_rtl_cdc_test-shells"></a>shells |  List of verilog_rtl_shell Labels. For each Label, a gumi define will be placed on the command line to use this shell instead of the original module. This requires that the original module was instantiated using \<code>gumi_&lt;module_name&gt; instead of just &lt;module_name&gt;.   | <a href="https://bazel.build/docs/build-ref.html#labels">List of labels</a> | optional | [] |
 | <a id="verilog_rtl_cdc_test-top"></a>top |  The name of the top-level module for this cdc run   | String | required |  |
 
@@ -210,7 +223,7 @@ A collection of RTL design files. Creates a generated flist file to be included 
 | <a id="verilog_rtl_library-is_shell_of"></a>is_shell_of |  INTERNAL: Do not set in verilog_rtl_library instances. Used for internal bookkeeping for macros derived from verilog_rtl_library. If set, this library is represents a 'shell' of another module. Allows downstream test rules to specify this Label as a 'shell' to override another instance via the gumi system.   | String | optional | "" |
 | <a id="verilog_rtl_library-lib_files"></a>lib_files |  Verilog library files containing multiple modules. A '-v' flag will be added for each file in this attribute. It is preferable to used the 'modules' attribute when possible because library files require parsing entire files to discover all modules.   | <a href="https://bazel.build/docs/build-ref.html#labels">List of labels</a> | optional | [] |
 | <a id="verilog_rtl_library-modules"></a>modules |  Verilog files containing a single module where the module name matches the file name. A '-y' flag will be added for each source file's directory. This is the preferred mechanism for specifying RTL modules.   | <a href="https://bazel.build/docs/build-ref.html#labels">List of labels</a> | optional | [] |
-| <a id="verilog_rtl_library-no_synth"></a>no_synth |  When True, do not allow the contents of this library to be exposed to synthesis. TODO: This currently enforced via an Aspect which is not included in this repository. The aspect creates a parallel set of 'synth__*.f' which have the filtered views which are passed to the synthesis tool.   | Boolean | optional | False |
+| <a id="verilog_rtl_library-no_synth"></a>no_synth |  Reserved compatibility attribute. Setting it to True fails analysis because this repository has no synthesis consumer that can enforce filtering. Filter simulation-only targets in the synthesis rule instead.   | Boolean | optional | False |
 
 
 <a id="verilog_rtl_lint_test"></a>
@@ -302,34 +315,10 @@ Compile and simulate a verilog_rtl_library.
 | <a id="verilog_rtl_unit_test-post_flist_args"></a>post_flist_args |  Additional command line arguments to be placed after the flist arguments See ut_sim_template attribute for exact layout.   | List of strings | optional | [] |
 | <a id="verilog_rtl_unit_test-pre_flist_args"></a>pre_flist_args |  Additional command line arguments to be placed after the simulator binary but before the flist arguments. See ut_sim_template attribute for exact layout.For defines to have effect, they must be declared in pre_flist_args not post_flist_args.   | List of strings | optional | [] |
 | <a id="verilog_rtl_unit_test-shells"></a>shells |  List of verilog_rtl_shell Labels. For each Label, a gumi define will be placed on the command line to use this shell instead of the original module. This requires that the original module was instantiated using \<code>gumi_&lt;module_name&gt; instead of just &lt;module_name&gt;.   | <a href="https://bazel.build/docs/build-ref.html#labels">List of labels</a> | optional | [] |
-| <a id="verilog_rtl_unit_test-simulator"></a>simulator |  Simulator to use for this RTL unit test. Only XRUN is supported here. For VCS, use the two-step `simmer` flow.   | String | optional | `"XRUN"` |
+| <a id="verilog_rtl_unit_test-simulator"></a>simulator |  Simulator to use for this one-step RTL unit test. Only XRUN is supported; VCS uses verilog_dv_tb + simmer.   | String | optional | `"XRUN"` |
 | <a id="verilog_rtl_unit_test-ut_sim_template"></a>ut_sim_template |  The template to generate the script to run the test. Also available is a [SVUnit](http://agilesoc.com/open-source-projects/svunit/) test template: @rules_verilog//vendors/cadence:verilog_rtl_unit_test_svunit.sh.template If using the SVUnit template, you may also want to throw: <pre><code>    post_flist_args = [     "--directory &lt;path_to_test_directory_from_workspace&gt;",  ],</code></pre>   | <a href="https://bazel.build/docs/build-ref.html#labels">Label</a> | optional | @rules_verilog//vendors/cadence:verilog_rtl_unit_test.sh.template |
 | <a id="verilog_rtl_unit_test-ut_sim_waves_template"></a>ut_sim_waves_template |  The template to generate the waves command script to run in the test. When using the SVUnit ut_sim_template or a custom SVUnit invocation, the default verilog_rtl_unit_test_waves.tcl.template will not work. You must either write your own waves script or use the SVUnit waves template: @rules_verilog//vendors/cadence:verilog_rtl_unit_test_svunit_waves.tcl.template.   | <a href="https://bazel.build/docs/build-ref.html#labels">Label</a> | optional | @rules_verilog//vendors/cadence:verilog_rtl_unit_test_waves.tcl.template |
 | <a id="verilog_rtl_unit_test-wave_viewer_command"></a>wave_viewer_command |  Allows custom override of waveform viewer command in the event of wrapping via modulefiles. Example override in project's .bazelrc:   build --@rules_verilog//:verilog_rtl_wave_viewer_command="runmod xrun --"   | <a href="https://bazel.build/docs/build-ref.html#labels">Label</a> | optional | @rules_verilog//:verilog_rtl_wave_viewer_command |
-
-
-<a id="verilog_test"></a>
-
-## verilog_test
-
-<pre>
-verilog_test(<a href="#verilog_test-name">name</a>, <a href="#verilog_test-data">data</a>, <a href="#verilog_test-deps">deps</a>, <a href="#verilog_test-post_flist_args">post_flist_args</a>, <a href="#verilog_test-pre_flist_args">pre_flist_args</a>, <a href="#verilog_test-shells">shells</a>, <a href="#verilog_test-tool">tool</a>)
-</pre>
-
-Provides a way to run a test against a set of libs.
-
-**ATTRIBUTES**
-
-
-| Name  | Description | Type | Mandatory | Default |
-| :------------- | :------------- | :------------- | :------------- | :------------- |
-| <a id="verilog_test-name"></a>name |  A unique name for this target.   | <a href="https://bazel.build/docs/build-ref.html#name">Name</a> | required |  |
-| <a id="verilog_test-data"></a>data |  Non-verilog dependencies   | <a href="https://bazel.build/docs/build-ref.html#labels">List of labels</a> | optional | [] |
-| <a id="verilog_test-deps"></a>deps |  Other verilog libraries this target is dependent upon. All Labels specified here must provide a VerilogInfo provider.   | <a href="https://bazel.build/docs/build-ref.html#labels">List of labels</a> | required |  |
-| <a id="verilog_test-post_flist_args"></a>post_flist_args |  Commands and arguments after flist arguments   | List of strings | optional | [] |
-| <a id="verilog_test-pre_flist_args"></a>pre_flist_args |  Commands and arguments before flist arguments   | List of strings | optional | [] |
-| <a id="verilog_test-shells"></a>shells |  List of verilog_rtl_shell Labels. For each Label, a gumi define will be placed on the command line to use this shell instead of the original module. This requires that the original module was instantiated using \<code>gumi_&lt;module_name&gt; instead of just &lt;module_name&gt;.   | <a href="https://bazel.build/docs/build-ref.html#labels">List of labels</a> | optional | [] |
-| <a id="verilog_test-tool"></a>tool |  Label to a single tool to run. Inserted at before pre_flist_args if set. Do not duplicate in pre_flist_args   | <a href="https://bazel.build/docs/build-ref.html#labels">Label</a> | optional | None |
 
 
 <a id="verilog_tool_encapsulation"></a>
@@ -373,7 +362,7 @@ should not need to depend on all the modules in the block.
 | :------------- | :------------- | :------------- |
 | <a id="verilog_rtl_pkg-name"></a>name |  A unique name for this target.   |  none |
 | <a id="verilog_rtl_pkg-direct"></a>direct |  The Systemverilog file containing the package.<br><br>See verilog_rtl_library::direct.   |  none |
-| <a id="verilog_rtl_pkg-no_synth"></a>no_synth |  Default False.<br><br>See verilog_rtl_library::no_synth.   |  <code>False</code> |
+| <a id="verilog_rtl_pkg-no_synth"></a>no_synth |  Reserved for compatibility. True is rejected because this repository cannot enforce synthesis filtering.   |  <code>False</code> |
 | <a id="verilog_rtl_pkg-deps"></a>deps |  Other packages this target is dependent on.<br><br>See verilog_rtl_library::deps.   |  <code>[]</code> |
 | <a id="verilog_rtl_pkg-visibility"></a>visibility |  Bazel target visibility.   |  <code>None</code> |
 
@@ -402,5 +391,5 @@ limited functionality. Frequent uses include:
 | :------------- | :------------- | :------------- |
 | <a id="verilog_rtl_shell-name"></a>name |  A unique name for this target.   |  none |
 | <a id="verilog_rtl_shell-module_to_shell_name"></a>module_to_shell_name |  The name of the module that will be replaced.<br><br>When a downstream test uses this 'shell', a gumi define will be created using this name.<br><br>When a shell needs to be hand-edited after generation If module_to_shell_name == 'custom', then all rules regarding shells are ignored and gumi shell defines are not thrown, allowing the user great power.   |  none |
-| <a id="verilog_rtl_shell-shell_module_label"></a>shell_module_label |  The Label or file containing the shell.<br><br>See verilog_rtl_library::no_synth.   |  none |
+| <a id="verilog_rtl_shell-shell_module_label"></a>shell_module_label |  The Label or file containing the shell. The shell is selected explicitly by simulation consumers.   |  none |
 | <a id="verilog_rtl_shell-deps"></a>deps |  Other packages this target is dependent on.<br><br>In general. shells should avoid having dependencies. Exceptions include necessary packages and possible a DV model to implement functional behavior.<br><br>See verilog_rtl_library::deps.   |  <code>[]</code> |
