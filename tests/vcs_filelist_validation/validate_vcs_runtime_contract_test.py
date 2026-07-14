@@ -1,6 +1,8 @@
+import datetime
 import os
 from pathlib import Path
 import shlex
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -21,6 +23,8 @@ if str(LIB_DIR) not in sys.path:
 from args_parser import parse_args
 from args_parse.parser import create_parser
 from lint_parser_hal import HalLintLog
+import simmer
+from lib.job_lib import Job, JobManager, JobStatus
 from lib.runtime_options import format_sim_opts_dict, resolve_test_timeout_hours
 from lib.simulators.vcs import VcsSimulator
 from lib.simulators.xcelium import XceliumSimulator
@@ -1013,11 +1017,87 @@ class VcsRuntimeContractTest(unittest.TestCase):
             self.assertIsNone(HalLintLog(logfile.name, None).waiver_direct_regex)
             self.assertIsNone(HalLintLog(logfile.name, "").waiver_direct_regex)
 
-    def test_vcs_warning_parser_accepts_message_ids(self):
+    def test_vcs_warning_parser_accepts_compile_and_elaboration_diagnostics(self):
         options = parse_args(["-t", "unit:test", "--simulator", "VCS"])
         pattern = VcsSimulator(options, DummyRegressionConfig(), None).get_log_parsing_info()["warning_regex"]
 
-        self.assertRegex("Warning-[INC-LDNE] Library directory does not exist", pattern)
+        diagnostics = [
+            "Warning-[INC-LDNE] Library directory does not exist",
+            "  Warning: timing checks are disabled",
+            "/tmp/vcs/generated.cc:17:9: warning: unused variable 'value'",
+        ]
+        for diagnostic in diagnostics:
+            with self.subTest(diagnostic=diagnostic):
+                self.assertRegex(diagnostic, pattern)
+
+    def _run_vcs_compile_post_run(self, warning_line, warning_waivers):
+        root = Path(tempfile.mkdtemp(prefix="vcs_warning_gate_"))
+        self.addCleanup(shutil.rmtree, root, ignore_errors=True)
+        log_path = root / "cmp.log"
+        waivers_path = root / "compile_warning_waivers"
+        log_path.write_text(warning_line + "\n", encoding="utf-8")
+        waivers_path.write_text(repr(warning_waivers), encoding="utf-8")
+
+        options = parse_args(["-t", "unit:test", "--simulator", "VCS"])
+        simulator = VcsSimulator(options, DummyRegressionConfig(), None)
+        vcomp = simmer.VCompJob.__new__(simmer.VCompJob)
+        vcomp._jobstatus = JobStatus.NOT_STARTED
+        vcomp._children = []
+        vcomp.job_lib = SimpleNamespace(returncode=0)
+        vcomp.simulator = simulator
+        vcomp.compile_warning_waivers_path = str(waivers_path)
+        vcomp.log_path = str(log_path)
+        vcomp.rcfg = SimpleNamespace(options=SimpleNamespace(no_compile=False), simmer_results_run=None)
+        vcomp.name = "unit_vcomp"
+        vcomp.bazel_vcomp_target = "//unit:unit_vcomp"
+        vcomp.job_dir = str(root)
+        vcomp.compile_fingerprint = "unit-fingerprint"
+        vcomp.job_start_time = datetime.datetime.now()
+        vcomp.log = mock.Mock()
+
+        with mock.patch.object(simmer, "log", mock.Mock()), \
+             mock.patch.object(simulator, "record_compile_artifacts"), \
+             mock.patch.object(simmer.compile_cache, "write_compile_fingerprint"):
+            vcomp.post_run()
+        return vcomp
+
+    def test_vcs_unwaived_compile_warning_blocks_simulation(self):
+        vcomp = self._run_vcs_compile_post_run(
+            "  Warning-[INC-LDNE] Library directory does not exist",
+            [],
+        )
+        self.assertEqual(JobStatus.FAILED, vcomp.jobstatus)
+
+        simulation = Job.__new__(Job)
+        simulation._jobstatus = JobStatus.NOT_STARTED
+        simulation._children = []
+        simulation._dependencies = [vcomp]
+        vcomp._children = [simulation]
+        manager = JobManager.__new__(JobManager)
+        manager.log = mock.Mock()
+        manager._todo = [simulation]
+        manager._skipped = []
+
+        manager._move_children_to_skipped(vcomp)
+
+        self.assertEqual(JobStatus.SKIPPED, simulation.jobstatus)
+        self.assertNotIn(simulation, manager._todo)
+
+    def test_vcs_waived_compile_warning_allows_simulation_dependency(self):
+        vcomp = self._run_vcs_compile_post_run(
+            "Warning-[INC-LDNE] Library directory does not exist",
+            [r"Warning-\[INC-LDNE\]"],
+        )
+
+        self.assertEqual(JobStatus.PASSED, vcomp.jobstatus)
+
+    def test_xcelium_warning_format_remains_compatible_with_tb_waivers(self):
+        options = parse_args(["-t", "unit:test", "--simulator", "XRUN"])
+        pattern = XceliumSimulator(options, DummyRegressionConfig(), None).get_log_parsing_info()["warning_regex"]
+        warning = "xmelab: *W,DEAPF: file xp_elab.log already exists and will be appended"
+
+        self.assertRegex(warning, pattern)
+        self.assertRegex(warning, r"\*W,DEAPF")
 
     def test_vcs_report_runs_generated_coverage_merge_script(self):
         options = parse_args(["-t", "unit:test", "--simulator", "VCS", "--cm", "line"])

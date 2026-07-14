@@ -725,7 +725,7 @@ verilog_dv_tb = rule(
         "warning_waivers": attr.string_list(
             doc = "Waive warnings in the compile. By default, simmer promotes all compile warnings to errors.\n" +
                   "This list is converted to python regular expressions which are imported by simmer to waive warning.\n" +
-                  "All warnings may be waived by using '\\*W'\n",
+                  "Xcelium waivers commonly match '\\*W,<ID>'; VCS waivers commonly match 'Warning-\\[<ID>\\]'.\n",
         ),
         "shells": attr.label_list(
             doc = "List of shells to use. Each label must be a verilog_rtl_shell instance.\n" +
