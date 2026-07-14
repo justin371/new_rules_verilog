@@ -39,8 +39,8 @@ verilog_rtl_library(
 
 verilog_dv_library(
     name = "dv_makelib",
-    makelib = "dv_unit_test_lib",
     srcs = ["unit_test_top.sv"],
+    makelib = "dv_unit_test_lib",
 )
 
 verilog_rtl_lint_test(
