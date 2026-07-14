@@ -62,7 +62,7 @@ class VcsRuntimeContractTest(unittest.TestCase):
         help_text = parser.format_help()
         self.assertIn("Bazel 7.7.1, Python 3.12", help_text)
         self.assertIn("Quote all test globs", help_text)
-        self.assertIn("default: adaptive", help_text)
+        self.assertIn("default: auto", help_text)
         self.assertIn("must already exist", help_text)
         self.assertIn("custom external partcomp/sharedlib directories are preserved", help_text)
         self.assertIn("Run this before --msie-prim", help_text)
@@ -454,7 +454,8 @@ class VcsRuntimeContractTest(unittest.TestCase):
         with mock.patch("lib.simulators.vcs.detect_allocated_cpus", return_value=(8, "unit test")):
             partcomp_args = shlex.split(simulator.generate_compile_options(vcomp)["partcomp_opts"])
 
-        self.assertIn("-partcomp=adaptive_sched", partcomp_args)
+        self.assertIn("-partcomp", partcomp_args)
+        self.assertNotIn("-partcomp=adaptive_sched", partcomp_args)
         self.assertIn("-partcomp_dir={}".format(os.path.join(vcomp.job_dir, "partitionlib")), partcomp_args)
         self.assertIn("-partcomp=incr_clean", partcomp_args)
         self.assertIn("-fastpartcomp=j8", partcomp_args)
@@ -591,7 +592,7 @@ class VcsRuntimeContractTest(unittest.TestCase):
                                  "LSB_HOSTS": "local local local local",
                              }))
         with mock.patch("lib.simulators.vcs.os.sched_getaffinity", create=True, return_value=set(range(32))):
-            self.assertEqual((32, "CPU affinity"), detect_allocated_cpus({}))
+            self.assertEqual((8, "CPU affinity fallback (capped at 8)"), detect_allocated_cpus({}))
         with mock.patch("lib.simulators.vcs.os.sched_getaffinity", create=True, return_value=set(range(4))):
             self.assertEqual((4, "LSB_DJOB_NUMPROC capped by CPU affinity"),
                              detect_allocated_cpus({"LSB_DJOB_NUMPROC": "16"}))
@@ -625,6 +626,24 @@ class VcsRuntimeContractTest(unittest.TestCase):
              mock.patch("lib.simulators.vcs.os.sched_getaffinity", create=True, return_value=set(range(64))):
             partcomp_args = shlex.split(simulator.generate_compile_options(DummyVcompJob())["partcomp_opts"])
 
+        self.assertIn("-partcomp", partcomp_args)
+        self.assertNotIn("-partcomp=adaptive_sched", partcomp_args)
+        self.assertIn("-fastpartcomp=j1", partcomp_args)
+
+    def test_vcs_explicit_partcomp_request_preserves_single_worker_flow(self):
+        lsf_environment = {
+            "LSB_DJOB_NUMPROC": "1",
+            "LSB_HOSTS": "sh-cloud30",
+            "LSB_MCPU_HOSTS": "sh-cloud30 1",
+        }
+        options = parse_args(["--simulator", "VCS", "--vcs-partcomp-mode", "adaptive"])
+        simulator = VcsSimulator(options, DummyRegressionConfig(), None)
+
+        with mock.patch.dict(os.environ, lsf_environment, clear=True), \
+             mock.patch("lib.simulators.vcs.os.sched_getaffinity", create=True, return_value=set(range(64))):
+            partcomp_args = shlex.split(simulator.generate_compile_options(DummyVcompJob())["partcomp_opts"])
+
+        self.assertIn("-partcomp=adaptive_sched", partcomp_args)
         self.assertIn("-fastpartcomp=j1", partcomp_args)
 
     def test_vcs_partition_compile_can_be_disabled_for_comparison(self):
@@ -634,9 +653,10 @@ class VcsRuntimeContractTest(unittest.TestCase):
         self.assertEqual("", simulator.generate_compile_options(DummyVcompJob())["partcomp_opts"])
 
     def test_vcs_dtl_uses_required_partition_compile_flow(self):
-        options = parse_args(["-t", "unit:test", "--simulator", "VCS", "--dtl"])
-        simulator = VcsSimulator(options, DummyRegressionConfig(), None)
+        options, simulator = self._validated(["-t", "unit:test", "--simulator", "VCS", "--dtl"])
         vcomp = DummyVcompJob()
+
+        self.assertEqual("auto", options.vcs_partcomp_mode)
 
         with mock.patch("lib.simulators.vcs.detect_allocated_cpus", return_value=(8, "unit test")):
             partcomp_args = shlex.split(simulator.generate_compile_options(vcomp)["partcomp_opts"])

@@ -107,7 +107,7 @@ def detect_allocated_cpus(environment=None):
         return 1, "LSB_DJOB_NUMPROC without per-host allocation (conservative)"
 
     if affinity_count is not None:
-        return affinity_count, "CPU affinity"
+        return min(affinity_count, 8), "CPU affinity fallback (capped at 8)"
 
     return min(os.cpu_count() or 1, 8), "host CPU count fallback (capped at 8)"
 
@@ -384,8 +384,8 @@ class VcsSimulator(SimulatorInterface):
         return opts
 
     def get_partition_compile_options(self, vcomp_job):
-        jobs = '-fastpartcomp=j{}'.format(self.get_partcomp_jobs())
         if self.options.dtl:
+            jobs = '-fastpartcomp=j{}'.format(self.get_partcomp_jobs())
             dtl_dir = os.path.join(vcomp_job.job_dir, self._debug_partition_dirname('dtl_static'))
             return shlex.join([
                 '-partcomp',
@@ -397,6 +397,8 @@ class VcsSimulator(SimulatorInterface):
         if mode_option is None:
             return ''
 
+        job_count = self.get_partcomp_jobs()
+        jobs = '-fastpartcomp=j{}'.format(job_count)
         partition_dir = self.get_partition_compile_dir(vcomp_job)
         args = [
             mode_option,

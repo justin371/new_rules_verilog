@@ -84,7 +84,7 @@ def validate_vcs_runtime_options(options, parser):
     if options.dtl and options.vcs_partcomp_mode == 'disabled':
         parser.error("--dtl requires VCS Partition Compile. Stopping before Bazel starts.")
     if options.dtl and any([
-            options.vcs_partcomp_mode != 'adaptive',
+            options.vcs_partcomp_mode != 'auto',
             options.vcs_partcomp_dir is not None,
             options.vcs_partcomp_sharedlib is not None,
     ]):

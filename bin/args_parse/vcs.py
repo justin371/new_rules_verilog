@@ -74,9 +74,9 @@ def add_vcs_arguments(parser):
                             'correlation for grading and debug. This increases merged database size.'))
     gvcs.add_argument(
         '--vcs-partcomp-mode',
-        default='adaptive',
+        default='auto',
         choices=['adaptive', 'auto', 'low', 'high', 'relax', 'disabled'],
-        help=('Select VCS Partition Compile behavior (default: adaptive).\n'
+        help=('Select VCS Partition Compile behavior (default: auto, the VCS-recommended autopartitioning mode).\n'
               'adaptive: schedule partitions using current load; auto: standard autopartitioning;\n'
               'low: more/smaller partitions; high: fewer/larger partitions;\n'
               'relax: relax a poorly balanced high-threshold result; disabled: use regular -Mupdate only.'))

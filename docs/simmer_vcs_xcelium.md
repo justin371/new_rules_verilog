@@ -173,12 +173,12 @@ cells and packages.
 
 ### VCS Partition Compile
 
-VCS Y-2026.03 Partition Compile is enabled by default with adaptive scheduling,
-allocation-aware compile parallelism and redundant-partition cleanup. Simmer
-passes the detected job allocation as `N`:
+VCS Y-2026.03 Partition Compile is enabled by default with the VCS-recommended
+autopartitioning mode, allocation-aware compile parallelism and
+redundant-partition cleanup. Simmer passes the detected job allocation as `N`:
 
 ```text
--partcomp=adaptive_sched
+-partcomp
 -partcomp_dir=<tb>__VCS_VCOMP/partitionlib
 -partcomp=incr_clean
 -fastpartcomp=jN
@@ -188,14 +188,12 @@ passes the detected job allocation as `N`:
 cluster-wide CPU scan. Simmer checks the current host allocation in
 `LSB_MCPU_HOSTS`/`LSB_HOSTS`, then Slurm per-task allocation and process CPU
 affinity. A multi-host LSF total without per-host evidence falls back to one
-worker. If no allocation data is available, simmer uses the host CPU count
-capped at the previous default of eight. `--vcs-partcomp-jobs N` always
-overrides automatic detection.
+worker. Affinity-only and host-count fallbacks are capped at the conservative
+default of eight. `--vcs-partcomp-jobs N` always overrides automatic detection.
 
 For an LSF wrapper such as `bs='bsub -I -q syn'`, omitting `-n` normally means
-the queue's default allocation, often one slot, so simmer selects `j1` even if
-the execution host has many idle CPUs. Request parallel capacity from LSF when
-it is needed:
+the queue's default allocation, often one slot, so simmer limits Partition
+Compile to `j1`. Request parallel capacity from LSF when it is needed:
 
 ```bash
 bs simmer -t 'sys_tb:smoke_test@1' --simulator VCS
@@ -236,7 +234,9 @@ A matching fingerprint and existing `simv` bypass VCS compilation. A miss
 compiles normally, unlike strict `--no-compile`. The option cannot be combined
 with `--recompile`.
 
-Available modes are `adaptive`, `auto`, `low`, `high`, `relax` and `disabled`:
+Available modes are `auto`, `adaptive`, `low`, `high`, `relax` and `disabled`.
+Keep the recommended `auto` default until profiling shows a reason to tune the
+partition thresholds or adaptive scheduler:
 
 ```bash
 simmer -t 'sys_tb:smoke_test@1' --simulator VCS \
