@@ -36,6 +36,9 @@ jobs:
         with:
           python-version: "3.12"
 
+      - name: install-python-dependencies
+        run: python -m pip install -r requirements.txt
+
       - name: install-bazelisk
         uses: vsco/bazelisk-action@170327f90b7b6c4364a97741d6e64f888d76bcb5
         with:
@@ -59,10 +62,13 @@ jobs:
       USE_BAZEL_VERSION: "7.7.1"
     steps:
       - name: install-system-dependencies
-        run: dnf install -y gcc gcc-c++ git gzip python3.12 tar unzip which zip
+        run: dnf install -y gcc gcc-c++ git gzip python3.12 python3.12-pip tar unzip which zip
 
       - name: checkout
         uses: actions/checkout@v4
+
+      - name: install-python-dependencies
+        run: python3.12 -m pip install -r requirements.txt
 
       - name: install-bazelisk
         uses: vsco/bazelisk-action@170327f90b7b6c4364a97741d6e64f888d76bcb5

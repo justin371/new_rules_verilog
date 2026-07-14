@@ -2,6 +2,7 @@
 load("@rules_python//python:defs.bzl", "py_test")
 load(
     "@rules_verilog//verilog:defs.bzl",
+    "verilog_dv_library",
     "verilog_dv_tb",
     "verilog_dv_test_cfg",
     "verilog_dv_unit_test",
@@ -25,8 +26,21 @@ sh_binary(
 
 verilog_rtl_library(
     name = "unit_test_top",
+    makelib = "unit_test_lib",
     modules = ["unit_test_top.sv"],
     deps = ["@filelist_external_fixture//:external_rtl"],
+)
+
+verilog_rtl_library(
+    name = "no_synth_compat",
+    modules = ["unit_test_top.sv"],
+    no_synth = True,
+)
+
+verilog_dv_library(
+    name = "dv_makelib",
+    makelib = "dv_unit_test_lib",
+    srcs = ["unit_test_top.sv"],
 )
 
 verilog_rtl_lint_test(
@@ -116,6 +130,7 @@ py_test(
         ":dv_cfg_vcs",
         ":dv_cfg_vcs_inherited",
         ":dv_cfg_vcs_no_timeout",
+        ":dv_makelib",
         ":dv_tb_vcs",
         ":dv_tb_vcs_compile_args.f",
         ":dv_tb_vcs_runtime_args.f",
@@ -124,9 +139,11 @@ py_test(
         ":dv_tb_xrun_ccf_compile_args.f",
         ":dv_tb_xrun_ccf_tb_options.py",
         ":dv_unit_xrun",
+        ":no_synth_compat",
         ":rtl_lint_vcs",
         ":rtl_lint_vcs_cmds.tcl",
         ":rtl_unit_xrun",
+        ":unit_test_top",
         ":vcs_partitions",
         "@filelist_external_fixture//:external_rtl",
     ],

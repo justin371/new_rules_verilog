@@ -155,6 +155,22 @@ simulation when the existing compile output does not match the current inputs.
 
 Use `--recompile` to force a clean VCS compile.
 
+### `makelib` and VCS reuse
+
+`verilog_rtl_library.makelib` and `verilog_dv_library.makelib` create a named
+Xcelium library with `-makelib`/`-endlib`. VCS must not receive those Xcelium
+tokens. It receives a companion filelist with the same ordered sources, and
+each Bazel library remains a separate `-file` input rather than being flattened
+into the testbench filelist.
+
+VCS recompilation isolation comes from `-Mupdate` and Partition Compile, not
+from the Xcelium library name. Keep stable RTL/IP in separate Bazel libraries
+so their filelist boundaries remain visible to the VCS compile. When automatic
+partitioning does not isolate a component well enough, declare its actual cells
+or packages in a VCS optconfig file as described below. A `makelib` string is
+not sufficient to generate that config because one library may contain several
+cells and packages.
+
 ### VCS Partition Compile
 
 VCS Y-2026.03 Partition Compile is enabled by default with adaptive scheduling,
@@ -171,6 +187,13 @@ The partition database belongs to one VCOMP directory rather than the shared
 Bazel runfiles tree. A normal internal RTL or testbench edit therefore rebuilds
 only affected partitions while unchanged third-party PCIe, UCIe, Ethernet,
 RISC-V and NoC IP/VIP partitions remain reusable.
+
+The default non-debug database remains `partitionlib`. `--waves` and `--gui`
+use sibling `partitionlib_waves` and `partitionlib_gui` databases because their
+KDB/debug-access options are not compatible with a non-debug partition build.
+Explicit `--vcs-partcomp-dir` and `--vcs-partcomp-sharedlib` paths are used
+exactly as supplied, so custom databases must be versioned separately for each
+debug, coverage, define and compile-argument configuration.
 
 Use the default local database for one workspace. Profile and tune parallelism
 with:

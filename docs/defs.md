@@ -7,7 +7,7 @@ Public entry point to all supported Verilog rules and APIs
 ## verilog_dv_library
 
 <pre>
-verilog_dv_library(<a href="#verilog_dv_library-name">name</a>, <a href="#verilog_dv_library-deps">deps</a>, <a href="#verilog_dv_library-dpi">dpi</a>, <a href="#verilog_dv_library-in_flist">in_flist</a>, <a href="#verilog_dv_library-incdir">incdir</a>, <a href="#verilog_dv_library-srcs">srcs</a>)
+verilog_dv_library(<a href="#verilog_dv_library-name">name</a>, <a href="#verilog_dv_library-deps">deps</a>, <a href="#verilog_dv_library-dpi">dpi</a>, <a href="#verilog_dv_library-in_flist">in_flist</a>, <a href="#verilog_dv_library-incdir">incdir</a>, <a href="#verilog_dv_library-makelib">makelib</a>, <a href="#verilog_dv_library-srcs">srcs</a>)
 </pre>
 
 A DV Library.
@@ -45,6 +45,7 @@ verilog_dv_library(
 | <a id="verilog_dv_library-dpi"></a>dpi |  cc_libraries to link in through the DPI. Currently, cc_import is not supported for precompiled shared libraries. Prefer placing shared libraries here rather than globbing `.so` files into `srcs`. Example: `cc_library(name = "dpi", srcs = glob(["*.c"]))` then `verilog_dv_library(name = "pkg", srcs = glob(["*.sv"]), dpi = [":dpi"])`.   | <a href="https://bazel.build/docs/build-ref.html#labels">List of labels</a> | optional | [] |
 | <a id="verilog_dv_library-in_flist"></a>in_flist |  Files to be placed directly in the generated flist. Best practice recommends 'pkg' and 'interface' files be declared here. If this attribute is empty (default), all srcs will put into the flist instead.   | <a href="https://bazel.build/docs/build-ref.html#labels">List of labels</a> | optional | [] |
 | <a id="verilog_dv_library-incdir"></a>incdir |  Generate a +incdir in generated flist for every file's directory declared in 'srcs' attribute.   | Boolean | optional | True |
+| <a id="verilog_dv_library-makelib"></a>makelib |  Compile this target into the named Xcelium library through `-makelib`/`-endlib`. VCS receives the same ordered sources through a separate `-file` boundary; VCS recompilation isolation is provided by `-Mupdate` and Partition Compile rather than Xcelium library syntax.   | String | optional | `""` |
 | <a id="verilog_dv_library-srcs"></a>srcs |  Systemverilog source files. Files are assumed to be \<code>included inside another file (e.g. the package file) and will not be placed on directly in the flist unless declared in the 'in_flist' attribute.   | <a href="https://bazel.build/docs/build-ref.html#labels">List of labels</a> | required |  |
 
 
@@ -202,7 +203,7 @@ Run Jaspergold CDC on a verilog_rtl_library.
 
 <pre>
 verilog_rtl_library(<a href="#verilog_rtl_library-name">name</a>, <a href="#verilog_rtl_library-deps">deps</a>, <a href="#verilog_rtl_library-direct">direct</a>, <a href="#verilog_rtl_library-enable_gumi">enable_gumi</a>, <a href="#verilog_rtl_library-gumi_file_override">gumi_file_override</a>, <a href="#verilog_rtl_library-gumi_override">gumi_override</a>, <a href="#verilog_rtl_library-headers">headers</a>,
-                    <a href="#verilog_rtl_library-is_pkg">is_pkg</a>, <a href="#verilog_rtl_library-is_shell_of">is_shell_of</a>, <a href="#verilog_rtl_library-lib_files">lib_files</a>, <a href="#verilog_rtl_library-modules">modules</a>, <a href="#verilog_rtl_library-no_synth">no_synth</a>)
+                    <a href="#verilog_rtl_library-is_pkg">is_pkg</a>, <a href="#verilog_rtl_library-is_shell_of">is_shell_of</a>, <a href="#verilog_rtl_library-lib_files">lib_files</a>, <a href="#verilog_rtl_library-makelib">makelib</a>, <a href="#verilog_rtl_library-modules">modules</a>, <a href="#verilog_rtl_library-no_synth">no_synth</a>)
 </pre>
 
 A collection of RTL design files. Creates a generated flist file to be included later in a compile.
@@ -222,8 +223,9 @@ A collection of RTL design files. Creates a generated flist file to be included 
 | <a id="verilog_rtl_library-is_pkg"></a>is_pkg |  INTERNAL: Do not set in verilog_rtl_library instances. Used for internal bookkeeping for macros derived from verilog_rtl_library. Used to enforce naming conventions related to packages to encourage simple dependency graphs   | Boolean | optional | False |
 | <a id="verilog_rtl_library-is_shell_of"></a>is_shell_of |  INTERNAL: Do not set in verilog_rtl_library instances. Used for internal bookkeeping for macros derived from verilog_rtl_library. If set, this library is represents a 'shell' of another module. Allows downstream test rules to specify this Label as a 'shell' to override another instance via the gumi system.   | String | optional | "" |
 | <a id="verilog_rtl_library-lib_files"></a>lib_files |  Verilog library files containing multiple modules. A '-v' flag will be added for each file in this attribute. It is preferable to used the 'modules' attribute when possible because library files require parsing entire files to discover all modules.   | <a href="https://bazel.build/docs/build-ref.html#labels">List of labels</a> | optional | [] |
+| <a id="verilog_rtl_library-makelib"></a>makelib |  Compile this target into the named Xcelium library through `-makelib`/`-endlib`. VCS receives the same ordered sources through a separate `-file` boundary; VCS recompilation isolation is provided by `-Mupdate` and Partition Compile rather than Xcelium library syntax.   | String | optional | `""` |
 | <a id="verilog_rtl_library-modules"></a>modules |  Verilog files containing a single module where the module name matches the file name. A '-y' flag will be added for each source file's directory. This is the preferred mechanism for specifying RTL modules.   | <a href="https://bazel.build/docs/build-ref.html#labels">List of labels</a> | optional | [] |
-| <a id="verilog_rtl_library-no_synth"></a>no_synth |  Reserved compatibility attribute. Setting it to True fails analysis because this repository has no synthesis consumer that can enforce filtering. Filter simulation-only targets in the synthesis rule instead.   | Boolean | optional | False |
+| <a id="verilog_rtl_library-no_synth"></a>no_synth |  Compatibility marker for downstream synthesis aspects or consumers. Simulation targets continue to include this library.   | Boolean | optional | False |
 
 
 <a id="verilog_rtl_lint_test"></a>
@@ -362,7 +364,7 @@ should not need to depend on all the modules in the block.
 | :------------- | :------------- | :------------- |
 | <a id="verilog_rtl_pkg-name"></a>name |  A unique name for this target.   |  none |
 | <a id="verilog_rtl_pkg-direct"></a>direct |  The Systemverilog file containing the package.<br><br>See verilog_rtl_library::direct.   |  none |
-| <a id="verilog_rtl_pkg-no_synth"></a>no_synth |  Reserved for compatibility. True is rejected because this repository cannot enforce synthesis filtering.   |  <code>False</code> |
+| <a id="verilog_rtl_pkg-no_synth"></a>no_synth |  Compatibility marker for downstream synthesis aspects or consumers. Simulation targets continue to include this package.   |  <code>False</code> |
 | <a id="verilog_rtl_pkg-deps"></a>deps |  Other packages this target is dependent on.<br><br>See verilog_rtl_library::deps.   |  <code>[]</code> |
 | <a id="verilog_rtl_pkg-visibility"></a>visibility |  Bazel target visibility.   |  <code>None</code> |
 

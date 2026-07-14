@@ -260,9 +260,10 @@ class VcsSimulator(SimulatorInterface):
     def get_partition_compile_options(self, vcomp_job):
         jobs = '-fastpartcomp=j{}'.format(self.options.vcs_partcomp_jobs)
         if self.options.dtl:
+            dtl_dir = os.path.join(vcomp_job.job_dir, self._debug_partition_dirname('dtl_static'))
             return shlex.join([
                 '-partcomp',
-                '-dir={}'.format(os.path.join(vcomp_job.job_dir, 'dtl_static')),
+                '-dir={}'.format(dtl_dir),
                 jobs,
             ])
 
@@ -270,7 +271,10 @@ class VcsSimulator(SimulatorInterface):
         if mode_option is None:
             return ''
 
-        partition_dir = self.options.vcs_partcomp_dir or os.path.join(vcomp_job.job_dir, 'partitionlib')
+        partition_dir = self.options.vcs_partcomp_dir or os.path.join(
+            vcomp_job.job_dir,
+            self._debug_partition_dirname('partitionlib'),
+        )
         if not os.path.isabs(partition_dir):
             partition_dir = os.path.join(self.rcfg.proj_dir, partition_dir)
         args = [
@@ -282,6 +286,13 @@ class VcsSimulator(SimulatorInterface):
         if self.options.vcs_partcomp_sharedlib is not None:
             args.append('-partcomp_sharedlib={}'.format(os.path.abspath(self.options.vcs_partcomp_sharedlib)))
         return shlex.join(args)
+
+    def _debug_partition_dirname(self, base_name):
+        if self.options.gui:
+            return base_name + '_gui'
+        if self.options.waves is not None:
+            return base_name + '_waves'
+        return base_name
 
     def _find_vcs_xprop_config(self, bench_dir, xprop_mode):
         for cfg_name in self.VCS_XPROP_CONFIG_BY_MODE.get(xprop_mode, []):

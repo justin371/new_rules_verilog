@@ -452,6 +452,39 @@ class VcsRuntimeContractTest(unittest.TestCase):
         self.assertIn("-partcomp=incr_clean", partcomp_args)
         self.assertIn("-fastpartcomp=j8", partcomp_args)
 
+    def test_vcs_partition_compile_separates_kdb_modes(self):
+        vcomp = DummyVcompJob()
+        expected = {
+            "--gui": "partitionlib_gui",
+            "--waves": "partitionlib_waves",
+        }
+
+        for option, dirname in expected.items():
+            with self.subTest(option=option):
+                options = parse_args(["-t", "unit:test", "--simulator", "VCS", option])
+                simulator = VcsSimulator(options, DummyRegressionConfig(), None)
+                partcomp_args = shlex.split(simulator.generate_compile_options(vcomp)["partcomp_opts"])
+
+                self.assertIn("-partcomp_dir={}".format(os.path.join(vcomp.job_dir, dirname)), partcomp_args)
+
+    def test_vcs_custom_partition_directory_is_not_renamed_for_waves(self):
+        custom_dir = os.path.join(tempfile.gettempdir(), "custom_partitionlib")
+        options = parse_args([
+            "-t",
+            "unit:test",
+            "--simulator",
+            "VCS",
+            "--waves",
+            "--vcs-partcomp-dir",
+            custom_dir,
+        ])
+        simulator = VcsSimulator(options, DummyRegressionConfig(), None)
+
+        partcomp_args = shlex.split(simulator.generate_compile_options(DummyVcompJob())["partcomp_opts"])
+
+        self.assertIn("-partcomp_dir={}".format(os.path.abspath(custom_dir)), partcomp_args)
+        self.assertNotIn("-partcomp_dir={}_waves".format(os.path.abspath(custom_dir)), partcomp_args)
+
     def test_vcs_coverage_detail_options_follow_command_reference(self):
         options, simulator = self._validated([
             "--simulator",
@@ -1142,6 +1175,12 @@ class VcsRuntimeContractTest(unittest.TestCase):
         self.assertIn("xcelium_dv_backend", dv_bzl)
         self.assertNotIn('filelist_flag = "-file"', dv_bzl)
         self.assertIn('"\\n-file"', vcs_backend)
+        self.assertIn('"transitive_vcs_flists"', vcs_backend)
+        self.assertIn('fallback_field = "transitive_flists"', vcs_backend)
+        self.assertIn('"vcs_cm_hier"', vcs_backend)
+        self.assertNotIn('"msie_primary_compile_args"', vcs_backend)
+        self.assertIn('"msie_primary_compile_args"', xcelium_backend)
+        self.assertIn("tb_options.update(backend.tb_options", dv_bzl)
         self.assertNotIn("_ut_sim_template_xrun_default", vcs_backend)
         self.assertNotIn("_default_sim_opts_xrun_default", vcs_backend)
         self.assertIn("does not support simulator = 'VCS'", dv_bzl)
@@ -1158,8 +1197,8 @@ class VcsRuntimeContractTest(unittest.TestCase):
         self.assertIn('defines.extend(["+define+{}{}', rtl_bzl)
         self.assertNotIn('defines.extend(["+{}{}', rtl_bzl)
         self.assertIn("[_gatesim_target(inherit, corner) for inherit in inherits]", dv_bzl)
-        self.assertIn("sets no_synth=True, but rules_verilog has no synthesis consumer", rtl_bzl)
-        self.assertNotIn("        no_synth = True,", rtl_bzl)
+        self.assertIn("Compatibility marker for downstream synthesis", rtl_bzl)
+        self.assertNotIn("sets no_synth=True", rtl_bzl)
         self.assertNotIn('"_runtime_args_template"', dv_bzl)
 
 

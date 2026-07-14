@@ -90,7 +90,9 @@ to be available on `PATH`.
 ### VCS Partition Compile
 
 VCS regressions use Partition Compile by default. The writable partition
-database is `<tb>__VCS_VCOMP/partitionlib`, so stable third-party IP/VIP
+database is `<tb>__VCS_VCOMP/partitionlib`; `--waves` and `--gui` use sibling
+`partitionlib_waves` and `partitionlib_gui` databases so incompatible KDB
+options do not invalidate each other. Stable third-party IP/VIP
 partitions are reused while changed project RTL and testbench partitions are
 rebuilt. Tune parallel compilation after measuring the workstation:
 
@@ -253,19 +255,19 @@ compile configuration, or the selected simulator tool environment changes.
 Recent normal-run compile/start failures remain visible through `simmer --history`.
 
 ### Python Dependencies
-rules_verilog is also dependent on several python libraries. These are defined in requirements.txt and may be installed in the package manager of your choice. The recommended flow is to install them via the `pip_parse` rule in your `WORKSPACE` file:
+rules_verilog uses the Python libraries listed in `requirements.txt`, but it
+does not create a pip repository or install them. The top-level project owns
+Python dependency installation so that every external rules repository shares
+the same environment. Install the requirements into the Python 3.12 environment
+used by Bazel before running `simmer`:
 
-```skylark
-load("@rules_python//python:pip.bzl", "pip_parse")
-
-pip_parse(
-    name = "pip_deps",
-    requirements_lock = "@rules_verilog//:requirements.txt",
-)
-
-load("@pip_deps//:requirements.bzl", "install_deps")
-install_deps()
+```bash
+python3.12 -m pip install -r path/to/rules_verilog/requirements.txt
 ```
+
+rules_verilog BUILD packages intentionally avoid workspace-owned Python
+requirement labels so `@rules_verilog//bin:simmer` can be loaded from an
+external repository.
 
 ### Red Hat validation
 

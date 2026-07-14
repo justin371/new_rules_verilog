@@ -79,6 +79,31 @@ def assert_lacks_legacy_filelist_flag(contents, relative_path):
 
 class VcsFilelistValidationTest(unittest.TestCase):
 
+    def test_no_synth_remains_compatible_with_simulation_analysis(self):
+        filelist = read_runfile("tests/vcs_filelist_validation/no_synth_compat.f")
+        self.assertIn("tests/vcs_filelist_validation/unit_test_top.sv", filelist)
+
+    def test_makelib_is_xrun_only_and_vcs_keeps_the_source_boundary(self):
+        xrun_filelist = read_runfile("tests/vcs_filelist_validation/unit_test_top.f")
+        vcs_filelist = read_runfile("tests/vcs_filelist_validation/unit_test_top_vcs.f")
+        dv_xrun_filelist = read_runfile("tests/vcs_filelist_validation/dv_makelib.f")
+        dv_vcs_filelist = read_runfile("tests/vcs_filelist_validation/dv_makelib_vcs.f")
+        vcs_compile_args = read_runfile("tests/vcs_filelist_validation/dv_tb_vcs_compile_args.f")
+
+        self.assertIn("-makelib\nunit_test_lib\n", xrun_filelist)
+        self.assertIn("-endlib", xrun_filelist)
+        self.assertNotIn("-makelib", vcs_filelist)
+        self.assertNotIn("-endlib", vcs_filelist)
+        self.assertNotIn("unit_test_lib", vcs_filelist)
+        self.assertIn("tests/vcs_filelist_validation/unit_test_top.sv", vcs_filelist)
+        self.assertIn("-makelib\ndv_unit_test_lib\n", dv_xrun_filelist)
+        self.assertIn("-endlib", dv_xrun_filelist)
+        self.assertNotIn("-makelib", dv_vcs_filelist)
+        self.assertNotIn("-endlib", dv_vcs_filelist)
+        self.assertNotIn("dv_unit_test_lib", dv_vcs_filelist)
+        self.assertIn("tests/vcs_filelist_validation/unit_test_top.sv", dv_vcs_filelist)
+        self.assertIn("-file tests/vcs_filelist_validation/unit_test_top_vcs.f", vcs_compile_args)
+
     def test_dv_test_cfg_keeps_its_public_runtime_contract(self):
         dynamic_args = ast.literal_eval(read_runfile("tests/vcs_filelist_validation/dv_cfg_vcs_dynamic_args.py", ))
 
@@ -106,12 +131,12 @@ class VcsFilelistValidationTest(unittest.TestCase):
             ],
             "tests/vcs_filelist_validation/rtl_lint_vcs_cmds.tcl": [
                 "+define+LINT",
-                "-file tests/vcs_filelist_validation/unit_test_top.f",
+                "-file tests/vcs_filelist_validation/unit_test_top_vcs.f",
                 "-file vendors/synopsys/verilog_rtl_lint_default_opts.f",
             ],
             "tests/vcs_filelist_validation/dv_tb_vcs_compile_args.f": [
                 "-file external/filelist_external_fixture/external_rtl.f",
-                "-file tests/vcs_filelist_validation/unit_test_top.f",
+                "-file tests/vcs_filelist_validation/unit_test_top_vcs.f",
                 "+define+CADENCE_WORKAROUND",
                 "+define+UNIFIED_VCS_COMPILE_ARG",
                 "+define+XRUNNER",
@@ -154,10 +179,16 @@ class VcsFilelistValidationTest(unittest.TestCase):
 
         vcs_options = ast.literal_eval(read_runfile("tests/vcs_filelist_validation/dv_tb_vcs_tb_options.py"))
         self.assertEqual("tests/vcs_filelist_validation/coverage_hier.cfg", vcs_options["vcs_cm_hier"])
+        self.assertNotIn("xcelium_covfile", vcs_options)
+        self.assertNotIn("msie_primary_compile_args", vcs_options)
+        self.assertNotIn("msie_incremental_compile_args", vcs_options)
+        self.assertNotIn("msie_primary_inputs", vcs_options)
 
         compile_inputs = read_runfile(vcs_options["compile_inputs"])
         self.assertIn("source\ttests/vcs_filelist_validation/unit_test_top.sv", compile_inputs)
         self.assertIn("source\texternal/filelist_external_fixture/external_ip.sv", compile_inputs)
+        self.assertIn("filelist\ttests/vcs_filelist_validation/unit_test_top_vcs.f", compile_inputs)
+        self.assertNotIn("filelist\ttests/vcs_filelist_validation/unit_test_top.f\n", compile_inputs)
         self.assertIn("runfile\ttests/vcs_filelist_validation/coverage_hier.cfg", compile_inputs)
 
     def test_xcelium_msie_filelists_are_bazel_generated_and_partitioned(self):
@@ -177,10 +208,12 @@ class VcsFilelistValidationTest(unittest.TestCase):
         self.assertIn("-f external/filelist_external_fixture/external_rtl.f", incremental)
         self.assertIn("source\ttests/vcs_filelist_validation/unit_test_top.sv", inputs)
         self.assertIn("filelist\ttests/vcs_filelist_validation/unit_test_top.f", inputs)
+        self.assertNotIn("filelist\ttests/vcs_filelist_validation/unit_test_top_vcs.f", inputs)
         self.assertIn("runfile\ttests/vcs_filelist_validation/coverage.ccf", inputs)
         self.assertEqual(primary_path, tb_options["msie_primary_compile_args"])
         self.assertEqual(incremental_path, tb_options["msie_incremental_compile_args"])
         self.assertEqual(inputs_path, tb_options["msie_primary_inputs"])
+        self.assertNotIn("vcs_cm_hier", tb_options)
 
     def test_unit_test_scripts_use_xcelium(self):
         scripts = {

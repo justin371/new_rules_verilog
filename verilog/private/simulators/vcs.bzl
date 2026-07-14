@@ -1,6 +1,6 @@
 """VCS backend helpers for DV rules."""
 
-load("//verilog/private:verilog.bzl", "VerilogInfo", "flists_to_arguments")
+load("//verilog/private:verilog.bzl", "VerilogInfo", "flists_to_arguments", "runfiles_relative_short_path")
 
 def _sanitize_defines(defines):
     sanitized = {}
@@ -40,7 +40,15 @@ def _compile_config(ctx, defines, compile_args):
     return struct(
         args = _sanitize_compile_args(compile_args),
         defines = "\n".join(["+define+{}{}".format(key, value) for key, value in _sanitize_defines(defines).items()]),
-        flists = flists_to_arguments(ctx.attr.shells + ctx.attr.deps, VerilogInfo, "transitive_flists", "\n-file"),
+        fallback_flist_field = "transitive_flists",
+        flist_field = "transitive_vcs_flists",
+        flists = flists_to_arguments(
+            ctx.attr.shells + ctx.attr.deps,
+            VerilogInfo,
+            "transitive_vcs_flists",
+            "\n-file",
+            fallback_field = "transitive_flists",
+        ),
         template = ctx.file._compile_args_template_vcs,
     )
 
@@ -66,10 +74,16 @@ def _runtime_config(ctx):
         template = ctx.file._default_sim_opts_vcs,
     )
 
+def _tb_options(ctx, unused_extra_compile_outputs, unused_xcelium_covfile):
+    return {
+        "vcs_cm_hier": runfiles_relative_short_path(ctx.file.vcs_cm_hier) if ctx.file.vcs_cm_hier else "",
+    }
+
 vcs_dv_backend = struct(
     compile_config = _compile_config,
     config_arg = _config_arg,
     extra_compile_outputs = _extra_compile_outputs,
     runtime_config = _runtime_config,
+    tb_options = _tb_options,
     validate_tb = _validate_tb,
 )
