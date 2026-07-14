@@ -578,11 +578,14 @@ class VcsRuntimeContractTest(unittest.TestCase):
             self._validated(["--simulator", "VCS", "--vcs-auto-compile-cache", "--recompile"])
 
     def test_vcs_partcomp_auto_jobs_use_scheduler_allocation(self):
-        self.assertEqual((6, "LSB_MCPU_HOSTS"), detect_allocated_cpus({"LSB_MCPU_HOSTS": "local 6"}))
-        with mock.patch("lib.simulators.vcs.socket.gethostname", return_value="local.example.com"):
-            self.assertEqual((6, "LSB_MCPU_HOSTS"), detect_allocated_cpus({"LSB_MCPU_HOSTS": "other 3 local 6"}))
-        with mock.patch("lib.simulators.vcs.socket.gethostname", return_value="unknown"):
-            self.assertEqual((3, "LSB_MCPU_HOSTS"), detect_allocated_cpus({"LSB_MCPU_HOSTS": "other 3 local 6"}))
+        with mock.patch("lib.simulators.vcs.os.sched_getaffinity", create=True, return_value=set(range(64))):
+            self.assertEqual((6, "LSB_MCPU_HOSTS"), detect_allocated_cpus({"LSB_MCPU_HOSTS": "local 6"}))
+            with mock.patch("lib.simulators.vcs.socket.gethostname", return_value="local.example.com"):
+                self.assertEqual((6, "LSB_MCPU_HOSTS"),
+                                 detect_allocated_cpus({"LSB_MCPU_HOSTS": "other 3 local 6"}))
+            with mock.patch("lib.simulators.vcs.socket.gethostname", return_value="unknown"):
+                self.assertEqual((3, "LSB_MCPU_HOSTS"),
+                                 detect_allocated_cpus({"LSB_MCPU_HOSTS": "other 3 local 6"}))
         self.assertEqual((1, "LSB_DJOB_NUMPROC without per-host allocation (conservative)"),
                          detect_allocated_cpus({"LSB_DJOB_NUMPROC": "4"}))
         with mock.patch("lib.simulators.vcs.socket.gethostname", return_value="local.example.com"):

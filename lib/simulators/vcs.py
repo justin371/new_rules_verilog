@@ -745,14 +745,10 @@ class VcsSimulator(SimulatorInterface):
         reused = bool(self.options.no_compile or getattr(vcomp_job, "compile_cache_hit", False))
         effective_partcomp_mode = self.get_effective_partcomp_mode()
         metrics = {
-            "compile_cache_hit":
-            bool(getattr(vcomp_job, "compile_cache_hit", False)),
-            "compile_reused":
-            reused,
-            "partcomp_mode":
-            effective_partcomp_mode,
-            "partcomp_jobs":
-            self.get_partcomp_jobs() if effective_partcomp_mode != 'disabled' and not reused else None,
+            "compile_cache_hit": bool(getattr(vcomp_job, "compile_cache_hit", False)),
+            "compile_reused": reused,
+            "partcomp_mode": effective_partcomp_mode,
+            "partcomp_jobs": self.get_partcomp_jobs() if effective_partcomp_mode != 'disabled' and not reused else None,
         }
         if reused or not self.options.vcs_profile or not os.path.isfile(vcomp_job.log_path):
             return metrics
