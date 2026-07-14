@@ -4,8 +4,9 @@
 CUSTOM_SHELL = "custom"
 
 VerilogInfo = provider("Transitive Verilog build inputs.", fields = {
-    "transitive_sources": "All source source files needed by a target. This flow is not currently setup to do partioned compile, so all files need to be carried through to the final step for compilation as a whole.",
+    "transitive_sources": "All source files needed by a target. They are retained for compile input tracking and simulator runfiles.",
     "transitive_flists": "All flists which specify ordering of transitive sources.",
+    "transitive_vcs_flists": "VCS-compatible flists. Source ordering and per-target filelist boundaries are preserved while Xcelium-only makelib markers are omitted.",
     "transitive_dpi": "Shared libraries (.so/.dll/.dylib) to link in via the DPI for testbenches.",
     "last_module": "This is a convenience accessor. The last module specified is assumed be the top module in a design. This is frequently needed by downstream tools.",
 })
@@ -45,7 +46,7 @@ def gather_shell_defines(shells):
         defines["gumi_use_{}".format(shell.label.name)] = ""
     return defines
 
-def get_transitive_srcs(srcs, deps, provider, attr_name, allow_other_outputs = False):
+def get_transitive_srcs(srcs, deps, provider, attr_name, allow_other_outputs = False, fallback_attr_name = None):
     """Obtain the source files for a target and its transitive dependencies.
 
     Args:
@@ -58,7 +59,12 @@ def get_transitive_srcs(srcs, deps, provider, attr_name, allow_other_outputs = F
     trans = []
     for dep in deps:
         if provider in dep:
-            trans.append(getattr(dep[provider], attr_name))
+            if hasattr(dep[provider], attr_name):
+                trans.append(getattr(dep[provider], attr_name))
+            elif fallback_attr_name and hasattr(dep[provider], fallback_attr_name):
+                trans.append(getattr(dep[provider], fallback_attr_name))
+            else:
+                fail("{} does not provide the required '{}' field".format(dep.label, attr_name))
         elif allow_other_outputs:
             trans.append(dep[DefaultInfo].files)
         else:
@@ -92,7 +98,7 @@ def merge_default_runfiles(ctx, files, targets, transitive_files = None):
         transitive_files = transitive_files,
     ).merge_all([target[DefaultInfo].default_runfiles for target in targets])
 
-def verilog_input_inventory(deps, extra_files):
+def verilog_input_inventory(deps, extra_files, flist_field = "transitive_flists", fallback_field = None):
     """Return a stable inventory of Verilog compile inputs.
 
     Args:
@@ -104,7 +110,14 @@ def verilog_input_inventory(deps, extra_files):
     """
     entries = []
     sources = get_transitive_srcs([], deps, VerilogInfo, "transitive_sources", allow_other_outputs = True)
-    flists = get_transitive_srcs([], deps, VerilogInfo, "transitive_flists", allow_other_outputs = False)
+    flists = get_transitive_srcs(
+        [],
+        deps,
+        VerilogInfo,
+        flist_field,
+        allow_other_outputs = False,
+        fallback_attr_name = fallback_field,
+    )
     for source in sources.to_list():
         entries.append("source\t{}".format(runfiles_relative_short_path(source)))
     for flist in flists.to_list():
@@ -113,14 +126,19 @@ def verilog_input_inventory(deps, extra_files):
         entries.append("runfile\t{}".format(runfiles_relative_short_path(extra_file)))
     return "\n".join(sorted(depset(entries).to_list())) + "\n"
 
-def flists_to_arguments(deps, provider, field, prefix, separator = "", tool_name = None, path_prefix = ""):
+def flists_to_arguments(deps, provider, field, prefix, separator = "", tool_name = None, path_prefix = "", fallback_field = None):
     # Emit Bazel short_path entries so generated filelists stay rooted at the
     # runfiles tree, e.g. hw/... and external/..., instead of machine-specific
     # absolute paths or fragile ../ relative traversals.
     transitive = []
     for dep in deps:
         if provider in dep:
-            transitive.append(getattr(dep[provider], field))
+            if hasattr(dep[provider], field):
+                transitive.append(getattr(dep[provider], field))
+            elif fallback_field and hasattr(dep[provider], fallback_field):
+                transitive.append(getattr(dep[provider], fallback_field))
+            else:
+                fail("{} does not provide the required '{}' field".format(dep.label, field))
 
         # else:
         #     trans.extend(dep[DefaultInfo].files.to_list())

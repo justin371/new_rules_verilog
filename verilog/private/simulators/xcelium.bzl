@@ -1,6 +1,6 @@
 """Xcelium backend helpers for DV rules."""
 
-load("//verilog/private:verilog.bzl", "VerilogInfo", "flists_to_arguments", "verilog_input_inventory")
+load("//verilog/private:verilog.bzl", "VerilogInfo", "flists_to_arguments", "runfiles_relative_short_path", "verilog_input_inventory")
 
 def _validate_tb(ctx, has_msie_primary, has_msie_extras):
     if ctx.file.vcs_cm_hier:
@@ -15,6 +15,8 @@ def _compile_config(ctx, defines, compile_args):
     return struct(
         args = compile_args,
         defines = "\n".join(["-define {}{}".format(key, value) for key, value in defines.items()]),
+        fallback_flist_field = None,
+        flist_field = "transitive_flists",
         flists = flists_to_arguments(ctx.attr.deps + ctx.attr.shells, VerilogInfo, "transitive_flists", "\n-f"),
         template = ctx.file._compile_args_template_xrun,
     )
@@ -95,6 +97,14 @@ def _runtime_config(ctx):
         template = ctx.file._default_sim_opts_xrun,
     )
 
+def _tb_options(unused_ctx, extra_compile_outputs, xcelium_covfile):
+    return {
+        "msie_incremental_compile_args": runfiles_relative_short_path(extra_compile_outputs.incremental_compile_args) if extra_compile_outputs.incremental_compile_args else "",
+        "msie_primary_compile_args": runfiles_relative_short_path(extra_compile_outputs.primary_compile_args) if extra_compile_outputs.primary_compile_args else "",
+        "msie_primary_inputs": runfiles_relative_short_path(extra_compile_outputs.primary_inputs) if extra_compile_outputs.primary_inputs else "",
+        "xcelium_covfile": runfiles_relative_short_path(xcelium_covfile) if xcelium_covfile else "",
+    }
+
 def _unit_test_config(ctx, unit_test_template, default_sim_opts, simulator_command, filelist_flag, dpi_tool):
     return struct(
         default_sim_opts = default_sim_opts,
@@ -109,6 +119,7 @@ xcelium_dv_backend = struct(
     config_arg = _config_arg,
     extra_compile_outputs = _extra_compile_outputs,
     runtime_config = _runtime_config,
+    tb_options = _tb_options,
     unit_test_config = _unit_test_config,
     validate_tb = _validate_tb,
 )

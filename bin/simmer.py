@@ -239,11 +239,6 @@ class VCompJob(Job):
             "dut_instance": "hdl_top.dut",
             "dut_top": "dut",
             "compile_inputs": "",
-            "vcs_cm_hier": "",
-            "xcelium_covfile": "",
-            "msie_primary_compile_args": "",
-            "msie_incremental_compile_args": "",
-            "msie_primary_inputs": "",
         }
         if os.path.isfile(tb_options_path):
             with open(tb_options_path, "r", encoding="utf-8") as filep:

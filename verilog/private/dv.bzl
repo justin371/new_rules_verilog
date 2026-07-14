@@ -360,6 +360,17 @@ def verilog_dv_test_cfg(name = None, tags = None, abstract = None, inherits = No
 def _is_dpi_shared_lib(path):
     return path.endswith(".so") or path.endswith(".dll") or path.endswith(".dylib")
 
+def _dv_library_flist_content(directories, in_flist, makelib = ""):
+    content = []
+    if makelib:
+        content.extend(["-makelib", makelib])
+    for directory in directories:
+        content.append("+incdir+{}".format(directory if directory else "."))
+    content.extend([runfiles_relative_short_path(f) for f in in_flist])
+    if makelib:
+        content.append("-endlib")
+    return content
+
 def _verilog_dv_library_impl(ctx):
     if ctx.attr.incdir:
         # Using dirname may result in bazel-out included in path
@@ -375,23 +386,7 @@ def _verilog_dv_library_impl(ctx):
     else:
         in_flist = ctx.files.srcs
 
-    content = []
-
-    # If using makelib, start here
-    if ctx.attr.makelib:
-        content.append("-makelib")
-        content.append(ctx.attr.makelib)
-
-    for d in directories:
-        if d == "":
-            d = "."
-        content.append("+incdir+{}".format(d))
-    for f in in_flist:
-        content.append(runfiles_relative_short_path(f))
-
-    # if using makelib, terminate here
-    if ctx.attr.makelib:
-        content.append("-endlib")
+    content = _dv_library_flist_content(directories, in_flist, ctx.attr.makelib)
 
     all_sos = []
     for dpi in ctx.attr.dpi:
@@ -408,15 +403,35 @@ def _verilog_dv_library_impl(ctx):
         output = out,
         content = "\n".join(content),
     )
+    vcs_out = out
+    if ctx.attr.makelib:
+        vcs_out = ctx.actions.declare_file(ctx.label.name + "_vcs.f")
+        ctx.actions.write(
+            output = vcs_out,
+            content = "\n".join(_dv_library_flist_content(directories, in_flist)),
+        )
 
     trans_srcs = get_transitive_srcs(ctx.files.srcs, ctx.attr.deps + ctx.attr.dpi, VerilogInfo, "transitive_sources", allow_other_outputs = True)
     trans_flists = get_transitive_srcs([out], ctx.attr.deps, VerilogInfo, "transitive_flists", allow_other_outputs = False)
+    trans_vcs_flists = get_transitive_srcs(
+        [vcs_out],
+        ctx.attr.deps,
+        VerilogInfo,
+        "transitive_vcs_flists",
+        allow_other_outputs = False,
+        fallback_attr_name = "transitive_flists",
+    )
     trans_dpi = get_transitive_srcs(all_sos, ctx.attr.deps, VerilogInfo, "transitive_dpi", allow_other_outputs = False)
 
-    all_files = depset(transitive = [trans_srcs, trans_flists])
+    all_files = depset(transitive = [trans_srcs, trans_flists, trans_vcs_flists])
 
     return [
-        VerilogInfo(transitive_sources = trans_srcs, transitive_flists = trans_flists, transitive_dpi = trans_dpi),
+        VerilogInfo(
+            transitive_sources = trans_srcs,
+            transitive_flists = trans_flists,
+            transitive_vcs_flists = trans_vcs_flists,
+            transitive_dpi = trans_dpi,
+        ),
         DefaultInfo(
             files = all_files,
             runfiles = ctx.runfiles(transitive_files = all_files),
@@ -476,8 +491,8 @@ verilog_dv_library = rule(
         ),
         "makelib": attr.string(
             default = "",
-            doc = "Used to specify that this DV lib should be compiled into its own library.\n" +
-                  "String value specified here is used as the name of the compile lib.",
+            doc = ("Compile this target into the named Xcelium library through -makelib/-endlib. " +
+                   "VCS receives the same ordered sources through a separate -file boundary; VCS recompilation isolation is provided by -Mupdate and Partition Compile rather than Xcelium library syntax."),
         ),
     },
     outputs = {"out": "%{name}.f"},
@@ -569,20 +584,22 @@ def _verilog_dv_tb_impl(ctx):
     )
     ctx.actions.write(
         output = ctx.outputs.compile_inputs,
-        content = verilog_input_inventory(all_deps, compile_input_files),
+        content = verilog_input_inventory(
+            all_deps,
+            compile_input_files,
+            flist_field = compile_config.flist_field,
+            fallback_field = compile_config.fallback_flist_field,
+        ),
     )
+    tb_options = {
+        "compile_inputs": runfiles_relative_short_path(ctx.outputs.compile_inputs),
+        "dut_instance": ctx.attr.dut_instance,
+        "dut_top": ctx.attr.dut_top,
+    }
+    tb_options.update(backend.tb_options(ctx, extra_compile_outputs, xcelium_covfile))
     ctx.actions.write(
         output = ctx.outputs.tb_options,
-        content = str({
-            "compile_inputs": runfiles_relative_short_path(ctx.outputs.compile_inputs),
-            "dut_instance": ctx.attr.dut_instance,
-            "dut_top": ctx.attr.dut_top,
-            "vcs_cm_hier": runfiles_relative_short_path(ctx.file.vcs_cm_hier) if ctx.file.vcs_cm_hier else "",
-            "xcelium_covfile": runfiles_relative_short_path(xcelium_covfile) if xcelium_covfile else "",
-            "msie_primary_compile_args": runfiles_relative_short_path(extra_compile_outputs.primary_compile_args) if extra_compile_outputs.primary_compile_args else "",
-            "msie_incremental_compile_args": runfiles_relative_short_path(extra_compile_outputs.incremental_compile_args) if extra_compile_outputs.incremental_compile_args else "",
-            "msie_primary_inputs": runfiles_relative_short_path(extra_compile_outputs.primary_inputs) if extra_compile_outputs.primary_inputs else "",
-        }),
+        content = str(tb_options),
     )
 
     ctx.actions.write(
@@ -592,7 +609,14 @@ def _verilog_dv_tb_impl(ctx):
     )
 
     trans_srcs = get_transitive_srcs([], all_deps, VerilogInfo, "transitive_sources", allow_other_outputs = True)
-    trans_flists = get_transitive_srcs([], all_deps, VerilogInfo, "transitive_flists", allow_other_outputs = False)
+    trans_flists = get_transitive_srcs(
+        [],
+        all_deps,
+        VerilogInfo,
+        compile_config.flist_field,
+        allow_other_outputs = False,
+        fallback_attr_name = compile_config.fallback_flist_field,
+    )
     generated_outputs = [
         ctx.outputs.compile_args,
         ctx.outputs.compile_inputs,

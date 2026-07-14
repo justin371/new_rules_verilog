@@ -1,5 +1,3 @@
-load("@pip_deps//:requirements.bzl", "requirement")
-
 # vim: set ft=bzl :
 load("@rules_python//python:defs.bzl", "py_library")
 
@@ -53,7 +51,6 @@ py_library(
 py_library(
     name = "regression_report",
     srcs = ["regression_report.py"],
-    deps = [requirement("jinja2")],
 )
 
 py_library(

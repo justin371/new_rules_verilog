@@ -15,6 +15,10 @@ if [[ "$(bazel --version)" != "bazel 7.7.1" ]]; then
   exit 1
 fi
 
-bazel test --test_output=errors //:buildifier_diff //tests/... //examples/dpi:dpi_c_test
+bazel test \
+  --incompatible_use_python_toolchains=false \
+  --python_path=/usr/bin/python3.12 \
+  --test_output=errors \
+  //:buildifier_diff //tests/... //examples/dpi:dpi_c_test
 bazel run //:buildifier_lint
 ./tests/doc_test.sh

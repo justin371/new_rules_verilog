@@ -1,7 +1,5 @@
 # vim: set ft=bzl :
 # lib/simulators/BUILD
-load("@pip_deps//:requirements.bzl", "requirement")
-
 package(default_visibility = ["//visibility:public"])
 
 py_library(
@@ -18,7 +16,6 @@ py_library(
         ":options",
         ":xcelium_options",
         "//lib:coverage_data",
-        requirement("jinja2"),
     ],
 )
 

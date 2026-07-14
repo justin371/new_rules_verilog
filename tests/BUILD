@@ -62,6 +62,17 @@ py_test(
 )
 
 py_test(
+    name = "external_python_deps_test",
+    srcs = ["external_python_deps_test.py"],
+    data = [
+        "//:WORKSPACE",
+        "//bin:BUILD",
+        "//lib:BUILD",
+        "//lib/simulators:BUILD",
+    ],
+)
+
+py_test(
     name = "job_manager_launch_test",
     srcs = ["job_manager_launch_test.py"],
     deps = [
@@ -111,6 +122,13 @@ py_test(
     name = "simmer_results_test",
     srcs = ["simmer_results_test.py"],
     deps = ["//lib:simmer_results"],
+)
+
+py_test(
+    name = "simmer_entrypoint_test",
+    srcs = ["simmer_entrypoint_test.py"],
+    args = ["$(location //bin:simmer)"],
+    data = ["//bin:simmer"],
 )
 
 buildifier(

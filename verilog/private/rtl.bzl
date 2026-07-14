@@ -94,10 +94,6 @@ def create_flist_content(ctx, gumi_path, allow_library_discovery, makelib = ""):
     return flist_content
 
 def _verilog_rtl_library_impl(ctx):
-    if ctx.attr.no_synth:
-        fail(("{} sets no_synth=True, but rules_verilog has no synthesis consumer that can honor it. " +
-              "Filter this target in the synthesis rule instead.").format(ctx.label))
-
     srcs = ctx.files.headers + ctx.files.modules + ctx.files.lib_files + ctx.files.direct
 
     if ctx.attr.is_pkg:
@@ -164,6 +160,13 @@ def _verilog_rtl_library_impl(ctx):
         gumi_path = runfiles_relative_short_path(ctx.file.gumi_file_override)
 
     flist_content = create_flist_content(ctx, gumi_path = gumi_path, allow_library_discovery = False, makelib = ctx.attr.makelib)
+    vcs_flist = ctx.outputs.flist
+    if ctx.attr.makelib:
+        vcs_flist = ctx.actions.declare_file(ctx.label.name + "_vcs.f")
+        ctx.actions.write(
+            output = vcs_flist,
+            content = "\n".join(create_flist_content(ctx, gumi_path = gumi_path, allow_library_discovery = False)),
+        )
 
     last_module = None
     for m in ctx.files.modules:
@@ -180,11 +183,19 @@ def _verilog_rtl_library_impl(ctx):
 
     trans_srcs = get_transitive_srcs(srcs, ctx.attr.deps, VerilogInfo, "transitive_sources", allow_other_outputs = True)
     trans_flists = get_transitive_srcs([ctx.outputs.flist], ctx.attr.deps, VerilogInfo, "transitive_flists", allow_other_outputs = False)
+    trans_vcs_flists = get_transitive_srcs(
+        [vcs_flist],
+        ctx.attr.deps,
+        VerilogInfo,
+        "transitive_vcs_flists",
+        allow_other_outputs = False,
+        fallback_attr_name = "transitive_flists",
+    )
     trans_dpi = get_transitive_srcs([], ctx.attr.deps, VerilogInfo, "transitive_dpi", allow_other_outputs = False)
 
-    runfiles = ctx.runfiles(transitive_files = depset(transitive = [trans_srcs, trans_flists, trans_dpi]))
+    runfiles = ctx.runfiles(transitive_files = depset(transitive = [trans_srcs, trans_flists, trans_vcs_flists, trans_dpi]))
 
-    all_files = depset(transitive = [trans_srcs, trans_flists])
+    all_files = depset(transitive = [trans_srcs, trans_flists, trans_vcs_flists])
 
     return [
         ShellInfo(
@@ -195,6 +206,7 @@ def _verilog_rtl_library_impl(ctx):
         VerilogInfo(
             transitive_sources = trans_srcs,
             transitive_flists = trans_flists,
+            transitive_vcs_flists = trans_vcs_flists,
             transitive_dpi = trans_dpi,
             last_module = last_module,
         ),
@@ -236,7 +248,7 @@ verilog_rtl_library = rule(
         ),
         "no_synth": attr.bool(
             default = False,
-            doc = "Reserved compatibility attribute. Setting it to True fails analysis because this repository has no synthesis consumer that can honor it. Filter simulation-only targets in the synthesis rule instead.",
+            doc = "Compatibility marker for downstream synthesis aspects or consumers. Simulation targets continue to include this library.",
         ),
         "is_pkg": attr.bool(
             default = False,
@@ -268,8 +280,8 @@ verilog_rtl_library = rule(
         ),
         "makelib": attr.string(
             default = "",
-            doc = "Used to specify that this RTL lib should be compiled into its own library.\n" +
-                  "String value specified here is used as the name of the compile lib.",
+            doc = ("Compile this target into the named Xcelium library through -makelib/-endlib. " +
+                   "VCS receives the same ordered sources through a separate -file boundary; VCS recompilation isolation is provided by -Mupdate and Partition Compile rather than Xcelium library syntax."),
         ),
     },
     outputs = {
@@ -297,8 +309,8 @@ def verilog_rtl_pkg(
         See verilog_rtl_library::direct.
       no_synth: Default False.
 
-        Reserved for compatibility. True is rejected because this repository
-        cannot enforce synthesis filtering.
+        Compatibility marker for downstream synthesis aspects or consumers.
+        Simulation targets continue to include this package.
       deps: Other packages this target is dependent on.
 
         See verilog_rtl_library::deps.
@@ -539,7 +551,15 @@ def _verilog_rtl_lint_test_impl(ctx):
     else:
         fail("verilog_rtl_lint_test {} requires rulefile when simulator = 'XRUN'".format(ctx.label))
 
-    trans_flists = get_transitive_srcs([], ctx.attr.shells + ctx.attr.deps, VerilogInfo, "transitive_flists", allow_other_outputs = False)
+    flist_field = "transitive_vcs_flists" if simulator == "VCS" else "transitive_flists"
+    trans_flists = get_transitive_srcs(
+        [],
+        ctx.attr.shells + ctx.attr.deps,
+        VerilogInfo,
+        flist_field,
+        allow_other_outputs = False,
+        fallback_attr_name = "transitive_flists",
+    )
 
     # This is a workaround for an issue with using -define in Ascent and will be removed once the Ascent issue is fixed
     # See github issue #24
@@ -596,7 +616,14 @@ def _verilog_rtl_lint_test_impl(ctx):
         },
     )
 
-    trans_flists = get_transitive_srcs([], ctx.attr.shells + ctx.attr.deps, VerilogInfo, "transitive_flists", allow_other_outputs = False)
+    trans_flists = get_transitive_srcs(
+        [],
+        ctx.attr.shells + ctx.attr.deps,
+        VerilogInfo,
+        flist_field,
+        allow_other_outputs = False,
+        fallback_attr_name = "transitive_flists",
+    )
     trans_srcs = get_transitive_srcs([], ctx.attr.shells + ctx.attr.deps, VerilogInfo, "transitive_sources", allow_other_outputs = True)
 
     lint_runfile_targets = ctx.attr.shells + ctx.attr.deps + ctx.attr.design_info + [

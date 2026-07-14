@@ -1,5 +1,3 @@
-load("@pip_deps//:requirements.bzl", "requirement")
-
 # vim: set ft=bzl :
 load("@rules_python//python:defs.bzl", "py_binary", "py_library")
 
@@ -21,7 +19,6 @@ py_binary(
     srcs = ["lint_parser_hal.py"],
     deps = [
         "//lib:cmn_logging",
-        requirement("beautifulsoup4"),
     ],
 )
 
@@ -41,9 +38,10 @@ py_binary(
     name = "simmer",
     srcs = ["simmer.py"],
     data = glob(["templates/**"]),
+    imports = ["."],
     deps = [
-        "//bin:args_parser",
-        "//bin:check_test",
+        "//bin:args_parser_lib",
+        "//bin:check_test_lib",
         "//lib:cmn_logging",
         "//lib:compile_cache",
         "//lib:job_lib",
@@ -56,7 +54,6 @@ py_binary(
         "//lib:sim_artifacts",
         "//lib:simmer_results",
         "//lib/simulators",
-        requirement("jinja2"),
     ],
 )
 
