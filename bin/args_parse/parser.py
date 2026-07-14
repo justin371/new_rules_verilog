@@ -122,6 +122,7 @@ def parse_args(argv):
             '--vcs-partcomp-jobs',
             '--vcs-partcomp-dir',
             '--vcs-partcomp-sharedlib',
+            '--vcs-auto-compile-cache',
         ] if argument_explicitly_requested(argv, argument)
     ]
     options.vcs_explicit_switches = [
@@ -140,6 +141,7 @@ def parse_args(argv):
             '--vcs-partcomp-jobs',
             '--vcs-partcomp-dir',
             '--vcs-partcomp-sharedlib',
+            '--vcs-auto-compile-cache',
             '--smartlog',
             '--vcs-runner',
             '--dtl',

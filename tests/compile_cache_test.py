@@ -3,7 +3,8 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from lib.compile_cache import compile_fingerprint, validate_compile_fingerprint, write_compile_fingerprint
+from lib.compile_cache import (can_reuse_compile, compile_fingerprint, invalidate_compile_fingerprint,
+                               validate_compile_fingerprint, write_compile_fingerprint)
 
 
 class CompileCacheTest(unittest.TestCase):
@@ -32,6 +33,7 @@ class CompileCacheTest(unittest.TestCase):
         mode_changed = compile_fingerprint(project, "vcs -debug_access -f compile.f", compile_args, inventory, project)
 
         self.assertNotEqual(initial, source_changed)
+        self.assertEqual(initial["compile_inputs_manifest_sha256"], source_changed["compile_inputs_manifest_sha256"])
         self.assertNotEqual(source_changed, mode_changed)
 
     def test_fingerprint_ignores_unrelated_tracked_changes(self):
@@ -65,6 +67,23 @@ class CompileCacheTest(unittest.TestCase):
         validate_compile_fingerprint(job_dir, fingerprint)
         with self.assertRaises(RuntimeError):
             validate_compile_fingerprint(job_dir, dict(fingerprint, compile_script="changed"))
+
+    def test_automatic_reuse_turns_validation_failure_into_cache_miss(self):
+        project, _, compile_args = self._project()
+        job_dir = project / "vcomp"
+        job_dir.mkdir()
+        fingerprint = compile_fingerprint(project, "vcs -f compile.f", compile_args)
+        write_compile_fingerprint(job_dir, fingerprint)
+
+        self.assertEqual((True, None), can_reuse_compile(job_dir, fingerprint, lambda: None))
+        hit, reason = can_reuse_compile(job_dir, fingerprint, lambda: (_ for _ in ()).throw(OSError("no simv")))
+        self.assertFalse(hit)
+        self.assertIn("no simv", reason)
+
+        invalidate_compile_fingerprint(job_dir)
+        hit, reason = can_reuse_compile(job_dir, fingerprint, lambda: None)
+        self.assertFalse(hit)
+        self.assertIn("requires", reason)
 
     def test_fingerprint_tracks_bazel_runfile_content(self):
         project, _, compile_args = self._project()
@@ -120,6 +139,17 @@ class CompileCacheTest(unittest.TestCase):
 
         self.assertNotEqual(initial, config_changed)
         self.assertNotEqual(config_changed, environment_changed)
+
+        equivalent_config = Path(tempfile.mkdtemp()) / "coverage_hier.cfg"
+        equivalent_config.write_text("+tree dut\n", encoding="utf-8")
+        equivalent = compile_fingerprint(
+            project,
+            "vcs -f compile.f",
+            compile_args,
+            extra_input_paths=[equivalent_config],
+            environment={"VCS_HOME": "/tools/vcs/Y-2026.03"},
+        )
+        self.assertEqual(config_changed["extra_inputs_content_sha256"], equivalent["extra_inputs_content_sha256"])
 
 
 if __name__ == "__main__":

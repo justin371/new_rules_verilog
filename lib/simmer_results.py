@@ -103,6 +103,8 @@ def record_compile_job(run, vcomp_job):
         "status": vcomp_job.jobstatus.name,
         "compile_dir": vcomp_job.job_dir,
         "cmp_log": vcomp_job.log_path,
+        "duration_s": int(getattr(vcomp_job, "duration_s", 0) or 0),
+        "metrics": getattr(vcomp_job, "compile_metrics", {}),
         "error_message": getattr(vcomp_job, "error_message", None),
     }
     _upsert_by_key(run["compile"], "vcomp_target", compile_record)

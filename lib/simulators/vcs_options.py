@@ -54,14 +54,14 @@ def validate_vcs_runtime_options(options, parser):
         parser.error("--fgp must be a positive integer thread count. Stopping before Bazel starts.")
     if options.vcs_runner is not None and not options.vcs_runner.strip():
         parser.error("--vcs-runner must not be empty. Stopping before Bazel starts.")
-    if options.vcs_partcomp_jobs < 1:
+    if options.vcs_partcomp_jobs != 'auto' and options.vcs_partcomp_jobs < 1:
         parser.error("--vcs-partcomp-jobs must be a positive integer. Stopping before Bazel starts.")
     if options.vcs_partcomp_dir is not None and not options.vcs_partcomp_dir.strip():
         parser.error("--vcs-partcomp-dir must not be empty. Stopping before Bazel starts.")
     if options.vcs_partcomp_sharedlib is not None and not options.vcs_partcomp_sharedlib.strip():
         parser.error("--vcs-partcomp-sharedlib must not be empty. Stopping before Bazel starts.")
     if options.vcs_partcomp_mode == 'disabled' and any([
-            options.vcs_partcomp_jobs != 8,
+            options.vcs_partcomp_jobs != 'auto',
             options.vcs_partcomp_dir is not None,
             options.vcs_partcomp_sharedlib is not None,
     ]):
@@ -75,6 +75,12 @@ def validate_vcs_runtime_options(options, parser):
         if options.vcs_partcomp_dir is not None and sharedlib == os.path.abspath(options.vcs_partcomp_dir):
             parser.error("--vcs-partcomp-dir and --vcs-partcomp-sharedlib must use different directories. "
                          "Stopping before Bazel starts.")
+    if options.vcs_auto_compile_cache and options.no_compile:
+        parser.error("--vcs-auto-compile-cache cannot be combined with --no-compile. "
+                     "Stopping before Bazel starts.")
+    if options.vcs_auto_compile_cache and options.recompile:
+        parser.error("--vcs-auto-compile-cache cannot be combined with --recompile. "
+                     "Stopping before Bazel starts.")
     if options.dtl and options.vcs_partcomp_mode == 'disabled':
         parser.error("--dtl requires VCS Partition Compile. Stopping before Bazel starts.")
     if options.dtl and any([

@@ -130,6 +130,18 @@ class SimulatorInterface(abc.ABC):
         """
         return
 
+    def validate_compile_cache_context(self, vcomp_job):
+        """Validate backend metadata after the compile fingerprint is available."""
+        return
+
+    def should_auto_reuse_compile(self):
+        """Return whether a fingerprint hit may bypass compilation."""
+        return False
+
+    def prepare_compile_execution(self, vcomp_job, reusing_compile):
+        """Prepare mutable backend state after the compile/reuse decision."""
+        return
+
     def prepare_compile_job(self, vcomp_job):
         """Resolve and validate simulator-specific compile inputs."""
         return
@@ -137,6 +149,10 @@ class SimulatorInterface(abc.ABC):
     def record_compile_artifacts(self, vcomp_job):
         """Record simulator-specific outputs after a successful compile."""
         return
+
+    def collect_compile_metrics(self, vcomp_job):
+        """Return optional backend metrics for persistent simmer results."""
+        return {}
 
     def cleanup_shared_runtime_artifacts(self, vcomp_jobs):
         """Clean simulator scratch files created under shared runfiles dirs.
@@ -200,6 +216,10 @@ class SimulatorInterface(abc.ABC):
                 for key in ("LOADEDMODULES", "MODULEPATH", "PATH")
             },
         }
+
+    def compile_script_for_fingerprint(self, compile_script):
+        """Normalize performance-only compile switches before hashing."""
+        return compile_script
 
     def collect_coverage_data(self, vcomp_jobs):
         """Return dashboard coverage summaries keyed by testbench name."""

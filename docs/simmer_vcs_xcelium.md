@@ -174,14 +174,36 @@ cells and packages.
 ### VCS Partition Compile
 
 VCS Y-2026.03 Partition Compile is enabled by default with adaptive scheduling,
-eight maximum compile processes and redundant-partition cleanup. Simmer passes:
+allocation-aware compile parallelism and redundant-partition cleanup. Simmer
+passes the detected job allocation as `N`:
 
 ```text
 -partcomp=adaptive_sched
 -partcomp_dir=<tb>__VCS_VCOMP/partitionlib
 -partcomp=incr_clean
--fastpartcomp=j8
+-fastpartcomp=jN
 ```
+
+`N` comes from the CPUs assigned to the running job, not from an idle-host or
+cluster-wide CPU scan. Simmer checks the current host allocation in
+`LSB_MCPU_HOSTS`/`LSB_HOSTS`, then Slurm per-task allocation and process CPU
+affinity. A multi-host LSF total without per-host evidence falls back to one
+worker. If no allocation data is available, simmer uses the host CPU count
+capped at the previous default of eight. `--vcs-partcomp-jobs N` always
+overrides automatic detection.
+
+For an LSF wrapper such as `bs='bsub -I -q syn'`, omitting `-n` normally means
+the queue's default allocation, often one slot, so simmer selects `j1` even if
+the execution host has many idle CPUs. Request parallel capacity from LSF when
+it is needed:
+
+```bash
+bs simmer -t 'sys_tb:smoke_test@1' --simulator VCS
+bs -n 8 simmer -t 'sys_tb:smoke_test@1' --simulator VCS
+```
+
+The second command selects at most `j8` after LSF grants those slots. It does
+not infer permission from the host's current idle CPU count.
 
 The partition database belongs to one VCOMP directory rather than the shared
 Bazel runfiles tree. A normal internal RTL or testbench edit therefore rebuilds
@@ -202,6 +224,17 @@ with:
 simmer -t 'sys_tb:smoke_test@1' --simulator VCS \
   --vcs-partcomp-jobs 16 --vcs-profile
 ```
+
+For repeated invocations that often have no compile-input changes, opt into an
+automatic fingerprint cache:
+
+```bash
+simmer -t 'sys_tb:smoke_test@1' --simulator VCS --vcs-auto-compile-cache
+```
+
+A matching fingerprint and existing `simv` bypass VCS compilation. A miss
+compiles normally, unlike strict `--no-compile`. The option cannot be combined
+with `--recompile`.
 
 Available modes are `adaptive`, `auto`, `low`, `high`, `relax` and `disabled`:
 
@@ -228,7 +261,18 @@ simmer -t 'sys_tb:smoke_test@1' --simulator VCS \
 
 The writable `--vcs-partcomp-dir` and read-only
 `--vcs-partcomp-sharedlib` must differ. Do not reuse a baseline across VCS
-versions, source releases, defines, coverage/debug modes or compile arguments.
+versions, source inventories, defines, coverage/debug modes or compile arguments.
+Explicit baseline builds and shared-library consumers write
+`.rules_verilog_partcomp.json` into the writable partition directory. A shared
+library with that manifest is rejected before VCS starts when its tool
+platform, source inventory or compile configuration is incompatible.
+Source-content edits with the same inventory remain valid inputs and VCS
+recompiles the affected partitions. Existing databases without a manifest
+remain usable with a warning so they can be republished incrementally.
+
+For automatic compile reuse or shared baselines, simmer resolves the actual
+VCS build with `vcs -full64 -ID`. Sites may set `RV_VCS_TOOL_ID` to a stable
+release ID to avoid that probe while retaining version-safe reuse.
 Simmer intentionally does not use `-simcopy_opts=mv`, which would make the
 source shared database unusable. `--recompile` removes the default local
 database because it is under VCOMP, but it does not delete a custom external
@@ -238,7 +282,9 @@ For effective partitioning, keep third-party components in separate Bazel
 libraries, wrap testbench code in SystemVerilog packages, avoid `$unit` code and
 minimize cross-partition XMRs. Inspect `cmp.log` for `PC_SHARED`, `PC_RECOMPILE`
 and the `-pcmakeprof` timing table. Coverage and Verdi require the referenced
-partition database to remain available.
+partition database to remain available. With `--vcs-profile`, simmer also
+stores marker counts, selected partition mode/jobs, compile wall time and cache
+reuse state in the compile entry of `.simmer_results.json`.
 
 Start with automatic partitioning. If profiling shows that stable third-party
 code shares a partition with frequently changing project code, add a VCS

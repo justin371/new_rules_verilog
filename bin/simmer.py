@@ -219,6 +219,7 @@ class VCompJob(Job):
 
         self.main_cmdline = None
         self.cov_work_dir = None
+        self.compile_cache_hit = False
 
     def pre_run(self):
         super(VCompJob, self).pre_run()
@@ -313,13 +314,14 @@ class VCompJob(Job):
         fingerprint_inputs = self.simulator.get_compile_fingerprint_inputs(self)
         self.compile_fingerprint = compile_cache.compile_fingerprint(
             self.rcfg.proj_dir,
-            compile_script,
+            self.simulator.compile_script_for_fingerprint(compile_script),
             self.bazel_compile_args,
             os.path.join(self.bazel_runfiles_main, self.tb_options["compile_inputs"])
             if self.tb_options["compile_inputs"] else None,
             self.bazel_runfiles_main,
             **fingerprint_inputs,
         )
+        self.simulator.validate_compile_cache_context(self)
 
         log.debug("bazel_runfiles_main: %s", self.bazel_runfiles_main)
 
@@ -327,8 +329,27 @@ class VCompJob(Job):
             self.simulator.validate_reusable_compile_artifacts(self)
             compile_cache.validate_compile_fingerprint(self.job_dir, self.compile_fingerprint)
             self.main_cmdline = "echo \"Bypassing {} due to --no-compile\"".format(self)
+        elif self.simulator.should_auto_reuse_compile():
+            self.compile_cache_hit, miss_reason = compile_cache.can_reuse_compile(
+                self.job_dir,
+                self.compile_fingerprint,
+                lambda: self.simulator.validate_reusable_compile_artifacts(self),
+            )
+            if not self.compile_cache_hit:
+                log.info("VCS compile cache miss for %s: %s", self, miss_reason)
+                self.main_cmdline = shlex.join(["bash", vcomp_sh_path])
+            else:
+                self.main_cmdline = "echo \"Bypassing {} due to VCS compile cache hit\"".format(self)
         else:
             self.main_cmdline = shlex.join(["bash", vcomp_sh_path])
+
+        if not self.rcfg.options.no_compile and not self.compile_cache_hit:
+            compile_cache.invalidate_compile_fingerprint(self.job_dir)
+
+        self.simulator.prepare_compile_execution(
+            self,
+            reusing_compile=self.rcfg.options.no_compile or self.compile_cache_hit,
+        )
 
         log.debug(" > %s", self.main_cmdline)
 
@@ -435,7 +456,7 @@ class VCompJob(Job):
             if self.jobstatus == JobStatus.PASSED: self.jobstatus = JobStatus.FAILED
 
         # --- Final Logging ---
-        if self.jobstatus == JobStatus.PASSED and not self.rcfg.options.no_compile:
+        if (self.jobstatus == JobStatus.PASSED and not self.rcfg.options.no_compile and not self.compile_cache_hit):
             try:
                 self.simulator.record_compile_artifacts(self)
             except (OSError, RuntimeError) as exc:
@@ -447,6 +468,8 @@ class VCompJob(Job):
                     compile_cache.write_compile_fingerprint(self.job_dir, self.compile_fingerprint)
                 except OSError as exc:
                     log.warning("Could not write compile fingerprint for %s: %s", self, exc)
+
+        self.compile_metrics = self.simulator.collect_compile_metrics(self)
 
         # log_level is determined by initial return code and potential warning failures
         log_level("%s vcomp %s in %s", self.name, self.jobstatus, self.job_dir)
