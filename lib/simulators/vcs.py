@@ -133,6 +133,13 @@ class VcsSimulator(SimulatorInterface):
         'relax': '-partcomp=autopart_relax',
     }
 
+    VCS_PARTCOMP_FORCE_SWITCHES = frozenset({
+        '--vcs-partcomp-mode',
+        '--vcs-partcomp-jobs',
+        '--vcs-partcomp-dir',
+        '--vcs-partcomp-sharedlib',
+    })
+
     def __init__(self, options, rcfg, env):
         super().__init__(options, rcfg, env)
         self.vso_workflow = VsoWorkflow(options, rcfg)
@@ -393,8 +400,11 @@ class VcsSimulator(SimulatorInterface):
                 jobs,
             ])
 
-        mode_option = self.VCS_PARTCOMP_OPTION_BY_MODE.get(self.options.vcs_partcomp_mode)
+        effective_mode = self.get_effective_partcomp_mode()
+        mode_option = self.VCS_PARTCOMP_OPTION_BY_MODE.get(effective_mode)
         if mode_option is None:
+            if self.options.vcs_partcomp_mode != 'disabled':
+                log.info("VCS Partition Compile bypassed for the implicit one-CPU allocation; using -Mupdate")
             return ''
 
         job_count = self.get_partcomp_jobs()
@@ -409,6 +419,15 @@ class VcsSimulator(SimulatorInterface):
         if self.options.vcs_partcomp_sharedlib is not None:
             args.append('-partcomp_sharedlib={}'.format(os.path.abspath(self.options.vcs_partcomp_sharedlib)))
         return shlex.join(args)
+
+    def get_effective_partcomp_mode(self):
+        if self.options.vcs_partcomp_mode == 'disabled' or self.options.dtl:
+            return self.options.vcs_partcomp_mode
+        explicitly_requested = self.VCS_PARTCOMP_FORCE_SWITCHES.intersection(
+            self.options.vcs_partcomp_explicit_switches)
+        if self.get_partcomp_jobs() == 1 and not explicitly_requested:
+            return 'disabled'
+        return self.options.vcs_partcomp_mode
 
     def get_partcomp_jobs(self):
         if self._resolved_partcomp_jobs is not None:
@@ -724,15 +743,16 @@ class VcsSimulator(SimulatorInterface):
 
     def collect_compile_metrics(self, vcomp_job):
         reused = bool(self.options.no_compile or getattr(vcomp_job, "compile_cache_hit", False))
+        effective_partcomp_mode = self.get_effective_partcomp_mode()
         metrics = {
             "compile_cache_hit":
             bool(getattr(vcomp_job, "compile_cache_hit", False)),
             "compile_reused":
             reused,
             "partcomp_mode":
-            self.options.vcs_partcomp_mode,
+            effective_partcomp_mode,
             "partcomp_jobs":
-            self.get_partcomp_jobs() if self.options.vcs_partcomp_mode != 'disabled' and not reused else None,
+            self.get_partcomp_jobs() if effective_partcomp_mode != 'disabled' and not reused else None,
         }
         if reused or not self.options.vcs_profile or not os.path.isfile(vcomp_job.log_path):
             return metrics

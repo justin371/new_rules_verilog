@@ -173,9 +173,10 @@ cells and packages.
 
 ### VCS Partition Compile
 
-VCS Y-2026.03 Partition Compile is enabled by default with the VCS-recommended
-autopartitioning mode, allocation-aware compile parallelism and
-redundant-partition cleanup. Simmer passes the detected job allocation as `N`:
+With at least two allocated CPUs, VCS Y-2026.03 Partition Compile is enabled by
+default with the VCS-recommended autopartitioning mode, allocation-aware compile
+parallelism and redundant-partition cleanup. Simmer passes the detected job
+allocation as `N`:
 
 ```text
 -partcomp
@@ -192,8 +193,11 @@ worker. Affinity-only and host-count fallbacks are capped at the conservative
 default of eight. `--vcs-partcomp-jobs N` always overrides automatic detection.
 
 For an LSF wrapper such as `bs='bsub -I -q syn'`, omitting `-n` normally means
-the queue's default allocation, often one slot, so simmer limits Partition
-Compile to `j1`. Request parallel capacity from LSF when it is needed:
+the queue's default allocation, often one slot. Simmer bypasses Partition
+Compile for this implicit one-CPU case and uses VCS's regular incremental
+`-Mupdate` flow. This avoids serial partition overhead and the VCS Partition
+Compile frontend path while providing no parallel speedup. Request parallel
+capacity from LSF when it is needed:
 
 ```bash
 bs simmer -t 'sys_tb:smoke_test@1' --simulator VCS
@@ -201,7 +205,13 @@ bs -n 8 simmer -t 'sys_tb:smoke_test@1' --simulator VCS
 ```
 
 The second command selects at most `j8` after LSF grants those slots. It does
-not infer permission from the host's current idle CPU count.
+not infer permission from the host's current idle CPU count. Explicit partcomp
+settings still force the requested flow, including a diagnostic `j1` run:
+
+```bash
+bs simmer -t 'sys_tb:smoke_test@1' --simulator VCS \
+  --vcs-partcomp-mode auto --vcs-partcomp-jobs 1
+```
 
 The partition database belongs to one VCOMP directory rather than the shared
 Bazel runfiles tree. A normal internal RTL or testbench edit therefore rebuilds

@@ -611,7 +611,7 @@ class VcsRuntimeContractTest(unittest.TestCase):
             self.assertEqual("VCS Y-2026.03", probe.get_tool_identity())
         self.assertEqual(["vcs", "-full64", "-ID"], run.call_args.args[0][-3:])
 
-    def test_vcs_partcomp_auto_jobs_honor_default_single_slot_lsf_job(self):
+    def test_vcs_partcomp_auto_jobs_bypass_partcomp_for_default_single_slot_lsf_job(self):
         lsf_environment = {
             "LSB_DJOB_NUMPROC": "1",
             "LSB_HOSTS": "sh-cloud30",
@@ -624,10 +624,26 @@ class VcsRuntimeContractTest(unittest.TestCase):
         simulator = VcsSimulator(options, DummyRegressionConfig(), None)
         with mock.patch.dict(os.environ, lsf_environment, clear=True), \
              mock.patch("lib.simulators.vcs.os.sched_getaffinity", create=True, return_value=set(range(64))):
-            partcomp_args = shlex.split(simulator.generate_compile_options(DummyVcompJob())["partcomp_opts"])
+            partcomp_opts = simulator.generate_compile_options(DummyVcompJob())["partcomp_opts"]
+            metrics = simulator.collect_compile_metrics(SimpleNamespace(log_path="missing", compile_cache_hit=False))
+
+        self.assertEqual("", partcomp_opts)
+        self.assertEqual("disabled", metrics["partcomp_mode"])
+        self.assertIsNone(metrics["partcomp_jobs"])
+
+        cache_options = parse_args(["--simulator", "VCS", "--vcs-auto-compile-cache"])
+        cache_simulator = VcsSimulator(cache_options, DummyRegressionConfig(), None)
+        with mock.patch.dict(os.environ, lsf_environment, clear=True), \
+             mock.patch("lib.simulators.vcs.os.sched_getaffinity", create=True, return_value=set(range(64))):
+            self.assertEqual("", cache_simulator.generate_compile_options(DummyVcompJob())["partcomp_opts"])
+
+    def test_vcs_explicit_partcomp_jobs_preserve_single_worker_flow(self):
+        options = parse_args(["--simulator", "VCS", "--vcs-partcomp-jobs", "1"])
+        simulator = VcsSimulator(options, DummyRegressionConfig(), None)
+
+        partcomp_args = shlex.split(simulator.generate_compile_options(DummyVcompJob())["partcomp_opts"])
 
         self.assertIn("-partcomp", partcomp_args)
-        self.assertNotIn("-partcomp=adaptive_sched", partcomp_args)
         self.assertIn("-fastpartcomp=j1", partcomp_args)
 
     def test_vcs_explicit_partcomp_request_preserves_single_worker_flow(self):
@@ -658,12 +674,12 @@ class VcsRuntimeContractTest(unittest.TestCase):
 
         self.assertEqual("auto", options.vcs_partcomp_mode)
 
-        with mock.patch("lib.simulators.vcs.detect_allocated_cpus", return_value=(8, "unit test")):
+        with mock.patch("lib.simulators.vcs.detect_allocated_cpus", return_value=(1, "unit test")):
             partcomp_args = shlex.split(simulator.generate_compile_options(vcomp)["partcomp_opts"])
 
         self.assertEqual("-partcomp", partcomp_args[0])
         self.assertIn("-dir={}".format(os.path.join(vcomp.job_dir, "dtl_static")), partcomp_args)
-        self.assertIn("-fastpartcomp=j8", partcomp_args)
+        self.assertIn("-fastpartcomp=j1", partcomp_args)
 
     def test_vcs_partcomp_manifest_is_written_and_validated(self):
         partition_dir = tempfile.mkdtemp(prefix="partcomp baseline ")

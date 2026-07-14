@@ -89,7 +89,8 @@ to be available on `PATH`.
 
 ### VCS Partition Compile
 
-VCS regressions use Partition Compile by default. The writable partition
+VCS regressions with at least two allocated CPUs use Partition Compile by
+default; implicit one-CPU jobs use regular `-Mupdate`. The writable partition
 database is `<tb>__VCS_VCOMP/partitionlib`; `--waves` and `--gui` use sibling
 `partitionlib_waves` and `partitionlib_gui` databases so incompatible KDB
 options do not invalidate each other. Stable third-party IP/VIP

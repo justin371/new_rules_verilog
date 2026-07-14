@@ -85,7 +85,8 @@ def add_vcs_arguments(parser):
                       type=_partcomp_jobs,
                       help=('Maximum parallel partition compile processes passed as -fastpartcomp=jN (default: auto). '
                             'auto uses CPUs allocated to this job by LSF/Slurm or process affinity; it never scans '
-                            'cluster idle CPUs. Pass an integer to override the detected allocation.'))
+                            'cluster idle CPUs. An implicit one-CPU allocation uses regular -Mupdate; pass an integer '
+                            'or an explicit partcomp mode to force Partition Compile.'))
     gvcs.add_argument('--vcs-partcomp-dir',
                       default=None,
                       help=('Override the writable -partcomp_dir. The default is '
