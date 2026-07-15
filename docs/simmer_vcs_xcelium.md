@@ -243,8 +243,8 @@ A matching fingerprint and existing `simv` bypass VCS compilation. A miss
 compiles normally, unlike strict `--no-compile`. The option cannot be combined
 with `--recompile`.
 
-Available modes after `--vcs-partcomp` are `auto`, `adaptive`, `low`, `high`,
-`relax` and `disabled`. Keep `auto` until profiling shows a reason to tune the
+Available modes after `--vcs-partcomp` are `auto`, `adaptive`, `low`, `high` and
+`relax`. Keep `auto` until profiling shows a reason to tune the
 partition thresholds or adaptive scheduler. Omit `--vcs-partcomp` for the
 normal `-Mupdate` flow:
 
@@ -552,7 +552,7 @@ For quiet normal runs, avoid `--tool-debug`; it prints scheduler polling noise.
   number of concurrent tests to account for those threads.
 - Avoid waves, `-debug_access`, VPI and SmartLog in throughput regressions.
 
-DTL (`--dtl`) and VCS ICO (`--ico`) are opt-in advanced flows. ICO does not change VCS compilation. Simmer initializes a
+DTL (`--vcs-partcomp --dtl`) and VCS ICO (`--ico`) are opt-in advanced flows. ICO does not change VCS compilation. Simmer initializes a
 shared CDB with `crg -dir <shared_record> -shared init` and passes the recommended
 `+ntb_solver_bias_mode_auto_config=2`, shared-record, work-directory, UVM test-type
 and test-name options to each `simv`. Existing initialized CDBs are reused.

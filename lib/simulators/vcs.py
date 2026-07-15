@@ -384,6 +384,11 @@ class VcsSimulator(SimulatorInterface):
         return opts
 
     def get_partition_compile_options(self, vcomp_job):
+        effective_mode = self.get_effective_partcomp_mode()
+        if effective_mode == 'disabled':
+            log.info("VCS Partition Compile is disabled by default; using -Mupdate")
+            return ''
+
         if self.options.dtl:
             jobs = '-fastpartcomp=j{}'.format(self.get_partcomp_jobs())
             dtl_dir = os.path.join(vcomp_job.job_dir, self._debug_partition_dirname('dtl_static'))
@@ -393,11 +398,8 @@ class VcsSimulator(SimulatorInterface):
                 jobs,
             ])
 
-        effective_mode = self.get_effective_partcomp_mode()
         mode_option = self.VCS_PARTCOMP_OPTION_BY_MODE.get(effective_mode)
         if mode_option is None:
-            if not self.options.vcs_partcomp:
-                log.info("VCS Partition Compile is disabled by default; using -Mupdate")
             return ''
 
         job_count = self.get_partcomp_jobs()
@@ -414,9 +416,7 @@ class VcsSimulator(SimulatorInterface):
         return shlex.join(args)
 
     def get_effective_partcomp_mode(self):
-        if self.options.dtl:
-            return self.options.vcs_partcomp_mode
-        if not self.options.vcs_partcomp or self.options.vcs_partcomp_mode == 'disabled':
+        if not self.options.vcs_partcomp:
             return 'disabled'
         return self.options.vcs_partcomp_mode
 

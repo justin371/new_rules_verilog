@@ -66,17 +66,8 @@ def validate_vcs_runtime_options(options, parser):
         '--vcs-partcomp-dir',
         '--vcs-partcomp-sharedlib',
     }.intersection(options.vcs_explicit_switches)
-    disabled_compatibility_request = (partcomp_detail_switches == {'--vcs-partcomp-mode'}
-                                      and options.vcs_partcomp_mode == 'disabled')
-    if not options.vcs_partcomp and partcomp_detail_switches and not disabled_compatibility_request:
+    if not options.vcs_partcomp and partcomp_detail_switches:
         parser.error("VCS Partition Compile details require '--vcs-partcomp'. "
-                     "Stopping before Bazel starts.")
-    if options.vcs_partcomp_mode == 'disabled' and any([
-            options.vcs_partcomp_jobs != 'auto',
-            options.vcs_partcomp_dir is not None,
-            options.vcs_partcomp_sharedlib is not None,
-    ]):
-        parser.error("Partition Compile details require an enabled '--vcs-partcomp-mode'. "
                      "Stopping before Bazel starts.")
     if options.vcs_partcomp_sharedlib is not None:
         sharedlib = os.path.abspath(options.vcs_partcomp_sharedlib)
@@ -92,8 +83,8 @@ def validate_vcs_runtime_options(options, parser):
     if options.vcs_auto_compile_cache and options.recompile:
         parser.error("--vcs-auto-compile-cache cannot be combined with --recompile. "
                      "Stopping before Bazel starts.")
-    if options.dtl and options.vcs_partcomp_mode == 'disabled':
-        parser.error("--dtl requires VCS Partition Compile. Stopping before Bazel starts.")
+    if options.dtl and not options.vcs_partcomp:
+        parser.error("--dtl requires '--vcs-partcomp'. Stopping before Bazel starts.")
     if options.dtl and any([
             options.vcs_partcomp_mode != 'auto',
             options.vcs_partcomp_dir is not None,

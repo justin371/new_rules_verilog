@@ -570,16 +570,8 @@ class VcsRuntimeContractTest(unittest.TestCase):
             self._validated(["--simulator", "VCS", "--vcs-partcomp-jobs", "4"])
         with self.assertRaises(ValueError):
             self._validated(["--simulator", "VCS", "--vcs-partcomp-mode", "adaptive"])
-        with self.assertRaises(ValueError):
-            self._validated([
-                "--simulator",
-                "VCS",
-                "--vcs-partcomp",
-                "--vcs-partcomp-mode",
-                "disabled",
-                "--vcs-partcomp-dir",
-                "/tmp/partcomp",
-            ])
+        with self.assertRaises(SystemExit):
+            parse_args(["--simulator", "VCS", "--vcs-partcomp-mode", "disabled"])
         sharedlib = tempfile.mkdtemp()
         with self.assertRaises(ValueError):
             self._validated([
@@ -687,23 +679,22 @@ class VcsRuntimeContractTest(unittest.TestCase):
         self.assertIn("-partcomp=adaptive_sched", partcomp_args)
         self.assertIn("-fastpartcomp=j1", partcomp_args)
 
-    def test_vcs_partition_compile_can_be_disabled_for_comparison(self):
-        default_options = parse_args(["--simulator", "VCS"])
-        compatibility_options = parse_args(["--simulator", "VCS", "--vcs-partcomp-mode", "disabled"])
-
-        self.assertEqual(
-            "",
-            VcsSimulator(default_options, DummyRegressionConfig(),
-                         None).generate_compile_options(DummyVcompJob())["partcomp_opts"],
-        )
-        self.assertEqual(
-            "",
-            VcsSimulator(compatibility_options, DummyRegressionConfig(),
-                         None).generate_compile_options(DummyVcompJob())["partcomp_opts"],
-        )
-
     def test_vcs_dtl_uses_required_partition_compile_flow(self):
-        options, simulator = self._validated(["-t", "unit:test", "--simulator", "VCS", "--dtl"])
+        disabled_options = parse_args(["-t", "unit:test", "--simulator", "VCS", "--dtl"])
+        disabled_simulator = VcsSimulator(disabled_options, DummyRegressionConfig(), None)
+        self.assertEqual("", disabled_simulator.generate_compile_options(DummyVcompJob())["partcomp_opts"])
+
+        with self.assertRaises(ValueError):
+            self._validated(["-t", "unit:test", "--simulator", "VCS", "--dtl"])
+
+        options, simulator = self._validated([
+            "-t",
+            "unit:test",
+            "--simulator",
+            "VCS",
+            "--vcs-partcomp",
+            "--dtl",
+        ])
         vcomp = DummyVcompJob()
 
         self.assertEqual("auto", options.vcs_partcomp_mode)

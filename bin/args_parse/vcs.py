@@ -77,15 +77,15 @@ def add_vcs_arguments(parser):
         default=False,
         action='store_true',
         help=('Enable VCS Partition Compile for this simmer invocation (default: disabled; regular -Mupdate only).\n'
-              'Use the --vcs-partcomp-* options below to tune the enabled flow.'))
-    gvcs.add_argument(
-        '--vcs-partcomp-mode',
-        default='auto',
-        choices=['adaptive', 'auto', 'low', 'high', 'relax', 'disabled'],
-        help=('Select VCS Partition Compile behavior after --vcs-partcomp (default when enabled: auto).\n'
-              'adaptive: schedule partitions using current load; auto: standard autopartitioning;\n'
-              'low: more/smaller partitions; high: fewer/larger partitions;\n'
-              'relax: relax a poorly balanced high-threshold result; disabled: use regular -Mupdate only.'))
+              'This is the only switch that enables Partition Compile; use the --vcs-partcomp-* options below to '
+              'tune the enabled flow.'))
+    gvcs.add_argument('--vcs-partcomp-mode',
+                      default='auto',
+                      choices=['adaptive', 'auto', 'low', 'high', 'relax'],
+                      help=('Select VCS Partition Compile behavior after --vcs-partcomp (default when enabled: auto).\n'
+                            'adaptive: schedule partitions using current load; auto: standard autopartitioning;\n'
+                            'low: more/smaller partitions; high: fewer/larger partitions;\n'
+                            'relax: relax a poorly balanced high-threshold result.'))
     gvcs.add_argument('--vcs-partcomp-jobs',
                       default='auto',
                       type=_partcomp_jobs,
@@ -125,7 +125,7 @@ def add_vcs_arguments(parser):
                       default=False,
                       action='store_true',
                       help=('Enable the batch-only VCS Dynamic Test Loading static/base compile flow. It requires '
-                            'Partition Compile, owns <VCOMP>/dtl_static, and cannot be combined with --gui or custom '
+                            '--vcs-partcomp, owns <VCOMP>/dtl_static, and cannot be combined with --gui or custom '
                             'Partition Compile mode/directories.'))
     gvcs.add_argument('--fgp',
                       type=int,
