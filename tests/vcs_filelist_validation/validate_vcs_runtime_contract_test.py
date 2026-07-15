@@ -1103,8 +1103,7 @@ class VcsRuntimeContractTest(unittest.TestCase):
             "VCS",
             "--waves",
         ])
-        sim_options = shlex.split(
-            simulator.generate_sim_options(SimpleNamespace(name="smoke", iteration=1), 42))
+        sim_options = shlex.split(simulator.generate_sim_options(SimpleNamespace(name="smoke", iteration=1), 42))
         template = self._read_repo_file("bin/templates/vcs_wave_cmd_template.tcl.j2")
         options.probes = ["hdl_top.dut"]
         rendered = jinja2.Template(template, undefined=jinja2.StrictUndefined).render(
