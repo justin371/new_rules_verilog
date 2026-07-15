@@ -66,7 +66,7 @@ VCS wave capture uses FSDB. These commands cover the generated simmer flow:
 # Default hdl_top scope, all hierarchy, full simulation.
 simmer -t 'sys_tb:smoke_test@1' --simulator VCS --waves
 
-# Selected scopes and eight hierarchy levels below each scope.
+# Selected scopes at UCLI depth 8: each scope plus seven nested levels.
 simmer -t 'sys_tb:smoke_test@1' --simulator VCS \
   --waves hdl_top.dut hdl_top.env --wave-depth 8
 
@@ -83,7 +83,7 @@ The generated FSDB controls are:
 
 | simmer argument | Effect |
 |-----------------|--------|
-| `--waves [scope ...]` | Enables FSDB and selects one or more HDL scopes; no scope defaults to `hdl_top`. |
+| `--waves [scope ...]` | Enables FSDB, glitch capture, and force/release/deposit metadata; no scope defaults to `hdl_top`. |
 | `--wave-depth N` | Applies depth `N` to every selected scope. The default captures all hierarchy. |
 | `--wave-start NS` | Starts dumping at an absolute, non-negative simulation time in ns. |
 | `--wave-end NS` | Stops dumping at an absolute time in ns; it must be greater than `--wave-start`. |
@@ -91,16 +91,25 @@ The generated FSDB controls are:
 
 Copy the [VCS FSDB Tcl example](docs/examples/vcs_fsdb_dump.tcl) when different
 scopes need different depths or when `dump -add` needs advanced UCLI options.
-Useful revisions include `-aggregates`, `-ports`/`-in`/`-out`/`-inout`, and
-`-fsdb_opt` values such as `+mda`, `+packedmda`, `+struct`, `+parameter`,
-`+sva`, `+strength`, `+Reg_Only`, `+IO_Only`, or `+by_file=<file>`. UCLI also
-supports `dump -suppress_file`, `dump -suppress_instance`, `dump -deltaCycle`
-and `dump -glitch`; follow the installed VCS guide because some must be issued
-before the first `dump -add` or require environment setup.
+The generated flow keeps `-aggregates` and
+`-fsdb_opt +packedmda+struct+parameter`; `-fsdb_opt` is still needed to select
+those object types and is independent of glitch and force capture. Other useful
+revisions include `-ports`/`-in`/`-out`/`-inout` and `-fsdb_opt` values such as
+`+mda`, `+sva`, `+strength`, `+Reg_Only`, `+IO_Only`, or `+by_file=<file>`.
+UCLI also supports `dump -suppress_file`, `dump -suppress_instance`, and
+`dump -deltaCycle`; follow the installed VCS guide because ordering and setup
+requirements vary by option.
 
-With `--wave-tcl`, the Tcl file owns scopes, depths, and dump timing. Keep the
-output at `$::env(SIMRESULTS)/waves.fsdb` so simmer can find it and generate
-`run_waves.sh`. Open Verdi locally or through the site LSF queue:
+For generated Tcl, simmer passes `+fsdb+glitch=0` and `+fsdb+force`, then runs
+`dump -glitch on` on the returned FSDB file ID. `+fsdb+force` records force,
+release, and deposit information for Verdi; UCLI `dump -forceEvent` is VPD-only
+and must not be used for FSDB.
+
+With `--wave-tcl`, the Tcl file owns scopes, depths, dump timing, and the
+file-ID-specific `dump -glitch on` command. Simmer still passes both runtime
+FSDB options. Keep the output at `$::env(SIMRESULTS)/waves.fsdb` so simmer can
+find it and generate `run_waves.sh`. Open Verdi locally or through the site LSF
+queue:
 
 ```bash
 ./run_waves.sh

@@ -1,4 +1,5 @@
 set wave_fid [dump -file "{{ waves_db }}" -type FSDB]
+dump -glitch on -fid $wave_fid
 {% for probe in options.probes -%}
 dump -add {{ probe }} -fid $wave_fid -depth {{ 0 if options.wave_depth == 999 else options.wave_depth }} -aggregates -fsdb_opt +packedmda+struct+parameter
 {% endfor -%}

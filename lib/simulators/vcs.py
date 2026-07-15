@@ -484,6 +484,8 @@ class VcsSimulator(SimulatorInterface):
                 "+ntb_solver_bias_test_type=uvm",
                 "+ntb_solver_bias_test_name={}".format(coverage_name),
             ])
+        if self.options.waves is not None:
+            sim_args.extend(["+fsdb+glitch=0", "+fsdb+force"])
         sim_args.extend(["+ntb_random_seed={}".format(seed), "-xlrm", "hier_inst_seed", "-assert", "nopostproc"])
         if self.options.fgp is not None:
             sim_args.append("-fgp=num_threads:{}".format(self.options.fgp))
@@ -524,7 +526,7 @@ class VcsSimulator(SimulatorInterface):
 
         if self.options.wave_tcl:
             if os.path.exists(self.options.wave_tcl):
-                wave_tcl_path = self.options.wave_tcl
+                wave_tcl_path = os.path.abspath(self.options.wave_tcl)
                 log.info(f"Using user-provided wave Tcl: {wave_tcl_path}")
             else:
                 raise ValueError("{} not exists".format(self.options.wave_tcl))

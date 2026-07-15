@@ -33,9 +33,9 @@ def add_debug_arguments(parser):
                        parent='--waves',
                        type=str,
                        default=None,
-                       choices=['shm', 'fsdb', 'vcd', 'vwdb'],
-                       help=('Select the waveform database format. Defaults to fsdb for VCS and vwdb for XRUN; '
-                             'VCS accepts fsdb, while XRUN accepts shm, vcd, or vwdb. Requires --waves.'))
+                       metavar='FORMAT',
+                       help=('Select the simulator-specific waveform database format. The selected backend '
+                             'applies its default and validates supported formats. Requires --waves.'))
     add_child_argument(gdebug,
                        '--wave-tcl',
                        parent='--waves',
@@ -43,7 +43,8 @@ def add_debug_arguments(parser):
                        default=None,
                        help=('Use an existing simulator-specific wave/probe Tcl file instead of generated commands. '
                              'The file must exist and is used only when waveform capture is enabled; custom Tcl '
-                             'controls scopes, depth, and dump timing instead of --waves values and --wave-* options.'))
+                             'controls scopes, depth, and dump timing, while --wave-type still selects the expected '
+                             'artifact format.'))
     add_child_argument(
         gdebug,
         '--wave-start',

@@ -345,6 +345,24 @@ class VcsRuntimeContractTest(unittest.TestCase):
                 self.assertEqual(wave_tcl.name, capture["wave_tcl_path"])
                 self.assertFalse(capture["render_template"])
 
+    def test_vcs_custom_wave_tcl_path_is_resolved_before_the_run_directory_changes(self):
+        with tempfile.NamedTemporaryFile(suffix=".tcl") as wave_tcl:
+            relative_path = os.path.relpath(wave_tcl.name)
+            options, simulator = self._validated([
+                "--simulator",
+                "VCS",
+                "--waves",
+                "--wave-tcl",
+                relative_path,
+            ])
+
+            capture = simulator.get_wave_capture_options(
+                SimpleNamespace(job_dir=tempfile.mkdtemp()),
+                "/tmp/generated-waves.tcl",
+            )
+
+            self.assertEqual(os.path.abspath(relative_path), capture["wave_tcl_path"])
+
     def test_xcelium_pldm_modes_use_separate_bazel_filelists(self):
         for mode, suffix in (("pldm_sa", "pldm_sa"), ("pldm_sim", "pldm_ice")):
             options = parse_args(["--simulator", "XRUN", "--emulator", mode])
@@ -882,6 +900,7 @@ class VcsRuntimeContractTest(unittest.TestCase):
         self.assertNotIn("--gui", common)
         self.assertNotIn("--wave-delta", common)
         self.assertNotIn("--probe-packed", common)
+        self.assertNotIn("fsdb", common.lower())
         self.assertIn("--gui", vcs)
         self.assertIn("--wave-delta", xcelium)
         self.assertIn("--probe-packed", xcelium)
@@ -900,6 +919,10 @@ class VcsRuntimeContractTest(unittest.TestCase):
             self._validated(["--simulator", "XRUN", "--wave-delta"])
         with self.assertRaises(ValueError):
             self._validated(["--simulator", "XRUN", "--waves", "--wave-type", "vwdb", "--wave-delta"])
+        with self.assertRaises(ValueError):
+            self._validated(["--simulator", "VCS", "--waves", "--wave-type", "unknown"])
+        with self.assertRaises(ValueError):
+            self._validated(["--simulator", "XRUN", "--waves", "--wave-type", "unknown"])
 
     def test_xcelium_msie_incremental_requires_primary_snapshot_name(self):
         with self.assertRaises(SystemExit):
@@ -1074,12 +1097,33 @@ class VcsRuntimeContractTest(unittest.TestCase):
         )
         self.assertIn("-fid $wave_fid -depth 8", rendered)
 
+    def test_vcs_fsdb_glitch_and_force_capture_is_enabled_with_waves(self):
+        options, simulator = self._validated([
+            "--simulator",
+            "VCS",
+            "--waves",
+        ])
+        sim_options = shlex.split(
+            simulator.generate_sim_options(SimpleNamespace(name="smoke", iteration=1), 42))
+        template = self._read_repo_file("bin/templates/vcs_wave_cmd_template.tcl.j2")
+        options.probes = ["hdl_top.dut"]
+        rendered = jinja2.Template(template, undefined=jinja2.StrictUndefined).render(
+            options=options,
+            waves_db="/tmp/waves.fsdb",
+        )
+
+        self.assertIn("+fsdb+glitch=0", sim_options)
+        self.assertIn("+fsdb+force", sim_options)
+        self.assertIn("dump -glitch on -fid $wave_fid", rendered)
+
     def test_vcs_custom_wave_tcl_example_controls_scope_depth_and_time(self):
         example = self._read_repo_file("docs/examples/vcs_fsdb_dump.tcl")
 
         self.assertIn('$::env(SIMRESULTS)/waves.fsdb', example)
         self.assertIn("dump -add hdl_top.dut -fid $wave_fid -depth 0", example)
         self.assertIn("dump -add hdl_top.env.agent -fid $wave_fid -depth 2", example)
+        self.assertIn("dump -glitch on -fid $wave_fid", example)
+        self.assertIn("+fsdb+force", example)
         self.assertIn("stop -absolute 1000ns", example)
         self.assertIn("stop -absolute 50000ns", example)
         self.assertIn("dump -close", example)
