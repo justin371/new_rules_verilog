@@ -89,8 +89,9 @@ to be available on `PATH`.
 
 ### VCS Partition Compile
 
-VCS uses regular incremental `-Mupdate` by default. Add `--vcs-partcomp` to one
-simmer command to enable Partition Compile. The writable partition database is
+VCS enables automatic compile fingerprint reuse and Partition Compile by
+default. An unchanged fingerprint bypasses VCS; a changed build uses the
+allocation-aware partition flow. The writable partition database is
 `<tb>__VCS_VCOMP/partitionlib`; `--waves` and `--gui` use sibling
 `partitionlib_waves` and `partitionlib_gui` databases so incompatible KDB
 options do not invalidate each other. Stable third-party IP/VIP
@@ -99,12 +100,14 @@ rebuilt. Tune parallel compilation after measuring the workstation:
 
 ```bash
 simmer -t 'sys_tb:smoke_test@1' --simulator VCS \
-  --vcs-partcomp --vcs-partcomp-jobs 16 --vcs-profile
+  --vcs-partcomp-jobs 16 --vcs-profile
 ```
 
-Omit `--vcs-partcomp` to use regular incremental compilation. Shared partition
-databases and the full compatibility guidance are documented in
-[VCS and Xcelium workflow](docs/simmer_vcs_xcelium.md#vcs-partition-compile).
+Use `--no-vcs-partcomp` for an unsupported VCS release or a regular `-Mupdate`
+comparison. Use `--no-vcs-auto-compile-cache` to invoke VCS even when the
+fingerprint matches. Shared partition databases and the full compatibility
+guidance are documented in [VCS and Xcelium
+workflow](docs/simmer_vcs_xcelium.md#vcs-partition-compile).
 
 ### VCS ICO and VSO.ai
 
@@ -114,7 +117,7 @@ ICO, VSO.ai CSO and VSO.ai Coverage Directed Solver are separate opt-in flows:
 simmer -t 'sys_tb:*@20' --simulator VCS --ico \
   --ico-shared-record /nfs/project/ico/shared_record
 
-simmer -t 'sys_tb:*@100' --simulator VCS --vso --vso-cbv --cm line \
+simmer -t 'sys_tb:*@100' --simulator VCS --vso --vso-cbv --vcs-cm line \
   --vso-dbdir /nfs/project/vso/model --vso-phase stress:3
 
 simmer -t 'sys_tb:*@20' --simulator VCS --vso-ccex \
@@ -172,7 +175,7 @@ Add simulator-specific coverage when coverage results should appear in the
 dashboard:
 
 ```bash
-simmer -t 'sys_tb:*@10' --simulator VCS --cm A \
+simmer -t 'sys_tb:*@10' --simulator VCS --vcs-cm A \
   --report --report-dir "$PWD/report-output"
 
 simmer -t 'sys_tb:*@10' --simulator XRUN --coverage A \

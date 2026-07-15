@@ -386,7 +386,7 @@ class VcsSimulator(SimulatorInterface):
     def get_partition_compile_options(self, vcomp_job):
         effective_mode = self.get_effective_partcomp_mode()
         if effective_mode == 'disabled':
-            log.info("VCS Partition Compile is disabled by default; using -Mupdate")
+            log.info("VCS Partition Compile is disabled; using -Mupdate")
             return ''
 
         if self.options.dtl:
