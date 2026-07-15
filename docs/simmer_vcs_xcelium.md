@@ -432,6 +432,11 @@ without editing the generated script:
 SIMMER_WAVE_LAUNCHER="bsub -I -q syn" ./run_waves.sh
 ```
 
+The generated UCLI script uses the file ID returned by `dump -file`, so it does
+not assume `FSDB0` when another dump file is already open. The default
+`--wave-depth 999` maps to UCLI `-depth 0`, which is the documented unlimited
+hierarchy depth; explicit smaller depths are preserved.
+
 Use `--wave-tcl <file>` for project-specific FSDB dump/probe commands. Keep the
 generated default as the reference for `dump -file`, `dump -add`, timed enable/
 disable, flush and close ordering.

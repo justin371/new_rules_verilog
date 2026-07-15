@@ -1046,6 +1046,33 @@ class VcsRuntimeContractTest(unittest.TestCase):
         self.assertIn("run 80ns", rendered)
         self.assertIn("database -close shm_db", rendered)
 
+    def test_vcs_wave_template_uses_returned_fsdb_id_and_unlimited_default_depth(self):
+        template = self._read_repo_file("bin/templates/vcs_wave_cmd_template.tcl.j2")
+        options = SimpleNamespace(
+            probes=["hdl_top.dut"],
+            wave_depth=999,
+            wave_end=100,
+            wave_start=20,
+        )
+
+        rendered = jinja2.Template(template, undefined=jinja2.StrictUndefined).render(
+            options=options,
+            waves_db="/tmp/waves.fsdb",
+        )
+
+        self.assertIn('set wave_fid [dump -file "/tmp/waves.fsdb" -type FSDB]', rendered)
+        self.assertNotIn("FSDB0", rendered)
+        self.assertIn("-fid $wave_fid -depth 0", rendered)
+        self.assertIn("dump -close", rendered)
+        self.assertNotIn("dump -close $wave_fid", rendered)
+
+        options.wave_depth = 8
+        rendered = jinja2.Template(template, undefined=jinja2.StrictUndefined).render(
+            options=options,
+            waves_db="/tmp/waves.fsdb",
+        )
+        self.assertIn("-fid $wave_fid -depth 8", rendered)
+
     def test_shell_templates_preserve_failures_and_argv(self):
         coverage = self._read_repo_file("bin/templates/vcs_cov_merge_template.sh.j2")
         vcs_compile = self._read_repo_file("bin/templates/vcs_compile_template.sh.j2")

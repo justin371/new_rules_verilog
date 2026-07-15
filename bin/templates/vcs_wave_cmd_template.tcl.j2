@@ -1,17 +1,17 @@
-dump -file {{ waves_db }} -type FSDB
+set wave_fid [dump -file "{{ waves_db }}" -type FSDB]
 {% for probe in options.probes -%}
-dump -add {{ probe }} -fid FSDB0 -depth {{ options.wave_depth }} -aggregates -fsdb_opt +packedmda+struct+parameter
+dump -add {{ probe }} -fid $wave_fid -depth {{ 0 if options.wave_depth == 999 else options.wave_depth }} -aggregates -fsdb_opt +packedmda+struct+parameter
 {% endfor -%}
 {% if options.wave_start > 0 -%}
-dump -disable -fid FSDB0
-stop -absolute {{ options.wave_start }}ns -command {dump -enable -fid FSDB0} -continue
+dump -disable -fid $wave_fid
+stop -absolute {{ options.wave_start }}ns -command {dump -enable -fid $wave_fid} -continue
 {% else -%}
-dump -enable -fid FSDB0
+dump -enable -fid $wave_fid
 {% endif -%}
 {% if options.wave_end != 99999999 -%}
-stop -absolute {{ options.wave_end }}ns -command {dump -disable -fid FSDB0; dump -flush FSDB0} -continue
+stop -absolute {{ options.wave_end }}ns -command {dump -disable -fid $wave_fid; dump -flush $wave_fid} -continue
 {% endif -%}
 run
-dump -flush FSDB0
+dump -flush $wave_fid
 dump -close
 exit
