@@ -1,6 +1,6 @@
 from lib import parser_actions
 
-from .common import COVFILE
+from .common import COVFILE, add_child_argument
 
 
 def add_xcelium_arguments(parser):
@@ -34,28 +34,38 @@ def add_xcelium_arguments(parser):
         action='store_true',
         help=('Enable XRUN Multicore Engine for compile and simulation. Requires MCE licenses; xprop is ignored and '
               'MSIE or emulator modes are rejected.'))
-    gxrun.add_argument('--mce-build-count',
+    add_child_argument(gxrun,
+                       '--mce-build-count',
+                       parent='--mce',
                        type=int,
                        default=4,
                        help=('Set XRUN MCE build thread count (default: 4; 0 lets XRUN use the configuration range). '
                              'Requires --mce.'))
-    gxrun.add_argument('--mce-build-cfg',
+    add_child_argument(gxrun,
+                       '--mce-build-cfg',
+                       parent='--mce',
                        type=str,
                        default='single-socket',
                        choices=['single-socket', 'all-cores'],
                        help='Select the XRUN MCE build CPU topology (default: single-socket). Requires --mce.')
-    gxrun.add_argument(
+    add_child_argument(
+        gxrun,
         '--mce-sim-count',
+        parent='--mce',
         type=int,
         default=4,
         help=('Set XRUN MCE simulation thread count (default: 4; 0 lets XRUN use the configuration range). '
               'Requires --mce; simmer adjusts job concurrency for this count.'))
-    gxrun.add_argument('--mce-sim-cfg',
+    add_child_argument(gxrun,
+                       '--mce-sim-cfg',
+                       parent='--mce',
                        type=str,
                        default='single-socket',
                        choices=['single-socket', 'single-threaded', 'partial-socket', 'all-cores'],
                        help='Select the XRUN MCE simulation CPU topology (default: single-socket). Requires --mce.')
-    gxrun.add_argument('--mce-split-max-size',
+    add_child_argument(gxrun,
+                       '--mce-split-max-size',
+                       parent='--mce',
                        type=int,
                        default=500000,
                        help='Set the positive XRUN MCE partition split-size limit (default: 500000). Requires --mce.')
@@ -64,8 +74,10 @@ def add_xcelium_arguments(parser):
                        help=(f'Enable XRUN coverage collection and generate the IMC merge/report flow.\n'
                              f'Use A for all metrics or join metrics with a colon, for example B:E:F:T:U.\n'
                              f'{parser_actions.CovAction.format_options(indent=0)}'))
-    gxrun.add_argument(
+    add_child_argument(
+        gxrun,
         '--covfile',
+        parent='--coverage',
         default=COVFILE,
         help=('Pass an existing Xcelium coverage configuration file. An explicitly supplied path requires '
               '--coverage and is validated before Bazel starts; otherwise the testbench xcelium_covfile is preferred.'))
@@ -96,18 +108,24 @@ def add_xcelium_arguments(parser):
         help=('Run the final multi-step MSIE stage and simulations against PRIMARY_SNAPSHOT. Preparation: configure '
               'verilog_dv_tb.msie_incremental_deps and complete matching href/primary stages in the same regression '
               'directory. Simmer validates the primary manifest before XRUN starts.'))
-    gxrun.add_argument(
+    add_child_argument(
+        gxrun,
         '--msie-primary-name',
+        parent='--msie-prim',
         metavar='SNAPSHOT',
         help=('Name the snapshot created by --msie-prim independently from its HDL top. Use the same value as the '
               'later --msie-incr argument; for example, top dut with snapshot dut_sdf_wc.'))
-    gxrun.add_argument(
+    add_child_argument(
+        gxrun,
         '--msie-primary-top',
+        parent='--msie-incr',
         metavar='PRIMARY_TOP',
         help=('Override the primary HDL top expected by --msie-incr. The default is the selected verilog_dv_tb '
               'dut_top value; set this only when the primary build used a different top.'))
-    gxrun.add_argument(
+    add_child_argument(
+        gxrun,
         '--msie-primary-key',
+        parent='--msie-prim/--msie-incr',
         metavar='KEY',
         default='',
         help=('Add an immutable site key to the primary compatibility manifest for --msie-prim/--msie-incr. Include '

@@ -259,12 +259,6 @@ class VCompJob(Job):
 
         log.debug("workdir = %s", self.job_dir)
 
-        if options.lmstat:
-            with open("lmstat.out", "w") as lmstat_out:
-                subprocess.run(["lmstat", "-a"], stdout=lmstat_out, stderr=subprocess.STDOUT, check=False)
-        else:
-            log.debug("Skipping lmstat -a")
-
         with open(os.path.join(self.job_dir, 'env.out'), 'w') as env_out:
             for key in ENV_CAPTURE_KEYS:
                 if key in os.environ:

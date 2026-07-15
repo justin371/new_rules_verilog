@@ -11,10 +11,11 @@ def validate_vcs_runtime_options(options, parser):
             options.vcs_urg_parallel,
             options.vcs_urg_show_tests,
     ]) and not options.cm:
-        parser.error("VCS coverage detail switches require '--cm'. "
+        parser.error("VCS coverage detail switches require '--vcs-cm'. "
                      "Stopping before Bazel starts.")
     if options.vcs_cm_line is not None and 'line' not in options.cm and 'A' not in options.cm:
-        parser.error("--vcs-cm-line requires line coverage in '--cm' (for example '--cm line' or '--cm A'). "
+        parser.error("--vcs-cm-line requires line coverage in '--vcs-cm' "
+                     "(for example '--vcs-cm line' or '--vcs-cm A'). "
                      "Stopping before Bazel starts.")
     if options.vcs_cm_report is not None:
         if 'svpackages' in options.vcs_cm_report and 'line' not in options.cm and 'A' not in options.cm:
@@ -48,8 +49,8 @@ def validate_vcs_runtime_options(options, parser):
             options.vcs_xprop_banner,
             options.vcs_xprop_report,
     ]):
-        parser.error("VCS xprop helper switches require XPROP to be enabled. "
-                     "Do not combine them with '--xprop D'. Stopping before Bazel starts.")
+        parser.error("VCS xprop helper switches require '--vcs-xprop F' or '--vcs-xprop C'. "
+                     "Do not combine them with '--vcs-xprop D'. Stopping before Bazel starts.")
     if options.fgp is not None and options.fgp < 1:
         parser.error("--fgp must be a positive integer thread count. Stopping before Bazel starts.")
     if options.vcs_runner is not None and not options.vcs_runner.strip():
@@ -67,7 +68,7 @@ def validate_vcs_runtime_options(options, parser):
         '--vcs-partcomp-sharedlib',
     }.intersection(options.vcs_explicit_switches)
     if not options.vcs_partcomp and partcomp_detail_switches:
-        parser.error("VCS Partition Compile details require '--vcs-partcomp'. "
+        parser.error("VCS Partition Compile details cannot be combined with '--no-vcs-partcomp'. "
                      "Stopping before Bazel starts.")
     if options.vcs_partcomp_sharedlib is not None:
         sharedlib = os.path.abspath(options.vcs_partcomp_sharedlib)
@@ -77,14 +78,8 @@ def validate_vcs_runtime_options(options, parser):
         if options.vcs_partcomp_dir is not None and sharedlib == os.path.abspath(options.vcs_partcomp_dir):
             parser.error("--vcs-partcomp-dir and --vcs-partcomp-sharedlib must use different directories. "
                          "Stopping before Bazel starts.")
-    if options.vcs_auto_compile_cache and options.no_compile:
-        parser.error("--vcs-auto-compile-cache cannot be combined with --no-compile. "
-                     "Stopping before Bazel starts.")
-    if options.vcs_auto_compile_cache and options.recompile:
-        parser.error("--vcs-auto-compile-cache cannot be combined with --recompile. "
-                     "Stopping before Bazel starts.")
     if options.dtl and not options.vcs_partcomp:
-        parser.error("--dtl requires '--vcs-partcomp'. Stopping before Bazel starts.")
+        parser.error("--dtl cannot be combined with '--no-vcs-partcomp'. Stopping before Bazel starts.")
     if options.dtl and any([
             options.vcs_partcomp_mode != 'auto',
             options.vcs_partcomp_dir is not None,
@@ -131,16 +126,16 @@ def validate_vcs_runtime_options(options, parser):
             parser.error("--vso-target-metric accepts comma-separated all, assert, cond, fsm, group, line, or tgl. "
                          "Stopping before Bazel starts.")
     if options.vso and options.vso_target_metric is None and not options.cm:
-        parser.error("VSO.ai init requires --cm or --vso-target-metric. Stopping before Bazel starts.")
+        parser.error("VSO.ai init requires --vcs-cm or --vso-target-metric. Stopping before Bazel starts.")
     if options.vso and options.vso_target_metric is None and options.cm == 'branch':
-        parser.error("VSO.ai cannot derive a supported target metric from --cm branch; pass --vso-target-metric. "
+        parser.error("VSO.ai cannot derive a supported target metric from --vcs-cm branch; pass --vso-target-metric. "
                      "Stopping before Bazel starts.")
     if options.vso_cbv:
         line_enabled = options.cm and ('line' in options.cm or 'A' in options.cm)
         port_toggle_enabled = (options.cm and ('tgl' in options.cm or 'A' in options.cm)
                                and options.vcs_cm_tgl == 'portsonly')
         if not line_enabled and not port_toggle_enabled:
-            parser.error("--vso-cbv requires --cm line or --cm tgl --vcs-cm-tgl portsonly for the Day0 model. "
+            parser.error("--vso-cbv requires --vcs-cm line or --vcs-cm tgl --vcs-cm-tgl portsonly for the Day0 model. "
                          "Stopping before Bazel starts.")
     if any([options.vso_ccex_rca, options.vso_ccex_auto_merge_dir is not None]) and not options.vso_ccex:
         parser.error("VSO.ai CCEX detail switches require '--vso-ccex'. Stopping before Bazel starts.")

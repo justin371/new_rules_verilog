@@ -54,6 +54,15 @@ class SimmerHelpFormatter(argparse.HelpFormatter):
         return '\n'.join(indent + line for source_line in text.splitlines()
                          for line in self._wrap_line(source_line, width))
 
+    def _format_action(self, action):
+        if not getattr(action, 'simmer_parent', None):
+            return super()._format_action(action)
+        self._current_indent += 2
+        try:
+            return super()._format_action(action)
+        finally:
+            self._current_indent -= 2
+
 
 def reproduction_args(argv):
     """Keep original options except selectors replaced by rerun.sh."""
@@ -110,7 +119,8 @@ def parse_args(argv):
     if options.history is not None and options.history < 1:
         parser.error("--history must be a positive integer.")
     options.simulator_was_explicit = simulator_explicitly_requested(argv)
-    options.xprop_was_explicit = argument_explicitly_requested(argv, '--xprop')
+    options.xprop_was_explicit = any(
+        argument_explicitly_requested(argv, argument) for argument in ('--xprop', '--vcs-xprop'))
     options.timeout_was_explicit = argument_explicitly_requested(argv, '--timeout')
     options.covfile_was_explicit = argument_explicitly_requested(argv, '--covfile')
     options.mce_detail_was_explicit = any(
@@ -147,6 +157,7 @@ def parse_args(argv):
     ]
     options.vcs_explicit_switches = [
         argument for argument in [
+            '--vcs-cm',
             '--cm',
             '--gui',
             '--vcs-cm-line',
@@ -158,15 +169,18 @@ def parse_args(argv):
             '--vcs-urg-parallel',
             '--vcs-urg-show-tests',
             '--vcs-partcomp',
+            '--no-vcs-partcomp',
             '--vcs-partcomp-mode',
             '--vcs-partcomp-jobs',
             '--vcs-partcomp-dir',
             '--vcs-partcomp-sharedlib',
             '--vcs-auto-compile-cache',
+            '--no-vcs-auto-compile-cache',
             '--smartlog',
             '--vcs-runner',
             '--dtl',
             '--fgp',
+            '--vcs-xprop',
             '--vcs-xprop-flowctrl',
             '--vcs-xprop-mmsopt',
             '--vcs-xprop-banner',

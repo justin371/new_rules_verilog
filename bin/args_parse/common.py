@@ -11,6 +11,12 @@ _SIMRESULTS = os.path.expanduser(os.environ.get("SIMRESULTS") or os.path.join(_S
 REPORT_DIR = os.environ.get("SIMMER_REPORT_DIR", os.path.join(_SIMRESULTS, "webroot"))
 
 
+def add_child_argument(container, *args, parent, **kwargs):
+    action = container.add_argument(*args, **kwargs)
+    action.simmer_parent = parent
+    return action
+
+
 def add_debug_arguments(parser):
     gdebug = parser.add_argument_group(
         'Debug arguments',
@@ -22,32 +28,42 @@ def add_debug_arguments(parser):
         nargs='*',
         help=('Enable waveform capture. Optionally list HDL scopes after the option; with no scopes, '
               'the simulator adapter uses its default top. Quote wildcard scopes so the shell does not expand them.'))
-    gdebug.add_argument('--wave-type',
-                        type=str,
-                        default=None,
-                        choices=['shm', 'fsdb', 'vcd', 'vwdb'],
-                        help=('Select the waveform database format. Defaults to fsdb for VCS and vwdb for XRUN; '
-                              'VCS accepts fsdb, while XRUN accepts shm, vcd, or vwdb. Requires --waves.'))
-    gdebug.add_argument('--wave-tcl',
-                        type=str,
-                        default=None,
-                        help=('Use an existing simulator-specific wave/probe Tcl file instead of generated commands. '
-                              'The file must exist and is used only when waveform capture is enabled.'))
-    gdebug.add_argument(
+    add_child_argument(gdebug,
+                       '--wave-type',
+                       parent='--waves',
+                       type=str,
+                       default=None,
+                       choices=['shm', 'fsdb', 'vcd', 'vwdb'],
+                       help=('Select the waveform database format. Defaults to fsdb for VCS and vwdb for XRUN; '
+                             'VCS accepts fsdb, while XRUN accepts shm, vcd, or vwdb. Requires --waves.'))
+    add_child_argument(gdebug,
+                       '--wave-tcl',
+                       parent='--waves',
+                       type=str,
+                       default=None,
+                       help=('Use an existing simulator-specific wave/probe Tcl file instead of generated commands. '
+                             'The file must exist and is used only when waveform capture is enabled.'))
+    add_child_argument(
+        gdebug,
         '--wave-start',
+        parent='--waves',
         type=int,
         default=0,
         help='Start waveform dumping at this non-negative simulation time in ns (default: 0). Requires --waves.')
-    gdebug.add_argument('--wave-end',
-                        type=int,
-                        default=99999999,
-                        help=('Stop waveform dumping at this simulation time in ns (default: effectively unlimited). '
-                              'It must be greater than --wave-start. Requires --waves.'))
-    gdebug.add_argument('--wave-depth',
-                        type=int,
-                        default=999,
-                        help=('Set generated probe hierarchy depth (default: 999, effectively all hierarchy). '
-                              'Reduce it to limit waveform size. Requires --waves.'))
+    add_child_argument(gdebug,
+                       '--wave-end',
+                       parent='--waves',
+                       type=int,
+                       default=99999999,
+                       help=('Stop waveform dumping at this simulation time in ns (default: effectively unlimited). '
+                             'It must be greater than --wave-start. Requires --waves.'))
+    add_child_argument(gdebug,
+                       '--wave-depth',
+                       parent='--waves',
+                       type=int,
+                       default=999,
+                       help=('Set generated probe hierarchy depth (default: 999, effectively all hierarchy). '
+                             'Reduce it to limit waveform size. Requires --waves.'))
     gdebug.add_argument('--verbosity',
                         type=str,
                         default=None,
@@ -168,9 +184,8 @@ def add_test_configuration_arguments(parser):
                         default=None,
                         action=parser_actions.XpropAction,
                         help=('Opt-in X-propagation selector. F=more pessimistic mode, C=ternary-like mode, D=Disable. '
-                              'On Xcelium, F maps to FOX and C maps to CAT. '
-                              'On VCS, F falls back to -xprop=xmerge and C falls back to -xprop=tmerge '
-                              'when no VCS xprop config file is present.'))
+                              'On Xcelium, F maps to FOX and C maps to CAT. For VCS, prefer --vcs-xprop; this '
+                              'shared spelling remains compatible.'))
     gtestc.add_argument('--timeout',
                         default=12.0,
                         type=float,
@@ -234,11 +249,6 @@ def add_regression_arguments(parser):
 def add_flow_control_arguments(parser):
     gflowc = parser.add_argument_group("Flow control arguments",
                                        "Control which build, compile, run, and report phases execute.")
-    gflowc.add_argument(
-        '--lmstat',
-        default=False,
-        action="store_true",
-        help='Run lmstat -a before scheduling jobs and save the output. Requires lmstat on PATH and license access.')
     gflowc.add_argument('--no-run',
                         default=False,
                         action="store_true",

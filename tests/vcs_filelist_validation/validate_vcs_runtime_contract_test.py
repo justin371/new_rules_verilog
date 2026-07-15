@@ -68,11 +68,24 @@ class VcsRuntimeContractTest(unittest.TestCase):
         normalized_help = " ".join(help_text.split())
         self.assertIn("Bazel 7.7.1, Python 3.12", normalized_help)
         self.assertIn("Quote all test globs", normalized_help)
-        self.assertIn("default: disabled", normalized_help)
+        self.assertIn("enabled (default)", normalized_help)
+        self.assertIn("--no-vcs-partcomp", normalized_help)
+        self.assertIn("--no-vcs-auto-compile-cache", normalized_help)
+        self.assertIn("--vcs-cm", normalized_help)
+        self.assertIn("--vcs-xprop", normalized_help)
+        self.assertNotIn("--lmstat", normalized_help)
         self.assertIn("must already exist", normalized_help)
         self.assertIn("custom external partcomp/sharedlib directories are preserved", normalized_help)
         self.assertIn("Run this before --msie-prim", normalized_help)
         self.assertIn("Requires EMU_JINJA2_PATH", normalized_help)
+        self.assertIn("\n    --wave-type", help_text)
+        self.assertIn("\n    --mce-build-count", help_text)
+        self.assertIn("\n    --vcs-cm-line", help_text)
+        self.assertIn("\n    --vcs-partcomp-mode", help_text)
+        self.assertIn("\n    --vcs-xprop-flowctrl", help_text)
+        self.assertIn("\n    --ico-workdir", help_text)
+        self.assertIn("\n    --vso-workdir", help_text)
+        self.assertIn("\n    --vso-ccex-rca", help_text)
 
     def test_zero_test_timeout_disables_job_timeout(self):
         self.assertEqual(0, resolve_test_timeout_hours({"timeout_minutes": 0}, 12.0, False))
@@ -136,7 +149,7 @@ class VcsRuntimeContractTest(unittest.TestCase):
         self.assertIn("fox_xprop.txt", msie_simulator.generate_compile_options(msie_vcomp)["xprop_cmd"])
 
     def test_explicit_vcs_xprop_f_enables_compile_option(self):
-        options = parse_args(["-t", "unit:test", "--simulator", "VCS", "--xprop", "F"])
+        options = parse_args(["-t", "unit:test", "--simulator", "VCS", "--vcs-xprop", "F"])
         simulator = VcsSimulator(options, DummyRegressionConfig(), None)
         simulator._vcs_tool_identity = "VCS Y-2026.03 unit test"
         vcomp = DummyVcompJob()
@@ -147,10 +160,25 @@ class VcsRuntimeContractTest(unittest.TestCase):
         self.assertIn(str(xprop_config), simulator.get_compile_fingerprint_inputs(vcomp)["extra_input_paths"])
 
     def test_explicit_xprop_disable_still_maps_to_none(self):
-        vcs_options = parse_args(["-t", "unit:test", "--simulator", "VCS", "--xprop", "D"])
+        vcs_options = parse_args(["-t", "unit:test", "--simulator", "VCS", "--vcs-xprop", "D"])
 
         self.assertIsNone(vcs_options.xprop)
         self.assertTrue(vcs_options.xprop_was_explicit)
+
+    def test_vcs_primary_switches_keep_compatibility_aliases(self):
+        primary = parse_args(["--simulator", "VCS", "--vcs-cm", "line+tgl", "--vcs-xprop", "C"])
+        compatible = parse_args(["--simulator", "VCS", "--cm", "line+tgl", "--xprop", "C"])
+
+        self.assertEqual(primary.cm, compatible.cm)
+        self.assertEqual(primary.xprop, compatible.xprop)
+        self.assertTrue(primary.xprop_was_explicit)
+        self.assertIn("--vcs-cm", primary.vcs_explicit_switches)
+        self.assertIn("--vcs-xprop", primary.vcs_explicit_switches)
+
+        with self.assertRaisesRegex(ValueError, "VCS-only"):
+            self._validated(["--simulator", "XRUN", "--vcs-xprop", "F"])
+        with self.assertRaisesRegex(ValueError, "VCS-only"):
+            self._validated(["--simulator", "XRUN", "--vcs-cm", "line"])
 
     def test_jobs_option_requires_a_positive_integer(self):
         self.assertEqual(3, parse_args(["--jobs", "3"]).jobs)
@@ -259,7 +287,7 @@ class VcsRuntimeContractTest(unittest.TestCase):
             "--simulator",
             "VCS",
             "--vso",
-            "--cm",
+            "--vcs-cm",
             "line",
         ])
         self.assertEqual("", normal.get_compile_template_context(DummyVcompJob())["vso_workdir"])
@@ -452,13 +480,29 @@ class VcsRuntimeContractTest(unittest.TestCase):
         self.assertTrue(VcsSimulator(smartlog_options, DummyRegressionConfig(), None).use_smartlog())
         self.assertTrue(VcsSimulator(waves_options, DummyRegressionConfig(), None).use_smartlog())
 
-    def test_vcs_partition_compile_is_disabled_by_default(self):
+    def test_vcs_partition_compile_and_cache_are_enabled_by_default(self):
         options = parse_args(["-t", "unit:test", "--simulator", "VCS"])
         simulator = VcsSimulator(options, DummyRegressionConfig(), None)
 
-        self.assertFalse(options.vcs_partcomp)
-        self.assertEqual("", simulator.generate_compile_options(DummyVcompJob())["partcomp_opts"])
-        self.assertEqual("disabled", simulator.get_effective_partcomp_mode())
+        self.assertTrue(options.vcs_partcomp)
+        self.assertTrue(options.vcs_auto_compile_cache)
+        self.assertEqual("auto", simulator.get_effective_partcomp_mode())
+        self.assertTrue(simulator.should_auto_reuse_compile())
+
+        disabled_options = parse_args([
+            "-t",
+            "unit:test",
+            "--simulator",
+            "VCS",
+            "--no-vcs-partcomp",
+            "--no-vcs-auto-compile-cache",
+        ])
+        disabled_simulator = VcsSimulator(disabled_options, DummyRegressionConfig(), None)
+        self.assertFalse(disabled_options.vcs_partcomp)
+        self.assertFalse(disabled_options.vcs_auto_compile_cache)
+        self.assertEqual("", disabled_simulator.generate_compile_options(DummyVcompJob())["partcomp_opts"])
+        self.assertEqual("disabled", disabled_simulator.get_effective_partcomp_mode())
+        self.assertFalse(disabled_simulator.should_auto_reuse_compile())
 
     def test_vcs_partition_compile_opt_in_uses_vcomp_owned_database(self):
         options = parse_args(["-t", "unit:test", "--simulator", "VCS", "--vcs-partcomp"])
@@ -571,9 +615,9 @@ class VcsRuntimeContractTest(unittest.TestCase):
         with self.assertRaises(ValueError):
             self._validated(["--simulator", "VCS", "--vcs-partcomp-jobs", "0"])
         with self.assertRaises(ValueError):
-            self._validated(["--simulator", "VCS", "--vcs-partcomp-jobs", "4"])
+            self._validated(["--simulator", "VCS", "--no-vcs-partcomp", "--vcs-partcomp-jobs", "4"])
         with self.assertRaises(ValueError):
-            self._validated(["--simulator", "VCS", "--vcs-partcomp-mode", "adaptive"])
+            self._validated(["--simulator", "VCS", "--no-vcs-partcomp", "--vcs-partcomp-mode", "adaptive"])
         with self.assertRaises(SystemExit):
             parse_args(["--simulator", "VCS", "--vcs-partcomp-mode", "disabled"])
         sharedlib = tempfile.mkdtemp()
@@ -588,8 +632,10 @@ class VcsRuntimeContractTest(unittest.TestCase):
                 sharedlib,
             ])
 
-        with self.assertRaises(ValueError):
-            self._validated(["--simulator", "VCS", "--vcs-auto-compile-cache", "--recompile"])
+        for flow_control in ("--recompile", "--no-compile"):
+            with self.subTest(flow_control=flow_control):
+                options, _ = self._validated(["--simulator", "VCS", flow_control])
+                self.assertTrue(options.vcs_auto_compile_cache)
 
     def test_vcs_partcomp_auto_jobs_use_scheduler_allocation(self):
         with mock.patch("lib.simulators.vcs.os.sched_getaffinity", create=True, return_value=set(range(64))):
@@ -626,7 +672,7 @@ class VcsRuntimeContractTest(unittest.TestCase):
             self.assertEqual("VCS Y-2026.03", probe.get_tool_identity())
         self.assertEqual(["vcs", "-full64", "-ID"], run.call_args.args[0][-3:])
 
-    def test_vcs_partcomp_default_is_disabled_for_single_slot_lsf_job(self):
+    def test_vcs_partcomp_default_preserves_single_slot_lsf_job(self):
         lsf_environment = {
             "LSB_DJOB_NUMPROC": "1",
             "LSB_HOSTS": "sh-cloud30",
@@ -642,15 +688,10 @@ class VcsRuntimeContractTest(unittest.TestCase):
             partcomp_opts = simulator.generate_compile_options(DummyVcompJob())["partcomp_opts"]
             metrics = simulator.collect_compile_metrics(SimpleNamespace(log_path="missing", compile_cache_hit=False))
 
-        self.assertEqual("", partcomp_opts)
-        self.assertEqual("disabled", metrics["partcomp_mode"])
-        self.assertIsNone(metrics["partcomp_jobs"])
-
-        cache_options = parse_args(["--simulator", "VCS", "--vcs-auto-compile-cache"])
-        cache_simulator = VcsSimulator(cache_options, DummyRegressionConfig(), None)
-        with mock.patch.dict(os.environ, lsf_environment, clear=True), \
-             mock.patch("lib.simulators.vcs.os.sched_getaffinity", create=True, return_value=set(range(64))):
-            self.assertEqual("", cache_simulator.generate_compile_options(DummyVcompJob())["partcomp_opts"])
+        self.assertIn("-partcomp", shlex.split(partcomp_opts))
+        self.assertIn("-fastpartcomp=j1", shlex.split(partcomp_opts))
+        self.assertEqual("auto", metrics["partcomp_mode"])
+        self.assertEqual(1, metrics["partcomp_jobs"])
 
     def test_vcs_explicit_partcomp_jobs_preserve_single_worker_flow(self):
         options = parse_args(["--simulator", "VCS", "--vcs-partcomp", "--vcs-partcomp-jobs", "1"])
@@ -684,19 +725,32 @@ class VcsRuntimeContractTest(unittest.TestCase):
         self.assertIn("-fastpartcomp=j1", partcomp_args)
 
     def test_vcs_dtl_uses_required_partition_compile_flow(self):
-        disabled_options = parse_args(["-t", "unit:test", "--simulator", "VCS", "--dtl"])
+        disabled_options = parse_args([
+            "-t",
+            "unit:test",
+            "--simulator",
+            "VCS",
+            "--no-vcs-partcomp",
+            "--dtl",
+        ])
         disabled_simulator = VcsSimulator(disabled_options, DummyRegressionConfig(), None)
         self.assertEqual("", disabled_simulator.generate_compile_options(DummyVcompJob())["partcomp_opts"])
 
         with self.assertRaises(ValueError):
-            self._validated(["-t", "unit:test", "--simulator", "VCS", "--dtl"])
+            self._validated([
+                "-t",
+                "unit:test",
+                "--simulator",
+                "VCS",
+                "--no-vcs-partcomp",
+                "--dtl",
+            ])
 
         options, simulator = self._validated([
             "-t",
             "unit:test",
             "--simulator",
             "VCS",
-            "--vcs-partcomp",
             "--dtl",
         ])
         vcomp = DummyVcompJob()
@@ -801,6 +855,10 @@ class VcsRuntimeContractTest(unittest.TestCase):
             self._validated(["-t", "unit:test", "--simulator", "XRUN", "--smartlog"])
         with self.assertRaises(ValueError):
             self._validated(["-t", "unit:test", "--simulator", "XRUN", "--vcs-partcomp"])
+        with self.assertRaises(ValueError):
+            self._validated(["-t", "unit:test", "--simulator", "XRUN", "--no-vcs-partcomp"])
+        with self.assertRaises(ValueError):
+            self._validated(["-t", "unit:test", "--simulator", "XRUN", "--no-vcs-auto-compile-cache"])
         with self.assertRaises(ValueError):
             self._validated(["-t", "unit:test", "--simulator", "XRUN", "--vcs-partcomp-jobs", "4"])
         with self.assertRaises(ValueError):
