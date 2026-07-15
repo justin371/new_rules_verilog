@@ -1,10 +1,22 @@
+import argparse
+
 from lib import parser_actions
+
+
+def _partcomp_jobs(value):
+    if str(value).lower() == 'auto':
+        return 'auto'
+    try:
+        jobs = int(value)
+    except ValueError as exc:
+        raise argparse.ArgumentTypeError("expected 'auto' or a positive integer") from exc
+    return jobs
 
 
 def add_vcs_arguments(parser):
     gvcs = parser.add_argument_group(
         "VCS arguments",
-        "VCS-only controls. Source the VCS/Verdi environment first. Option semantics follow the Y-2026.03 User Guide; "
+        "VCS-only controls. Source the VCS/Verdi environment first. Option semantics follow the installed VCS release; "
         "licensed execution still requires Red Hat site validation. Explicit VCS options are rejected for XRUN.")
     gvcs.add_argument(
         '--gui',
@@ -61,28 +73,43 @@ def add_vcs_arguments(parser):
                       help=('Add -show tests to the generated URG merge so the merged VDB retains test-to-cover '
                             'correlation for grading and debug. This increases merged database size.'))
     gvcs.add_argument(
-        '--vcs-partcomp-mode',
-        default='adaptive',
-        choices=['adaptive', 'auto', 'low', 'high', 'relax', 'disabled'],
-        help=('Select VCS Partition Compile behavior (default: adaptive).\n'
-              'adaptive: schedule partitions using current load; auto: standard autopartitioning;\n'
-              'low: more/smaller partitions; high: fewer/larger partitions;\n'
-              'relax: relax a poorly balanced high-threshold result; disabled: use regular -Mupdate only.'))
+        '--vcs-partcomp',
+        default=False,
+        action='store_true',
+        help=('Enable VCS Partition Compile for this simmer invocation (default: disabled; regular -Mupdate only).\n'
+              'This is the only switch that enables Partition Compile; use the --vcs-partcomp-* options below to '
+              'tune the enabled flow.'))
+    gvcs.add_argument('--vcs-partcomp-mode',
+                      default='auto',
+                      choices=['adaptive', 'auto', 'low', 'high', 'relax'],
+                      help=('Select VCS Partition Compile behavior after --vcs-partcomp (default when enabled: auto).\n'
+                            'adaptive: schedule partitions using current load; auto: standard autopartitioning;\n'
+                            'low: more/smaller partitions; high: fewer/larger partitions;\n'
+                            'relax: relax a poorly balanced high-threshold result.'))
     gvcs.add_argument('--vcs-partcomp-jobs',
-                      default=8,
-                      type=int,
-                      help=('Maximum parallel partition compile processes passed as -fastpartcomp=jN (default: 8). '
-                            'Choose no more than the CPU/license capacity available to each concurrent VCOMP job.'))
+                      default='auto',
+                      type=_partcomp_jobs,
+                      help=('Maximum parallel partition compile processes passed as -fastpartcomp=jN (default: auto). '
+                            'auto uses CPUs allocated to this job by LSF/Slurm or process affinity; it never scans '
+                            'cluster idle CPUs. Requires --vcs-partcomp.'))
     gvcs.add_argument('--vcs-partcomp-dir',
                       default=None,
                       help=('Override the writable -partcomp_dir. The default is '
                             '<regression>/<tb>__VCS_VCOMP/partitionlib and is removed by --recompile. '
-                            'Use a versioned external path only when intentionally publishing a baseline.'))
+                            'Use a versioned external path only when intentionally publishing a baseline. '
+                            'Requires --vcs-partcomp.'))
     gvcs.add_argument('--vcs-partcomp-sharedlib',
                       default=None,
                       help=('Reuse an existing partition database through -partcomp_sharedlib. The directory must '
                             'already exist, must differ from --vcs-partcomp-dir, and must match the VCS version, '
-                            'Red Hat platform, sources, defines, coverage/debug mode, and compile arguments.'))
+                            'Red Hat platform, source inventory, defines, coverage/debug mode, and compile arguments. '
+                            'Requires --vcs-partcomp.'))
+    gvcs.add_argument(
+        '--vcs-auto-compile-cache',
+        default=False,
+        action='store_true',
+        help=('Automatically skip VCS compilation when the existing simv and compile fingerprint are unchanged. '
+              'Unlike --no-compile, a cache miss recompiles normally. Cannot be combined with --recompile.'))
     gvcs.add_argument('--smartlog',
                       dest='smartlog',
                       default=False,
@@ -98,7 +125,7 @@ def add_vcs_arguments(parser):
                       default=False,
                       action='store_true',
                       help=('Enable the batch-only VCS Dynamic Test Loading static/base compile flow. It requires '
-                            'Partition Compile, owns <VCOMP>/dtl_static, and cannot be combined with --gui or custom '
+                            '--vcs-partcomp, owns <VCOMP>/dtl_static, and cannot be combined with --gui or custom '
                             'Partition Compile mode/directories.'))
     gvcs.add_argument('--fgp',
                       type=int,

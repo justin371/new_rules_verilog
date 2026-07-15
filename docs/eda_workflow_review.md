@@ -20,8 +20,8 @@
 | VCS ICO | Supported by `--ico`; off by default | ICO license/setup exists and the shared CDB is on a supported filesystem |
 | VSO.ai CSO | Simplified init/ask-all/execute/finalize+merge flow | VSO_HOME, persistent model storage and matching VCS/VSO licenses are configured |
 | VSO.ai CCEX | Compile/runtime CCEX with optional RCA and shared learning | Coverage Directed Solver is licensed and shared merge storage is validated |
-| Dynamic Test Loading | Supported by `--dtl`; batch only | Compile savings exceed the extra static/dynamic flow complexity |
-| Partition Compile shared baseline | Supported by `--vcs-partcomp-sharedlib` | Baseline matches the VCS release, Red Hat platform, sources and compile configuration |
+| Dynamic Test Loading | Supported by `--vcs-partcomp --dtl`; batch only | Compile savings exceed the extra static/dynamic flow complexity |
+| Partition Compile shared baseline | Supported by `--vcs-partcomp --vcs-partcomp-sharedlib PATH` | Baseline matches the VCS release, Red Hat platform, sources and compile configuration |
 | Fine-Grained Parallelism | Supported by `--fgp N` | Profiling shows runtime CPU scaling and license capacity is available |
 | Verdi GUI/reverse debug | Supported for one VCS test | Interactive debug is required; never for throughput regressions |
 | Full FSDB probes | Supported | A narrow probe cannot reproduce the issue; high disk cost is accepted |

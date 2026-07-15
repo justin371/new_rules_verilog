@@ -152,6 +152,27 @@ class SimmerResultsTest(unittest.TestCase):
         self.assertIn("COMPILE_FAILED", history)
         self.assertIn("compile: cmp.log", history)
 
+    def test_compile_record_preserves_optional_performance_metrics(self):
+        run = simmer_results.create_run(["simmer", "-t", "tb:test"], self.rcfg, 1)
+        vcomp = SimpleNamespace(
+            name="tb",
+            bazel_vcomp_target="//tb:tb",
+            jobstatus=SimpleNamespace(name="PASSED"),
+            job_dir="compile",
+            log_path="cmp.log",
+            duration_s=12.8,
+            compile_metrics={
+                "partcomp_jobs": 4,
+                "compile_cache_hit": True
+            },
+            error_message=None,
+        )
+
+        simmer_results.record_compile_job(run, vcomp)
+
+        self.assertEqual(12, run["compile"][0]["duration_s"])
+        self.assertEqual(4, run["compile"][0]["metrics"]["partcomp_jobs"])
+
     def test_multi_test_history_keeps_summary_and_one_representative_test(self):
         run = self._completed_run()
         run["planned_tests"] = 3

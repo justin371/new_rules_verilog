@@ -45,6 +45,18 @@ def _compile_inputs_digest(compile_inputs_path, runfiles_root):
     return digest.hexdigest()
 
 
+def _compile_inputs_manifest_digest(compile_inputs_path):
+    digest = hashlib.sha256()
+    with open(compile_inputs_path, "r", encoding="utf-8") as filep:
+        for line in filep:
+            entry = line.rstrip("\n")
+            if "\t" not in entry:
+                raise RuntimeError("Malformed compile input inventory entry: {!r}".format(entry))
+            digest.update(entry.encode("utf-8"))
+            digest.update(b"\0")
+    return digest.hexdigest()
+
+
 def _extra_inputs_digest(paths):
     digest = hashlib.sha256()
     for path in sorted(os.path.abspath(os.fspath(path)) for path in paths if path):
@@ -53,6 +65,11 @@ def _extra_inputs_digest(paths):
         digest.update(_file_bytes(path))
         digest.update(b"\0")
     return digest.hexdigest()
+
+
+def _extra_inputs_content_digest(paths):
+    file_digests = sorted(_digest_bytes(_file_bytes(path)) for path in paths if path)
+    return _digest_bytes(*(digest.encode("ascii") for digest in file_digests))
 
 
 def compile_fingerprint(project_dir,
@@ -64,15 +81,17 @@ def compile_fingerprint(project_dir,
                         environment=None):
     """Return the source, generated filelist and compile-mode identity."""
     fingerprint = {
-        "schema_version": 4,
+        "schema_version": 5,
         "compile_script_sha256": _digest_bytes(compile_script.encode("utf-8")),
         "compile_args_sha256": _digest_bytes(_file_bytes(compile_args_path)),
         "environment": dict(sorted((environment or {}).items())),
     }
     if compile_inputs_path:
         fingerprint["compile_inputs_sha256"] = _compile_inputs_digest(compile_inputs_path, runfiles_root)
+        fingerprint["compile_inputs_manifest_sha256"] = _compile_inputs_manifest_digest(compile_inputs_path)
     if extra_input_paths:
         fingerprint["extra_inputs_sha256"] = _extra_inputs_digest(extra_input_paths)
+        fingerprint["extra_inputs_content_sha256"] = _extra_inputs_content_digest(extra_input_paths)
     return fingerprint
 
 
@@ -93,6 +112,13 @@ def write_compile_fingerprint(job_dir, fingerprint):
             os.remove(temporary_path)
 
 
+def invalidate_compile_fingerprint(job_dir):
+    try:
+        os.remove(_fingerprint_path(job_dir))
+    except FileNotFoundError:
+        pass
+
+
 def validate_compile_fingerprint(job_dir, expected):
     path = _fingerprint_path(job_dir)
     if not os.path.isfile(path):
@@ -101,3 +127,13 @@ def validate_compile_fingerprint(job_dir, expected):
         actual = json.load(filep)
     if actual != expected:
         raise RuntimeError("--no-compile build fingerprint mismatch in {}. Recompile this testbench.".format(job_dir))
+
+
+def can_reuse_compile(job_dir, expected, validate_artifacts):
+    """Return an automatic cache decision without turning a miss into an error."""
+    try:
+        validate_artifacts()
+        validate_compile_fingerprint(job_dir, expected)
+    except (OSError, RuntimeError, ValueError) as exc:
+        return False, str(exc)
+    return True, None

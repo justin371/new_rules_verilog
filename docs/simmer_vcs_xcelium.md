@@ -173,14 +173,43 @@ cells and packages.
 
 ### VCS Partition Compile
 
-VCS Y-2026.03 Partition Compile is enabled by default with adaptive scheduling,
-eight maximum compile processes and redundant-partition cleanup. Simmer passes:
+VCS X-2025.06-SP2-4 uses regular incremental `-Mupdate` by default. Partition
+Compile is an explicit per-command opt-in through `--vcs-partcomp`. When enabled,
+simmer uses standard autopartitioning, allocation-aware compile parallelism and
+redundant-partition cleanup, passing the detected job allocation as `N`:
 
 ```text
--partcomp=adaptive_sched
+-partcomp
 -partcomp_dir=<tb>__VCS_VCOMP/partitionlib
 -partcomp=incr_clean
--fastpartcomp=j8
+-fastpartcomp=jN
+```
+
+`N` comes from the CPUs assigned to the running job, not from an idle-host or
+cluster-wide CPU scan. Simmer checks the current host allocation in
+`LSB_MCPU_HOSTS`/`LSB_HOSTS`, then Slurm per-task allocation and process CPU
+affinity. A multi-host LSF total without per-host evidence falls back to one
+worker. Affinity-only and host-count fallbacks are capped at the conservative
+default of eight. `--vcs-partcomp-jobs N` always overrides automatic detection
+after `--vcs-partcomp` enables the flow.
+
+For an LSF wrapper such as `bs='bsub -I -q syn'`, omitting `-n` normally means
+the queue's default allocation, often one slot. Without `--vcs-partcomp`, both
+commands below use regular `-Mupdate`. Add the flag only when Partition Compile
+is intended, and request parallel capacity from LSF when it is needed:
+
+```bash
+bs simmer -t 'sys_tb:smoke_test@1' --simulator VCS
+bs -n 8 simmer -t 'sys_tb:smoke_test@1' --simulator VCS --vcs-partcomp
+```
+
+The second command selects at most `j8` after LSF grants those slots. It does
+not infer permission from the host's current idle CPU count. A diagnostic `j1`
+run must still opt in explicitly:
+
+```bash
+bs simmer -t 'sys_tb:smoke_test@1' --simulator VCS \
+  --vcs-partcomp --vcs-partcomp-mode auto --vcs-partcomp-jobs 1
 ```
 
 The partition database belongs to one VCOMP directory rather than the shared
@@ -200,14 +229,27 @@ with:
 
 ```bash
 simmer -t 'sys_tb:smoke_test@1' --simulator VCS \
-  --vcs-partcomp-jobs 16 --vcs-profile
+  --vcs-partcomp --vcs-partcomp-jobs 16 --vcs-profile
 ```
 
-Available modes are `adaptive`, `auto`, `low`, `high`, `relax` and `disabled`:
+For repeated invocations that often have no compile-input changes, opt into an
+automatic fingerprint cache:
 
 ```bash
-simmer -t 'sys_tb:smoke_test@1' --simulator VCS \
-  --vcs-partcomp-mode disabled --vcs-profile
+simmer -t 'sys_tb:smoke_test@1' --simulator VCS --vcs-auto-compile-cache
+```
+
+A matching fingerprint and existing `simv` bypass VCS compilation. A miss
+compiles normally, unlike strict `--no-compile`. The option cannot be combined
+with `--recompile`.
+
+Available modes after `--vcs-partcomp` are `auto`, `adaptive`, `low`, `high` and
+`relax`. Keep `auto` until profiling shows a reason to tune the
+partition thresholds or adaptive scheduler. Omit `--vcs-partcomp` for the
+normal `-Mupdate` flow:
+
+```bash
+simmer -t 'sys_tb:smoke_test@1' --simulator VCS --vcs-profile
 ```
 
 To create a versioned baseline database for multiple workspaces, use a path
@@ -215,7 +257,8 @@ owned by that exact VCS release, Red Hat platform and compile configuration:
 
 ```bash
 simmer -t 'sys_tb:smoke_test@1' --simulator VCS \
-  --vcs-partcomp-dir "$PWD/.vcs-partitions/Y-2026.03/sys_tb-default"
+  --vcs-partcomp \
+  --vcs-partcomp-dir "$PWD/.vcs-partitions/X-2025.06-SP2-4/sys_tb-default"
 ```
 
 Other workspaces can consume it while writing changed partitions to their local
@@ -223,12 +266,24 @@ VCOMP database:
 
 ```bash
 simmer -t 'sys_tb:smoke_test@1' --simulator VCS \
-  --vcs-partcomp-sharedlib /shared/vcs-partitions/Y-2026.03/sys_tb-default
+  --vcs-partcomp \
+  --vcs-partcomp-sharedlib /shared/vcs-partitions/X-2025.06-SP2-4/sys_tb-default
 ```
 
 The writable `--vcs-partcomp-dir` and read-only
 `--vcs-partcomp-sharedlib` must differ. Do not reuse a baseline across VCS
-versions, source releases, defines, coverage/debug modes or compile arguments.
+versions, source inventories, defines, coverage/debug modes or compile arguments.
+Explicit baseline builds and shared-library consumers write
+`.rules_verilog_partcomp.json` into the writable partition directory. A shared
+library with that manifest is rejected before VCS starts when its tool
+platform, source inventory or compile configuration is incompatible.
+Source-content edits with the same inventory remain valid inputs and VCS
+recompiles the affected partitions. Existing databases without a manifest
+remain usable with a warning so they can be republished incrementally.
+
+For automatic compile reuse or shared baselines, simmer resolves the actual
+VCS build with `vcs -full64 -ID`. Sites may set `RV_VCS_TOOL_ID` to a stable
+release ID to avoid that probe while retaining version-safe reuse.
 Simmer intentionally does not use `-simcopy_opts=mv`, which would make the
 source shared database unusable. `--recompile` removes the default local
 database because it is under VCOMP, but it does not delete a custom external
@@ -238,7 +293,9 @@ For effective partitioning, keep third-party components in separate Bazel
 libraries, wrap testbench code in SystemVerilog packages, avoid `$unit` code and
 minimize cross-partition XMRs. Inspect `cmp.log` for `PC_SHARED`, `PC_RECOMPILE`
 and the `-pcmakeprof` timing table. Coverage and Verdi require the referenced
-partition database to remain available.
+partition database to remain available. With `--vcs-profile`, simmer also
+stores marker counts, selected partition mode/jobs, compile wall time and cache
+reuse state in the compile entry of `.simmer_results.json`.
 
 Start with automatic partitioning. If profiling shows that stable third-party
 code shares a partition with frequently changing project code, add a VCS
@@ -495,7 +552,7 @@ For quiet normal runs, avoid `--tool-debug`; it prints scheduler polling noise.
   number of concurrent tests to account for those threads.
 - Avoid waves, `-debug_access`, VPI and SmartLog in throughput regressions.
 
-DTL (`--dtl`) and VCS ICO (`--ico`) are opt-in advanced flows. ICO does not change VCS compilation. Simmer initializes a
+DTL (`--vcs-partcomp --dtl`) and VCS ICO (`--ico`) are opt-in advanced flows. ICO does not change VCS compilation. Simmer initializes a
 shared CDB with `crg -dir <shared_record> -shared init` and passes the recommended
 `+ntb_solver_bias_mode_auto_config=2`, shared-record, work-directory, UVM test-type
 and test-name options to each `simv`. Existing initialized CDBs are reused.

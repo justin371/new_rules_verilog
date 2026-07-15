@@ -1,11 +1,15 @@
 # lib/simulators/vcs.py
+import json
 import os
 import stat
 import logging
+import platform
 import re
 import shlex
 import shutil
+import socket
 import subprocess
+import tempfile
 
 from lib.coverage_data import aggregate_coverage_metrics, parse_coverage_summary
 from .base import SimulatorInterface, ValidationErrorParser
@@ -15,6 +19,97 @@ from .vso import VsoWorkflow
 from .vcs_jobs import IcoInitJob, VsoAskJob, VsoInitJob
 
 log = logging.getLogger(__name__)
+
+PARTCOMP_MANIFEST_FILENAME = ".rules_verilog_partcomp.json"
+
+
+def _positive_integer(value):
+    try:
+        value = int(value)
+    except (TypeError, ValueError):
+        return None
+    return value if value > 0 else None
+
+
+def _lsf_host_slots(value, hostname=None):
+    tokens = (value or "").split()
+    if len(tokens) < 2 or len(tokens) % 2:
+        return None
+    pairs = []
+    for index in range(0, len(tokens), 2):
+        slots = _positive_integer(tokens[index + 1])
+        if slots is None:
+            return None
+        pairs.append((tokens[index], slots))
+    if len(pairs) == 1:
+        return pairs[0][1]
+
+    hostname = hostname or socket.gethostname()
+    local_names = {hostname.lower(), hostname.split('.', 1)[0].lower()}
+    for host, slots in pairs:
+        if host.lower() in local_names or host.split('.', 1)[0].lower() in local_names:
+            return slots
+    return min(slots for _, slots in pairs)
+
+
+def _lsf_host_list_slots(value, hostname=None):
+    hosts = (value or "").split()
+    if not hosts:
+        return None
+    hostname = hostname or socket.gethostname()
+    local_names = {hostname.lower(), hostname.split('.', 1)[0].lower()}
+    local_slots = sum(1 for host in hosts
+                      if host.lower() in local_names or host.split('.', 1)[0].lower() in local_names)
+    if local_slots:
+        return local_slots
+    slots_by_host = {}
+    for host in hosts:
+        short_name = host.split('.', 1)[0].lower()
+        slots_by_host[short_name] = slots_by_host.get(short_name, 0) + 1
+    return min(slots_by_host.values())
+
+
+def detect_allocated_cpus(environment=None):
+    """Return CPUs assigned to this process and the allocation source."""
+    environment = os.environ if environment is None else environment
+
+    affinity_count = None
+    affinity = getattr(os, "sched_getaffinity", None)
+    if affinity is not None:
+        try:
+            affinity_count = len(affinity(0)) or None
+        except OSError:
+            pass
+
+    host_slots = _lsf_host_slots(environment.get("LSB_MCPU_HOSTS"))
+    if host_slots is None:
+        host_slots = _lsf_host_list_slots(environment.get("LSB_HOSTS"))
+        host_source = "LSB_HOSTS"
+    else:
+        host_source = "LSB_MCPU_HOSTS"
+    if host_slots is not None:
+        if affinity_count is not None and affinity_count < host_slots:
+            return affinity_count, "{} capped by CPU affinity".format(host_source)
+        return host_slots, host_source
+
+    slurm_cpus = _positive_integer(environment.get("SLURM_CPUS_PER_TASK"))
+    if slurm_cpus is not None:
+        if affinity_count is not None and affinity_count < slurm_cpus:
+            return affinity_count, "SLURM_CPUS_PER_TASK capped by CPU affinity"
+        return slurm_cpus, "SLURM_CPUS_PER_TASK"
+
+    lsf_total = _positive_integer(environment.get("LSB_DJOB_NUMPROC"))
+    if lsf_total is not None:
+        if affinity_count is not None and affinity_count < lsf_total:
+            return affinity_count, "LSB_DJOB_NUMPROC capped by CPU affinity"
+        if lsf_total == 1:
+            return 1, "LSB_DJOB_NUMPROC"
+        return 1, "LSB_DJOB_NUMPROC without per-host allocation (conservative)"
+
+    if affinity_count is not None:
+        return min(affinity_count, 8), "CPU affinity fallback (capped at 8)"
+
+    return min(os.cpu_count() or 1, 8), "host CPU count fallback (capped at 8)"
 
 
 class VcsSimulator(SimulatorInterface):
@@ -43,6 +138,8 @@ class VcsSimulator(SimulatorInterface):
         self.vso_workflow = VsoWorkflow(options, rcfg)
         self._vso_init_job = None
         self._vso_ask_job = None
+        self._resolved_partcomp_jobs = None
+        self._vcs_tool_identity = None
 
     def get_name(self):
         return "vcs"
@@ -62,6 +159,29 @@ class VcsSimulator(SimulatorInterface):
 
     def get_tool_command(self, tool_name):
         return "{} {}".format(self.get_tool_runner(), tool_name).strip()
+
+    def get_tool_identity(self):
+        if self._vcs_tool_identity is not None:
+            return self._vcs_tool_identity
+        configured_identity = os.environ.get("RV_VCS_TOOL_ID")
+        if configured_identity:
+            self._vcs_tool_identity = configured_identity
+            return self._vcs_tool_identity
+
+        command = shlex.split(self.get_tool_runner()) + ["vcs", "-full64", "-ID"]
+        try:
+            result = subprocess.run(command, capture_output=True, text=True, timeout=30, check=False)
+        except (OSError, subprocess.TimeoutExpired) as exc:
+            raise RuntimeError(
+                "Unable to resolve the VCS build ID with '{}'. Set RV_VCS_TOOL_ID to the site VCS release ID: {}".
+                format(shlex.join(command), exc)) from exc
+        identity = "\n".join(part.strip() for part in (result.stdout, result.stderr) if part.strip())
+        if result.returncode != 0 or not identity:
+            raise RuntimeError(
+                "Unable to resolve the VCS build ID with '{}'. Set RV_VCS_TOOL_ID to the site VCS release ID.\n{}".
+                format(shlex.join(command), identity))
+        self._vcs_tool_identity = identity
+        return self._vcs_tool_identity
 
     def validate_resolved_options(self):
         parser = ValidationErrorParser()
@@ -140,10 +260,20 @@ class VcsSimulator(SimulatorInterface):
         inputs = super().get_compile_fingerprint_inputs(vcomp_job)
         if self.options.vcs_cm_hier:
             inputs["extra_input_paths"].append(self.options.vcs_cm_hier)
+        xprop_config = getattr(vcomp_job, "vcs_xprop_config_path", None)
+        if xprop_config:
+            inputs["extra_input_paths"].append(xprop_config)
         inputs["environment"].update(
             {key: os.environ.get(key, "")
              for key in ("LM_LICENSE_FILE", "VCS_HOME", "VSO_HOME")})
+        inputs["environment"]["VCS_TOOL_ID"] = self.get_tool_identity()
         return inputs
+
+    def compile_script_for_fingerprint(self, compile_script):
+        return re.sub(r"-fastpartcomp=j\d+", "-fastpartcomp=jAUTO", compile_script)
+
+    def should_auto_reuse_compile(self):
+        return self.options.vcs_auto_compile_cache
 
     def get_scheduler_threads_per_test(self):
         return self.options.fgp if self.options.fgp is not None else 1
@@ -205,11 +335,6 @@ class VcsSimulator(SimulatorInterface):
         # Coverage (Functional/Code)
         if self.options.cm:
             vcomp_job.cov_work_dir = os.path.join(self.rcfg.regression_dir, vcomp_job.name + "__COV_WORK_VCS.vdb")
-            if self.options.no_compile:
-                shutil.rmtree(os.path.join(vcomp_job.cov_work_dir, "snps", "coverage", "db", "testdata"),
-                              ignore_errors=True)
-            else:
-                shutil.rmtree(vcomp_job.cov_work_dir, ignore_errors=True)
             opts['cov_opts'] += ' -cm_dir {} '.format(vcomp_job.cov_work_dir)
             # Translate coverage level options if needed
             cm_level = self.options.cm
@@ -234,6 +359,7 @@ class VcsSimulator(SimulatorInterface):
             xprop_mode = self.options.xprop
             xprop_cmds = []
             xprop_cfg_path = self._find_vcs_xprop_config(vcomp_job.bench_dir, xprop_mode)
+            vcomp_job.vcs_xprop_config_path = xprop_cfg_path
             if xprop_cfg_path is not None:
                 xprop_cmds.append("-xprop={}".format(xprop_cfg_path))
             else:
@@ -258,8 +384,13 @@ class VcsSimulator(SimulatorInterface):
         return opts
 
     def get_partition_compile_options(self, vcomp_job):
-        jobs = '-fastpartcomp=j{}'.format(self.options.vcs_partcomp_jobs)
+        effective_mode = self.get_effective_partcomp_mode()
+        if effective_mode == 'disabled':
+            log.info("VCS Partition Compile is disabled by default; using -Mupdate")
+            return ''
+
         if self.options.dtl:
+            jobs = '-fastpartcomp=j{}'.format(self.get_partcomp_jobs())
             dtl_dir = os.path.join(vcomp_job.job_dir, self._debug_partition_dirname('dtl_static'))
             return shlex.join([
                 '-partcomp',
@@ -267,16 +398,13 @@ class VcsSimulator(SimulatorInterface):
                 jobs,
             ])
 
-        mode_option = self.VCS_PARTCOMP_OPTION_BY_MODE.get(self.options.vcs_partcomp_mode)
+        mode_option = self.VCS_PARTCOMP_OPTION_BY_MODE.get(effective_mode)
         if mode_option is None:
             return ''
 
-        partition_dir = self.options.vcs_partcomp_dir or os.path.join(
-            vcomp_job.job_dir,
-            self._debug_partition_dirname('partitionlib'),
-        )
-        if not os.path.isabs(partition_dir):
-            partition_dir = os.path.join(self.rcfg.proj_dir, partition_dir)
+        job_count = self.get_partcomp_jobs()
+        jobs = '-fastpartcomp=j{}'.format(job_count)
+        partition_dir = self.get_partition_compile_dir(vcomp_job)
         args = [
             mode_option,
             '-partcomp_dir={}'.format(os.path.abspath(partition_dir)),
@@ -286,6 +414,30 @@ class VcsSimulator(SimulatorInterface):
         if self.options.vcs_partcomp_sharedlib is not None:
             args.append('-partcomp_sharedlib={}'.format(os.path.abspath(self.options.vcs_partcomp_sharedlib)))
         return shlex.join(args)
+
+    def get_effective_partcomp_mode(self):
+        if not self.options.vcs_partcomp:
+            return 'disabled'
+        return self.options.vcs_partcomp_mode
+
+    def get_partcomp_jobs(self):
+        if self._resolved_partcomp_jobs is not None:
+            return self._resolved_partcomp_jobs
+        if self.options.vcs_partcomp_jobs != 'auto':
+            self._resolved_partcomp_jobs = self.options.vcs_partcomp_jobs
+            return self._resolved_partcomp_jobs
+        self._resolved_partcomp_jobs, source = detect_allocated_cpus()
+        log.info("VCS Partition Compile auto-selected j%d from %s", self._resolved_partcomp_jobs, source)
+        return self._resolved_partcomp_jobs
+
+    def get_partition_compile_dir(self, vcomp_job):
+        partition_dir = self.options.vcs_partcomp_dir or os.path.join(
+            vcomp_job.job_dir,
+            self._debug_partition_dirname('partitionlib'),
+        )
+        if not os.path.isabs(partition_dir):
+            partition_dir = os.path.join(self.rcfg.proj_dir, partition_dir)
+        return os.path.abspath(partition_dir)
 
     def _debug_partition_dirname(self, base_name):
         if self.options.gui:
@@ -482,11 +634,123 @@ class VcsSimulator(SimulatorInterface):
         # Enable Verdi debug features along with DVE/Verdi GUI
         return " -gui=verdi +UVM_VERDI_TRACE=UVM_AWARE +UVM_CONFIG_TRACE +UVM_PHASE_TRACE +UVM_OBJECTION_TRACE +UVM_RESOURCE_DB_TRACE +UVM_LOG_TRACE "
 
+    def _partcomp_manifest_identity(self, vcomp_job):
+        fingerprint = vcomp_job.compile_fingerprint
+        try:
+            os_release = platform.freedesktop_os_release()
+        except (AttributeError, OSError):
+            os_release = {}
+        return {
+            "schema_version": 1,
+            "tool": {
+                "vcs_home": os.environ.get("VCS_HOME", ""),
+                "vcs_tool_id": self.get_tool_identity(),
+                "runner": self.get_tool_runner(),
+                "platform": platform.system(),
+                "machine": platform.machine(),
+                "os_id": os_release.get("ID", ""),
+                "os_version": os_release.get("VERSION_ID", ""),
+            },
+            "inputs": {
+                "compile_args_sha256": fingerprint.get("compile_args_sha256"),
+                "compile_inputs_manifest_sha256": fingerprint.get("compile_inputs_manifest_sha256"),
+                "extra_inputs_content_sha256": fingerprint.get("extra_inputs_content_sha256"),
+            },
+            "configuration": {
+                "partcomp_mode": self.options.vcs_partcomp_mode,
+                "debug_mode": "gui" if self.options.gui else "waves" if self.options.waves is not None else "default",
+                "coverage": self.options.cm,
+                "coverage_line": self.options.vcs_cm_line,
+                "coverage_report": self.options.vcs_cm_report or [],
+                "coverage_cond": self.options.vcs_cm_cond,
+                "coverage_tgl": self.options.vcs_cm_tgl,
+                "fgp": self.options.fgp is not None,
+                "smartlog": self.use_smartlog(),
+                "xprop": self.options.xprop if self.options.xprop_was_explicit else None,
+                "xprop_flowctrl": self.options.vcs_xprop_flowctrl,
+                "xprop_mmsopt": self.options.vcs_xprop_mmsopt,
+                "rtl_defines": self.options.rtl_defines or [],
+                "vso": self.options.vso,
+                "vso_cbv": self.options.vso_cbv,
+                "vso_build_name": self.vso_workflow.build_name(vcomp_job) if self.options.vso else None,
+                "vso_workdir": self.vso_workflow.workdir() if self.options.vso_cbv else None,
+                "vso_ccex": self.options.vso_ccex,
+                "vso_ccex_rca": self.options.vso_ccex_rca,
+            },
+        }
+
+    def validate_compile_cache_context(self, vcomp_job):
+        sharedlib = self.options.vcs_partcomp_sharedlib
+        if sharedlib is None:
+            return
+        manifest_path = os.path.join(os.path.abspath(sharedlib), PARTCOMP_MANIFEST_FILENAME)
+        if not os.path.isfile(manifest_path):
+            log.warning("VCS Partition Compile shared library has no rules_verilog manifest: %s", manifest_path)
+            return
+        try:
+            with open(manifest_path, "r", encoding="utf-8") as filep:
+                actual = json.load(filep)
+        except (OSError, ValueError) as exc:
+            raise RuntimeError("Cannot read VCS Partition Compile manifest '{}': {}".format(manifest_path,
+                                                                                            exc)) from exc
+        expected = self._partcomp_manifest_identity(vcomp_job)
+        if actual != expected:
+            mismatches = sorted(key for key in set(actual) | set(expected) if actual.get(key) != expected.get(key))
+            raise RuntimeError("VCS Partition Compile shared library is incompatible ({}): {}".format(
+                ", ".join(mismatches), manifest_path))
+
+    def prepare_compile_execution(self, vcomp_job, reusing_compile):
+        if not self.options.cm:
+            return
+        if reusing_compile:
+            shutil.rmtree(os.path.join(vcomp_job.cov_work_dir, "snps", "coverage", "db", "testdata"),
+                          ignore_errors=True)
+        else:
+            shutil.rmtree(vcomp_job.cov_work_dir, ignore_errors=True)
+
     def validate_reusable_compile_artifacts(self, vcomp_job):
         simv_path = os.path.join(vcomp_job.job_dir, "simv")
         if not os.path.exists(simv_path):
             raise FileNotFoundError(
                 "VCS --no-compile requires an existing elaborated executable at '{}'".format(simv_path))
+
+    def record_compile_artifacts(self, vcomp_job):
+        self.validate_reusable_compile_artifacts(vcomp_job)
+        if (self.options.dtl or self.get_effective_partcomp_mode() == 'disabled'
+                or (self.options.vcs_partcomp_dir is None and self.options.vcs_partcomp_sharedlib is None)):
+            return
+        partition_dir = self.get_partition_compile_dir(vcomp_job)
+        os.makedirs(partition_dir, exist_ok=True)
+        descriptor, temporary_path = tempfile.mkstemp(prefix=".partcomp-manifest-", dir=partition_dir, text=True)
+        manifest_path = os.path.join(partition_dir, PARTCOMP_MANIFEST_FILENAME)
+        try:
+            with os.fdopen(descriptor, "w", encoding="utf-8") as filep:
+                json.dump(self._partcomp_manifest_identity(vcomp_job), filep, indent=2, sort_keys=True)
+                filep.write("\n")
+            os.replace(temporary_path, manifest_path)
+        finally:
+            if os.path.exists(temporary_path):
+                os.remove(temporary_path)
+
+    def collect_compile_metrics(self, vcomp_job):
+        reused = bool(self.options.no_compile or getattr(vcomp_job, "compile_cache_hit", False))
+        effective_partcomp_mode = self.get_effective_partcomp_mode()
+        metrics = {
+            "compile_cache_hit": bool(getattr(vcomp_job, "compile_cache_hit", False)),
+            "compile_reused": reused,
+            "partcomp_mode": effective_partcomp_mode,
+            "partcomp_jobs": self.get_partcomp_jobs() if effective_partcomp_mode != 'disabled' and not reused else None,
+        }
+        if reused or not self.options.vcs_profile or not os.path.isfile(vcomp_job.log_path):
+            return metrics
+        markers = {"PC_SHARED": 0, "PC_RECOMPILE": 0}
+        with open(vcomp_job.log_path, "r", encoding="utf-8", errors="ignore") as filep:
+            for line in filep:
+                for marker in markers:
+                    if marker in line:
+                        markers[marker] += 1
+        metrics["profile_marker_lines"] = markers
+        return metrics
 
     # --- Method to implement for generating the simulation command ---
     def get_sim_command(self, test_job, sim_opts, vcomp_job_dir, log_path, user_args_list=None):

@@ -1,4 +1,5 @@
 import argparse
+import textwrap
 
 from .common import (
     PROJ_DIR,
@@ -24,6 +25,34 @@ _RERUN_OMITTED_OPTIONS = {
     '--global-tag',
     '--global-ntag',
 }
+
+_HELP_WIDTH = 150
+
+
+class SimmerHelpFormatter(argparse.HelpFormatter):
+
+    def __init__(self, prog):
+        super().__init__(prog, width=_HELP_WIDTH)
+
+    @staticmethod
+    def _wrap_line(line, width):
+        if not line.strip():
+            return ['']
+        leading_space = line[:len(line) - len(line.lstrip())]
+        wrapped = textwrap.wrap(
+            line.strip(),
+            width=max(1, width - len(leading_space)),
+            break_long_words=False,
+            break_on_hyphens=False,
+        )
+        return [leading_space + part for part in wrapped]
+
+    def _split_lines(self, text, width):
+        return [line for source_line in text.splitlines() for line in self._wrap_line(source_line, width)]
+
+    def _fill_text(self, text, width, indent):
+        return '\n'.join(indent + line for source_line in text.splitlines()
+                         for line in self._wrap_line(source_line, width))
 
 
 def reproduction_args(argv):
@@ -58,7 +87,7 @@ def create_parser():
          "  simmer -t 'gate_tb:test@1' --simulator XRUN --msie-href dut\n"
          "  simmer -t 'gate_tb:test@1' --simulator XRUN --msie-prim dut --msie-primary-name dut_wc --msie-primary-key KEY\n"
          "  simmer -t 'gate_tb:test@1' --simulator XRUN --msie-incr dut_wc --msie-primary-key KEY"),
-        formatter_class=argparse.RawTextHelpFormatter,
+        formatter_class=SimmerHelpFormatter,
     )
 
     add_debug_arguments(parser)
@@ -116,14 +145,6 @@ def parse_args(argv):
             '--emulator',
         ] if argument_explicitly_requested(argv, argument)
     ]
-    options.vcs_partcomp_explicit_switches = [
-        argument for argument in [
-            '--vcs-partcomp-mode',
-            '--vcs-partcomp-jobs',
-            '--vcs-partcomp-dir',
-            '--vcs-partcomp-sharedlib',
-        ] if argument_explicitly_requested(argv, argument)
-    ]
     options.vcs_explicit_switches = [
         argument for argument in [
             '--cm',
@@ -136,10 +157,12 @@ def parse_args(argv):
             '--vcs-profile',
             '--vcs-urg-parallel',
             '--vcs-urg-show-tests',
+            '--vcs-partcomp',
             '--vcs-partcomp-mode',
             '--vcs-partcomp-jobs',
             '--vcs-partcomp-dir',
             '--vcs-partcomp-sharedlib',
+            '--vcs-auto-compile-cache',
             '--smartlog',
             '--vcs-runner',
             '--dtl',

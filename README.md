@@ -89,8 +89,9 @@ to be available on `PATH`.
 
 ### VCS Partition Compile
 
-VCS regressions use Partition Compile by default. The writable partition
-database is `<tb>__VCS_VCOMP/partitionlib`; `--waves` and `--gui` use sibling
+VCS uses regular incremental `-Mupdate` by default. Add `--vcs-partcomp` to one
+simmer command to enable Partition Compile. The writable partition database is
+`<tb>__VCS_VCOMP/partitionlib`; `--waves` and `--gui` use sibling
 `partitionlib_waves` and `partitionlib_gui` databases so incompatible KDB
 options do not invalidate each other. Stable third-party IP/VIP
 partitions are reused while changed project RTL and testbench partitions are
@@ -98,12 +99,12 @@ rebuilt. Tune parallel compilation after measuring the workstation:
 
 ```bash
 simmer -t 'sys_tb:smoke_test@1' --simulator VCS \
-  --vcs-partcomp-jobs 16 --vcs-profile
+  --vcs-partcomp --vcs-partcomp-jobs 16 --vcs-profile
 ```
 
-Use `--vcs-partcomp-mode disabled` to compare against regular incremental
-compilation. Shared partition databases and the full compatibility guidance are
-documented in [VCS and Xcelium workflow](docs/simmer_vcs_xcelium.md#vcs-partition-compile).
+Omit `--vcs-partcomp` to use regular incremental compilation. Shared partition
+databases and the full compatibility guidance are documented in
+[VCS and Xcelium workflow](docs/simmer_vcs_xcelium.md#vcs-partition-compile).
 
 ### VCS ICO and VSO.ai
 
