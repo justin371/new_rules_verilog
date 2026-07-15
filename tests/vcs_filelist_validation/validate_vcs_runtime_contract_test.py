@@ -78,6 +78,7 @@ class VcsRuntimeContractTest(unittest.TestCase):
         self.assertIn("custom external partcomp/sharedlib directories are preserved", normalized_help)
         self.assertIn("Run this before --msie-prim", normalized_help)
         self.assertIn("Requires EMU_JINJA2_PATH", normalized_help)
+        self.assertIn("custom Tcl controls scopes, depth, and dump timing", normalized_help)
         self.assertIn("\n    --wave-type", help_text)
         self.assertIn("\n    --mce-build-count", help_text)
         self.assertIn("\n    --vcs-cm-line", help_text)
@@ -1072,6 +1073,17 @@ class VcsRuntimeContractTest(unittest.TestCase):
             waves_db="/tmp/waves.fsdb",
         )
         self.assertIn("-fid $wave_fid -depth 8", rendered)
+
+    def test_vcs_custom_wave_tcl_example_controls_scope_depth_and_time(self):
+        example = self._read_repo_file("docs/examples/vcs_fsdb_dump.tcl")
+
+        self.assertIn('$::env(SIMRESULTS)/waves.fsdb', example)
+        self.assertIn("dump -add hdl_top.dut -fid $wave_fid -depth 0", example)
+        self.assertIn("dump -add hdl_top.env.agent -fid $wave_fid -depth 2", example)
+        self.assertIn("stop -absolute 1000ns", example)
+        self.assertIn("stop -absolute 50000ns", example)
+        self.assertIn("dump -close", example)
+        self.assertNotIn("dump -close $wave_fid", example)
 
     def test_shell_templates_preserve_failures_and_argv(self):
         coverage = self._read_repo_file("bin/templates/vcs_cov_merge_template.sh.j2")

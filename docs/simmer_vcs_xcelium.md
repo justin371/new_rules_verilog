@@ -437,9 +437,11 @@ not assume `FSDB0` when another dump file is already open. The default
 `--wave-depth 999` maps to UCLI `-depth 0`, which is the documented unlimited
 hierarchy depth; explicit smaller depths are preserved.
 
-Use `--wave-tcl <file>` for project-specific FSDB dump/probe commands. Keep the
-generated default as the reference for `dump -file`, `dump -add`, timed enable/
-disable, flush and close ordering.
+Use `--wave-tcl <file>` for project-specific FSDB dump/probe commands. The
+[editable VCS FSDB example](examples/vcs_fsdb_dump.tcl) shows per-scope depth,
+timed enable/disable, flush and close ordering. A custom Tcl file owns scopes,
+depths, and timing; keep its output at `$::env(SIMRESULTS)/waves.fsdb` so simmer
+can find it and generate `run_waves.sh`.
 
 ## Xcelium defaults
 

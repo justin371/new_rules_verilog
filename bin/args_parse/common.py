@@ -42,7 +42,8 @@ def add_debug_arguments(parser):
                        type=str,
                        default=None,
                        help=('Use an existing simulator-specific wave/probe Tcl file instead of generated commands. '
-                             'The file must exist and is used only when waveform capture is enabled.'))
+                             'The file must exist and is used only when waveform capture is enabled; custom Tcl '
+                             'controls scopes, depth, and dump timing instead of --waves values and --wave-* options.'))
     add_child_argument(
         gdebug,
         '--wave-start',

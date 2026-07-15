@@ -58,6 +58,55 @@ Override the launcher with `RV_VCS_RUNNER` or `--vcs-runner` only when a project
 VCS simulations use the two-step `verilog_dv_tb` + `simmer` flow. The one-step
 DV and RTL unit-test rules remain Xcelium-only.
 
+### VCS FSDB wave dumping
+
+VCS wave capture uses FSDB. These commands cover the generated simmer flow:
+
+```bash
+# Default hdl_top scope, all hierarchy, full simulation.
+simmer -t 'sys_tb:smoke_test@1' --simulator VCS --waves
+
+# Selected scopes and eight hierarchy levels below each scope.
+simmer -t 'sys_tb:smoke_test@1' --simulator VCS \
+  --waves hdl_top.dut hdl_top.env --wave-depth 8
+
+# Capture only the 1000 ns through 50000 ns interval.
+simmer -t 'sys_tb:smoke_test@1' --simulator VCS \
+  --waves hdl_top.dut --wave-start 1000 --wave-end 50000
+
+# Use a project-owned UCLI file for per-scope depth and advanced FSDB controls.
+simmer -t 'sys_tb:smoke_test@1' --simulator VCS --waves \
+  --wave-tcl ./debug/vcs_fsdb_dump.tcl
+```
+
+The generated FSDB controls are:
+
+| simmer argument | Effect |
+|-----------------|--------|
+| `--waves [scope ...]` | Enables FSDB and selects one or more HDL scopes; no scope defaults to `hdl_top`. |
+| `--wave-depth N` | Applies depth `N` to every selected scope. The default captures all hierarchy. |
+| `--wave-start NS` | Starts dumping at an absolute, non-negative simulation time in ns. |
+| `--wave-end NS` | Stops dumping at an absolute time in ns; it must be greater than `--wave-start`. |
+| `--wave-tcl FILE` | Uses a VCS UCLI file instead of generated scope, depth, and time commands. |
+
+Copy the [VCS FSDB Tcl example](docs/examples/vcs_fsdb_dump.tcl) when different
+scopes need different depths or when `dump -add` needs advanced UCLI options.
+Useful revisions include `-aggregates`, `-ports`/`-in`/`-out`/`-inout`, and
+`-fsdb_opt` values such as `+mda`, `+packedmda`, `+struct`, `+parameter`,
+`+sva`, `+strength`, `+Reg_Only`, `+IO_Only`, or `+by_file=<file>`. UCLI also
+supports `dump -suppress_file`, `dump -suppress_instance`, `dump -deltaCycle`
+and `dump -glitch`; follow the installed VCS guide because some must be issued
+before the first `dump -add` or require environment setup.
+
+With `--wave-tcl`, the Tcl file owns scopes, depths, and dump timing. Keep the
+output at `$::env(SIMRESULTS)/waves.fsdb` so simmer can find it and generate
+`run_waves.sh`. Open Verdi locally or through the site LSF queue:
+
+```bash
+./run_waves.sh
+SIMMER_WAVE_LAUNCHER="bsub -I -q syn" ./run_waves.sh
+```
+
 ### Unit tests with Xcelium
 
 Use Xcelium for one-step unit-test targets:
