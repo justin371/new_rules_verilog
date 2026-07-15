@@ -14,6 +14,20 @@ SIM_TIMEOUT_START_FILE="$SIMRESULTS/simulation_started"
 rm -f "$SIM_DURATION_FILE" "$SIM_TIMEOUT_START_FILE"
 export VIP_LOG_DIR="$SIMRESULTS"
 export SVT_LOG_DIR="$SIMRESULTS"
+TEST_EXIT_CODE=0
+
+{%- if sockets %}
+function cleanup_socket_artifacts {
+    local child_pid
+    for child_pid in $(jobs -pr); do
+        kill "$child_pid" 2>/dev/null || true
+    done
+ {%- for _, _, socket_file in sockets %}
+    rm -f {{ socket_file|shell_quote }}
+ {%- endfor %}
+}
+trap cleanup_socket_artifacts EXIT
+{%- endif %}
 
 # --- Main Test Function ---
 function testFunction {
@@ -21,26 +35,29 @@ function testFunction {
     declare -i final_result=0
 
     # --- Socket Handling ---
+ {%- if sockets %}
+    cd "$PROJ_DIR"
+ {%- endif %}
  {%- for socket_name, socket_command, socket_file in sockets %}
     echo "--- Handling Socket: {{ socket_name }} ---"
     # Remove previous socket file if it exists
-    rm -f "{{ socket_file }}"
+    rm -f {{ socket_file|shell_quote }}
     # Spawn socket process
-    echo "Spawning: {{ socket_command }}"
-    {{ socket_command }} > "{{ job.job_dir }}/{{ socket_name }}.log" 2>&1 &
+    printf 'Spawning: %s\n' {{ socket_command|shell_quote }}
+    bash -c {{ socket_command|shell_quote }} > {{ (job.job_dir ~ '/' ~ socket_name ~ '.log')|shell_quote }} 2>&1 &
     declare SOCKET_{{ loop.index }}_PID=$!
-    echo "Socket {{ socket_name }} started with PID $SOCKET_{{ loop.index }}_PID (Log: {{ job.job_dir }}/{{ socket_name }}.log)"
+    printf 'Socket %s started with PID %s (Log: %s)\n' {{ socket_name|shell_quote }} "$SOCKET_{{ loop.index }}_PID" {{ (job.job_dir ~ '/' ~ socket_name ~ '.log')|shell_quote }}
 
     # Wait for socket file to be created by the process
     local wait_count=0
     local max_wait=30 # Max seconds to wait
-    while [ ! -e "{{ socket_file }}" ]; do
-        echo "Waiting for {{ socket_name }} (PID $SOCKET_{{ loop.index }}_PID) to create {{ socket_file }}..."
+    while [ ! -e {{ socket_file|shell_quote }} ]; do
+        printf 'Waiting for %s (PID %s) to create %s...\n' {{ socket_name|shell_quote }} "$SOCKET_{{ loop.index }}_PID" {{ socket_file|shell_quote }}
         sleep 1
         # Check if the socket process is still running
-        if ! ps -p $SOCKET_{{ loop.index }}_PID > /dev/null; then
-           echo "%E- ERROR: Socket process {{ socket_name }} (PID $SOCKET_{{ loop.index }}_PID) exited prematurely without creating {{ socket_file }}."
-           echo "Check log: {{ job.job_dir }}/{{ socket_name }}.log"
+        if ! ps -p "$SOCKET_{{ loop.index }}_PID" > /dev/null; then
+           printf '%%E- ERROR: Socket process %s (PID %s) exited prematurely without creating %s.\n' {{ socket_name|shell_quote }} "$SOCKET_{{ loop.index }}_PID" {{ socket_file|shell_quote }}
+           printf 'Check log: %s\n' {{ (job.job_dir ~ '/' ~ socket_name ~ '.log')|shell_quote }}
            # Decide whether to exit immediately or continue and let failure be caught later
            # exit 1 # Exit immediately
            final_result=1 # Mark failure and continue for now
@@ -49,14 +66,14 @@ function testFunction {
         # Timeout check
         wait_count=$((wait_count + 1))
         if [ "$wait_count" -ge "$max_wait" ]; then
-            echo "%E- ERROR: Timeout waiting for socket {{ socket_name }} (PID $SOCKET_{{ loop.index }}_PID) to create {{ socket_file }}."
+            printf '%%E- ERROR: Timeout waiting for socket %s (PID %s) to create %s.\n' {{ socket_name|shell_quote }} "$SOCKET_{{ loop.index }}_PID" {{ socket_file|shell_quote }}
             final_result=1
             kill "$SOCKET_{{ loop.index }}_PID" 2>/dev/null || true
             break
         fi
     done
-    if [ -e "{{ socket_file }}" ]; then
-        echo "Socket file {{ socket_file }} created."
+    if [ -e {{ socket_file|shell_quote }} ]; then
+        printf 'Socket file %s created.\n' {{ socket_file|shell_quote }}
     fi
     echo "-------------------------------------"
  {%- endfor %}
@@ -69,10 +86,12 @@ function testFunction {
     cd "$PROJ_DIR"
     echo "Executing: bazel run {{ pre_run_cmd }}"
     # Capture exit code
-    set +o errexit
-    bazel run {{ pre_run_cmd }} | tee "{{ job.job_dir }}/pre_run.stdout"
-    local pre_run_exit_code=$?
-    set -o errexit
+    local pre_run_exit_code
+    if bazel run {{ pre_run_cmd }} | tee {{ (job.job_dir ~ '/pre_run.stdout')|shell_quote }}; then
+        pre_run_exit_code=0
+    else
+        pre_run_exit_code=$?
+    fi
     echo "Pre-simulation command finished with exit code: $pre_run_exit_code"
     if [ $pre_run_exit_code -ne 0 ]; then
         echo "%E- ERROR: Pre-simulation command failed."
@@ -104,10 +123,12 @@ function testFunction {
     # Execute any simulator-specific pre-commands
     {% for cmd in pre_sim_commands %}
     # echo "Executing pre-sim command: {{ cmd }}"
-    set +o errexit
-    eval "{{ cmd }}" # Use eval in case the command has pipes/redirects etc.
-    local pre_cmd_exit_code=$?
-    set -o errexit
+    local pre_cmd_exit_code
+    if eval {{ cmd|shell_quote }}; then
+        pre_cmd_exit_code=0
+    else
+        pre_cmd_exit_code=$?
+    fi
     if [ $pre_cmd_exit_code -ne 0 ]; then
         echo "%E- ERROR: Pre-sim command failed: {{ cmd }}"
         final_result=1
@@ -115,13 +136,15 @@ function testFunction {
     {% endfor %}
 
     # Execute the main simulation command with timing
-    set +o errexit # Disable errexit to capture the simulation's exit code
     : > "$SIM_TIMEOUT_START_FILE"
     local SIM_START_SECONDS=$SECONDS
-    time {{ simulation_command }}
-    local sim_exit_code=$?
+    local sim_exit_code
+    if time {{ simulation_command }}; then
+        sim_exit_code=0
+    else
+        sim_exit_code=$?
+    fi
     printf '%s\n' "$((SECONDS - SIM_START_SECONDS))" > "$SIM_DURATION_FILE"
-    set -o errexit # Re-enable errexit
     echo "Simulation finished with exit code: $sim_exit_code"
     if [ "$sim_exit_code" -ne 0 ] && [ "$final_result" -eq 0 ]; then
         final_result=$sim_exit_code
@@ -129,13 +152,15 @@ function testFunction {
 
     # Execute any simulator-specific post-commands
     {% for cmd in post_sim_commands %}
-    echo "Executing post-sim command: {{ cmd }}"
-    set +o errexit
-    eval "{{ cmd }}"
-    local post_cmd_exit_code=$?
-    set -o errexit
+    printf 'Executing post-sim command: %s\n' {{ cmd|shell_quote }}
+    local post_cmd_exit_code
+    if eval {{ cmd|shell_quote }}; then
+        post_cmd_exit_code=0
+    else
+        post_cmd_exit_code=$?
+    fi
     if [ $post_cmd_exit_code -ne 0 ]; then
-        echo "%W- WARNING: Post-sim command failed: {{ cmd }}"
+        printf '%%W- WARNING: Post-sim command failed: %s\n' {{ cmd|shell_quote }}
         # Typically don't add to final_result unless cleanup failure is critical
     fi
     {% endfor %}
@@ -149,7 +174,7 @@ function testFunction {
     # --- Socket Process Cleanup and Exit Code Collection ---
     # echo "--- Cleaning Up Sockets ---"
     declare -i sockets_exit_code=0
- {%- for socket_name, _, _ in sockets %}
+ {%- for socket_name, _, socket_file in sockets %}
     SOCKET_PID_VARNAME="SOCKET_{{ loop.index }}_PID"
     # Check if PID variable is set and non-empty
     if [ -n "${!SOCKET_PID_VARNAME:-}" ]; then
@@ -172,10 +197,12 @@ function testFunction {
                 kill -KILL "$current_pid" 2>/dev/null || true
             fi
         fi
-        set +o errexit
-        wait "$current_pid"
-        local socket_exit_code=$?
-        set -o errexit
+        local socket_exit_code
+        if wait "$current_pid"; then
+            socket_exit_code=0
+        else
+            socket_exit_code=$?
+        fi
         echo "Socket {{ socket_name }} exited with code: $socket_exit_code"
         if [ "$socket_exit_code" -ne 0 ] && [ "$socket_exit_code" -ne 137 ] && [ "$socket_exit_code" -ne 143 ]; then
             echo "%E- ERROR: Socket process {{ socket_name }} (PID $current_pid) returned non-zero exit code $socket_exit_code."
@@ -185,6 +212,7 @@ function testFunction {
     else
         echo "%W- WARNING: PID variable '$SOCKET_PID_VARNAME' not found for socket {{ socket_name }}. Cannot wait/check status."
     fi
+    rm -f {{ socket_file|shell_quote }}
  {% endfor %}
     # Add accumulated socket exit codes to the final result
     # Optional: decide if socket failures should make the whole test fail
@@ -206,10 +234,12 @@ function testFunction {
 
     if [ -f "$check_test_script" ] && [ -f "$log_file_to_check" ]; then
         # echo "Running: $check_test_script $log_file_to_check"
-        set +o errexit
-        "$check_test_script" "$log_file_to_check" {{ log_check_args }}
-        local parse_exit_code=$?
-        set -o errexit
+        local parse_exit_code
+        if "$check_test_script" "$log_file_to_check" {{ log_check_args }}; then
+            parse_exit_code=0
+        else
+            parse_exit_code=$?
+        fi
         # echo "Log parsing finished with exit code: $parse_exit_code"
         if [ $parse_exit_code -ne 0 ]; then
             # echo "%E- ERROR: Log parsing reported errors."
@@ -235,8 +265,7 @@ function testFunction {
 
     # echo "--- Test Function End ---"
     # echo "Final combined exit code: $final_result"
-    # Return the accumulated result code
-    return $final_result
+    TEST_EXIT_CODE=$final_result
 }
 
 # --- Signal Handling ---
@@ -263,10 +292,9 @@ trap "signal_exit" TERM HUP INT QUIT USR1 USR2 PIPE
 # This needs to be the final execution step in the script
 # so the script's exit code reflects the test result.
 testFunction
-TEST_EXIT_CODE=$? # Capture the return code from the function
 
 # echo "$(date): Script finished with exit code $TEST_EXIT_CODE"
-exit $TEST_EXIT_CODE
+exit "$TEST_EXIT_CODE"
 
 ##################
 # Run invocations

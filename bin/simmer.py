@@ -608,7 +608,7 @@ class TestJob(Job):
             #  OSError: AF_UNIX path too long
             # As such, we'll use that name as the unique value to create hash
             socket_file = os.path.join(self.job_dir, "{}.socket".format(socket_name))
-            socket_file = os.path.join("/tmp", sha1(socket_file.encode('ascii')).hexdigest())
+            socket_file = os.path.join("/tmp", sha1(socket_file.encode('utf-8')).hexdigest())
             sim_opts += " " + shlex.join(["+SOCKET__{}={}".format(socket_name, socket_file)])
             socket_command = socket_command.replace("{socket_file}", socket_file)
             sockets.append((socket_name, socket_command, socket_file))
@@ -732,7 +732,7 @@ class TestJob(Job):
             # ---
             # Add test_name_seed specifically for VCS template if needed
             'test_name_seed': getattr(self, 'test_name_seed', None),
-            'check_test_path': shlex.quote(sim_artifacts.find_bazel_executable(self.rcfg.proj_dir, "check_test")),
+            'check_test_path': sim_artifacts.find_bazel_executable(self.rcfg.proj_dir, "check_test"),
             'log_check_args': log_check_args,
         }
 

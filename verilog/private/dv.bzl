@@ -250,7 +250,7 @@ _verilog_dv_test_cfg_rule = rule(
                   "Simmer has the ability to spawn parallel processes to the primary simulation that are connected via sockets.\n" +
                   "For each entry in the dictionary, simmer will create a separate process and pass a unique temporary file path to both the simulator and the socket_command.\n" +
                   "The socket name must match [A-Za-z_][A-Za-z0-9_]* and is passed as \"+SOCKET__<socket_name>=<socket_file>\" to the simulator.\n" +
-                  "The socket_file is a path to a unique temporary file in the simulation results directory created by simmer.\n" +
+                  "The socket_file is a short, unique path under /tmp created by simmer to stay within Unix-domain socket path limits.\n" +
                   "The socket_command is a bash command that must contain the literal placeholder \"{socket_file}\"; other shell braces are preserved.\n" +
                   "The socket_command will be run from the root of the project tree.",
         ),

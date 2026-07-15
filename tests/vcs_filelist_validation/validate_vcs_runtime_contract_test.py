@@ -7,6 +7,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import time
 import unittest
 from types import SimpleNamespace
 from unittest import mock
@@ -102,6 +103,33 @@ class VcsRuntimeContractTest(unittest.TestCase):
 
         test_srcdir = os.environ["TEST_SRCDIR"]
         return (Path(test_srcdir) / test_workspace / relative_path).read_text(encoding="utf-8")
+
+    def _render_sim_template(self, project_dir, job_dir, simulation_command, sockets=(), sim_working_dir=None):
+        environment = jinja2.Environment(undefined=jinja2.StrictUndefined)
+        environment.filters["shell_quote"] = shlex.quote
+        template = environment.from_string(self._read_repo_file("bin/templates/sim_template.sh.j2"))
+        runfiles_dir = Path(job_dir) / "runfiles"
+        runfiles_dir.mkdir(exist_ok=True)
+        job = SimpleNamespace(
+            _log_path=str(Path(job_dir) / "simulation.log"),
+            job_dir=str(job_dir),
+            vcomper=SimpleNamespace(
+                bazel_runfiles_main=str(runfiles_dir),
+                rcfg=SimpleNamespace(proj_dir=str(project_dir)),
+            ),
+        )
+        return template.render(
+            check_test_path=str(Path(project_dir) / "check test"),
+            job=job,
+            log_check_args="",
+            options=SimpleNamespace(skip_parse_sim_log=1),
+            post_sim_commands=[],
+            pre_run_cmd="",
+            pre_sim_commands=[],
+            sim_working_dir=str(sim_working_dir or Path(job_dir) / "sim work"),
+            simulation_command=simulation_command,
+            sockets=sockets,
+        )
 
     def setUp(self):
         self._original_vcs_runner = os.environ.pop("RV_VCS_RUNNER", None)
@@ -1157,6 +1185,11 @@ class VcsRuntimeContractTest(unittest.TestCase):
         simmer = self._read_repo_file("bin/simmer.py")
         self.assertNotIn("socket_command.format(socket_file=socket_file)", simmer)
         self.assertIn('socket_command.replace("{socket_file}", socket_file)', simmer)
+        self.assertIn("socket_file.encode('utf-8')", simmer)
+        self.assertNotIn("socket_file.encode('ascii')", simmer)
+        self.assertIn("'check_test_path': sim_artifacts.find_bazel_executable", simmer)
+        self.assertIn("trap cleanup_socket_artifacts EXIT", sim)
+        self.assertIn("bash -c {{ socket_command|shell_quote }}", sim)
         dv_rule = self._read_repo_file("verilog/private/dv.bzl")
         self.assertIn("must match [A-Za-z_][A-Za-z0-9_]*", dv_rule)
         self.assertIn("other shell braces are preserved", dv_rule)
@@ -1167,6 +1200,66 @@ class VcsRuntimeContractTest(unittest.TestCase):
             self.assertIn("set -Eeuo pipefail", template)
             self.assertIn('"$@"', template)
         self.assertIn('"${PYTHON:-python3}" ./{LINT_PARSER}', lint_templates[1])
+
+    def test_sim_template_cleans_socket_sidecar_after_unexpected_failure(self):
+        root = Path(tempfile.mkdtemp(prefix="sim socket contract "))
+        project_dir = root / "project root"
+        job_dir = root / "job output"
+        project_dir.mkdir()
+        job_dir.mkdir()
+        socket_file = root / "sidecar.socket"
+        sidecar_pid_file = root / "sidecar.pid"
+        sidecar = root / "socket sidecar.sh"
+        sidecar.write_text(
+            "#!/usr/bin/env bash\n"
+            "printf '%s\\n' \"$PWD\"\n"
+            "printf '%s\\n' \"$$\" > \"$2\"\n"
+            ": > \"$1\"\n"
+            "trap 'exit 0' TERM\n"
+            "while :; do sleep 1; done\n",
+            encoding="utf-8",
+        )
+        sidecar.chmod(0o755)
+        socket_command = shlex.join([str(sidecar), str(socket_file), str(sidecar_pid_file)])
+        rendered = self._render_sim_template(
+            project_dir,
+            job_dir,
+            "true",
+            sockets=[("bridge", socket_command, str(socket_file))],
+            sim_working_dir="/dev/null/not-a-directory",
+        )
+        sim_script = job_dir / "sim.sh"
+        sim_script.write_text(rendered, encoding="utf-8")
+
+        result = subprocess.run(["bash", str(sim_script)], cwd=root, capture_output=True, text=True, timeout=10)
+
+        self.assertNotEqual(0, result.returncode)
+        self.assertFalse(socket_file.exists())
+        self.assertEqual(str(project_dir), (job_dir / "bridge.log").read_text(encoding="utf-8").splitlines()[0])
+        sidecar_pid = int(sidecar_pid_file.read_text(encoding="utf-8"))
+        for _ in range(20):
+            try:
+                os.kill(sidecar_pid, 0)
+            except ProcessLookupError:
+                break
+            time.sleep(0.05)
+        else:
+            self.fail("socket sidecar was left running after the simulation script exited")
+
+    def test_sim_template_does_not_report_captured_sim_failure_as_shell_error(self):
+        root = Path(tempfile.mkdtemp(prefix="sim failure contract "))
+        project_dir = root / "project root"
+        job_dir = root / "job output"
+        project_dir.mkdir()
+        job_dir.mkdir()
+        rendered = self._render_sim_template(project_dir, job_dir, "bash -c 'exit 7'")
+        sim_script = job_dir / "sim.sh"
+        sim_script.write_text(rendered, encoding="utf-8")
+
+        result = subprocess.run(["bash", str(sim_script)], cwd=root, capture_output=True, text=True, timeout=10)
+
+        self.assertEqual(7, result.returncode)
+        self.assertNotIn("simulation script failed at line", result.stderr)
 
     def test_cdc_template_passes_one_command_payload(self):
         template = self._read_repo_file("vendors/cadence/verilog_rtl_cdc_test.sh.template")
