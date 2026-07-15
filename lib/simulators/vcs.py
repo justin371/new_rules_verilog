@@ -133,13 +133,6 @@ class VcsSimulator(SimulatorInterface):
         'relax': '-partcomp=autopart_relax',
     }
 
-    VCS_PARTCOMP_FORCE_SWITCHES = frozenset({
-        '--vcs-partcomp-mode',
-        '--vcs-partcomp-jobs',
-        '--vcs-partcomp-dir',
-        '--vcs-partcomp-sharedlib',
-    })
-
     def __init__(self, options, rcfg, env):
         super().__init__(options, rcfg, env)
         self.vso_workflow = VsoWorkflow(options, rcfg)
@@ -403,8 +396,8 @@ class VcsSimulator(SimulatorInterface):
         effective_mode = self.get_effective_partcomp_mode()
         mode_option = self.VCS_PARTCOMP_OPTION_BY_MODE.get(effective_mode)
         if mode_option is None:
-            if self.options.vcs_partcomp_mode != 'disabled':
-                log.info("VCS Partition Compile bypassed for the implicit one-CPU allocation; using -Mupdate")
+            if not self.options.vcs_partcomp:
+                log.info("VCS Partition Compile is disabled by default; using -Mupdate")
             return ''
 
         job_count = self.get_partcomp_jobs()
@@ -421,11 +414,9 @@ class VcsSimulator(SimulatorInterface):
         return shlex.join(args)
 
     def get_effective_partcomp_mode(self):
-        if self.options.vcs_partcomp_mode == 'disabled' or self.options.dtl:
+        if self.options.dtl:
             return self.options.vcs_partcomp_mode
-        explicitly_requested = self.VCS_PARTCOMP_FORCE_SWITCHES.intersection(
-            self.options.vcs_partcomp_explicit_switches)
-        if self.get_partcomp_jobs() == 1 and not explicitly_requested:
+        if not self.options.vcs_partcomp or self.options.vcs_partcomp_mode == 'disabled':
             return 'disabled'
         return self.options.vcs_partcomp_mode
 
@@ -725,7 +716,7 @@ class VcsSimulator(SimulatorInterface):
 
     def record_compile_artifacts(self, vcomp_job):
         self.validate_reusable_compile_artifacts(vcomp_job)
-        if (self.options.dtl or self.options.vcs_partcomp_mode == 'disabled'
+        if (self.options.dtl or self.get_effective_partcomp_mode() == 'disabled'
                 or (self.options.vcs_partcomp_dir is None and self.options.vcs_partcomp_sharedlib is None)):
             return
         partition_dir = self.get_partition_compile_dir(vcomp_job)

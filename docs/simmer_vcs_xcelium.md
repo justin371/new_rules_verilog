@@ -173,10 +173,10 @@ cells and packages.
 
 ### VCS Partition Compile
 
-With at least two allocated CPUs, VCS Y-2026.03 Partition Compile is enabled by
-default with the VCS-recommended autopartitioning mode, allocation-aware compile
-parallelism and redundant-partition cleanup. Simmer passes the detected job
-allocation as `N`:
+VCS X-2025.06-SP2-4 uses regular incremental `-Mupdate` by default. Partition
+Compile is an explicit per-command opt-in through `--vcs-partcomp`. When enabled,
+simmer uses standard autopartitioning, allocation-aware compile parallelism and
+redundant-partition cleanup, passing the detected job allocation as `N`:
 
 ```text
 -partcomp
@@ -190,27 +190,26 @@ cluster-wide CPU scan. Simmer checks the current host allocation in
 `LSB_MCPU_HOSTS`/`LSB_HOSTS`, then Slurm per-task allocation and process CPU
 affinity. A multi-host LSF total without per-host evidence falls back to one
 worker. Affinity-only and host-count fallbacks are capped at the conservative
-default of eight. `--vcs-partcomp-jobs N` always overrides automatic detection.
+default of eight. `--vcs-partcomp-jobs N` always overrides automatic detection
+after `--vcs-partcomp` enables the flow.
 
 For an LSF wrapper such as `bs='bsub -I -q syn'`, omitting `-n` normally means
-the queue's default allocation, often one slot. Simmer bypasses Partition
-Compile for this implicit one-CPU case and uses VCS's regular incremental
-`-Mupdate` flow. This avoids serial partition overhead and the VCS Partition
-Compile frontend path while providing no parallel speedup. Request parallel
-capacity from LSF when it is needed:
+the queue's default allocation, often one slot. Without `--vcs-partcomp`, both
+commands below use regular `-Mupdate`. Add the flag only when Partition Compile
+is intended, and request parallel capacity from LSF when it is needed:
 
 ```bash
 bs simmer -t 'sys_tb:smoke_test@1' --simulator VCS
-bs -n 8 simmer -t 'sys_tb:smoke_test@1' --simulator VCS
+bs -n 8 simmer -t 'sys_tb:smoke_test@1' --simulator VCS --vcs-partcomp
 ```
 
 The second command selects at most `j8` after LSF grants those slots. It does
-not infer permission from the host's current idle CPU count. Explicit partcomp
-settings still force the requested flow, including a diagnostic `j1` run:
+not infer permission from the host's current idle CPU count. A diagnostic `j1`
+run must still opt in explicitly:
 
 ```bash
 bs simmer -t 'sys_tb:smoke_test@1' --simulator VCS \
-  --vcs-partcomp-mode auto --vcs-partcomp-jobs 1
+  --vcs-partcomp --vcs-partcomp-mode auto --vcs-partcomp-jobs 1
 ```
 
 The partition database belongs to one VCOMP directory rather than the shared
@@ -230,7 +229,7 @@ with:
 
 ```bash
 simmer -t 'sys_tb:smoke_test@1' --simulator VCS \
-  --vcs-partcomp-jobs 16 --vcs-profile
+  --vcs-partcomp --vcs-partcomp-jobs 16 --vcs-profile
 ```
 
 For repeated invocations that often have no compile-input changes, opt into an
@@ -244,13 +243,13 @@ A matching fingerprint and existing `simv` bypass VCS compilation. A miss
 compiles normally, unlike strict `--no-compile`. The option cannot be combined
 with `--recompile`.
 
-Available modes are `auto`, `adaptive`, `low`, `high`, `relax` and `disabled`.
-Keep the recommended `auto` default until profiling shows a reason to tune the
-partition thresholds or adaptive scheduler:
+Available modes after `--vcs-partcomp` are `auto`, `adaptive`, `low`, `high`,
+`relax` and `disabled`. Keep `auto` until profiling shows a reason to tune the
+partition thresholds or adaptive scheduler. Omit `--vcs-partcomp` for the
+normal `-Mupdate` flow:
 
 ```bash
-simmer -t 'sys_tb:smoke_test@1' --simulator VCS \
-  --vcs-partcomp-mode disabled --vcs-profile
+simmer -t 'sys_tb:smoke_test@1' --simulator VCS --vcs-profile
 ```
 
 To create a versioned baseline database for multiple workspaces, use a path
@@ -258,7 +257,8 @@ owned by that exact VCS release, Red Hat platform and compile configuration:
 
 ```bash
 simmer -t 'sys_tb:smoke_test@1' --simulator VCS \
-  --vcs-partcomp-dir "$PWD/.vcs-partitions/Y-2026.03/sys_tb-default"
+  --vcs-partcomp \
+  --vcs-partcomp-dir "$PWD/.vcs-partitions/X-2025.06-SP2-4/sys_tb-default"
 ```
 
 Other workspaces can consume it while writing changed partitions to their local
@@ -266,7 +266,8 @@ VCOMP database:
 
 ```bash
 simmer -t 'sys_tb:smoke_test@1' --simulator VCS \
-  --vcs-partcomp-sharedlib /shared/vcs-partitions/Y-2026.03/sys_tb-default
+  --vcs-partcomp \
+  --vcs-partcomp-sharedlib /shared/vcs-partitions/X-2025.06-SP2-4/sys_tb-default
 ```
 
 The writable `--vcs-partcomp-dir` and read-only

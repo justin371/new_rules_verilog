@@ -2,7 +2,6 @@
 -V
 -notice
 -sverilog
--std=1800-2023
 -DVCS
 -ntb_opts uvm-1.2
 -lca

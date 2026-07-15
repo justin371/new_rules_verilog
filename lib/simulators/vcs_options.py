@@ -60,6 +60,17 @@ def validate_vcs_runtime_options(options, parser):
         parser.error("--vcs-partcomp-dir must not be empty. Stopping before Bazel starts.")
     if options.vcs_partcomp_sharedlib is not None and not options.vcs_partcomp_sharedlib.strip():
         parser.error("--vcs-partcomp-sharedlib must not be empty. Stopping before Bazel starts.")
+    partcomp_detail_switches = {
+        '--vcs-partcomp-mode',
+        '--vcs-partcomp-jobs',
+        '--vcs-partcomp-dir',
+        '--vcs-partcomp-sharedlib',
+    }.intersection(options.vcs_explicit_switches)
+    disabled_compatibility_request = (partcomp_detail_switches == {'--vcs-partcomp-mode'}
+                                      and options.vcs_partcomp_mode == 'disabled')
+    if not options.vcs_partcomp and partcomp_detail_switches and not disabled_compatibility_request:
+        parser.error("VCS Partition Compile details require '--vcs-partcomp'. "
+                     "Stopping before Bazel starts.")
     if options.vcs_partcomp_mode == 'disabled' and any([
             options.vcs_partcomp_jobs != 'auto',
             options.vcs_partcomp_dir is not None,
