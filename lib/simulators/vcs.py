@@ -476,7 +476,7 @@ class VcsSimulator(SimulatorInterface):
         return coverage
 
     def get_log_parsing_info(self):
-        return {'warning_regex': r"^(?:Warning|Error)(?:-|\s*:).*"}
+        return {'warning_regex': r"(?i)^(?:\s*(?:Warning|Error)(?:-|\s*:)|.+:\s*(?:warning|error):).*"}
 
     def get_gui_command_options(self):
         # Enable Verdi debug features along with DVE/Verdi GUI
