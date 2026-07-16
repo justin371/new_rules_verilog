@@ -258,8 +258,7 @@ class RegressionReport:
         if not targets:
             return None
 
-        launcher_dir = os.path.join(self.output_path, self.proj_name, "open_reports")
-        launcher_path = os.path.join(launcher_dir, "open_{}.sh".format(timestamp))
+        launcher_path = os.path.join(self.output_path, "open_{}.sh".format(timestamp))
         target_lines = "\n".join("    {}".format(shlex.quote(target)) for target in targets)
         launcher = """#!/usr/bin/env bash
 
@@ -295,7 +294,7 @@ done
         _write_text_atomic(launcher_path, launcher)
         os.chmod(launcher_path, 0o755)
 
-        launchers = sorted(Path(launcher_dir).glob("open_*.sh"))
+        launchers = sorted(Path(self.output_path).glob("open_*.sh"))
         for stale_launcher in launchers[:-MAX_HISTORY]:
             stale_launcher.unlink()
         return launcher_path

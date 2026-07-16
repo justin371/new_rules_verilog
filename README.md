@@ -268,7 +268,7 @@ The dashboard entry point and drill-down pages are written under:
 <report-dir>/regression_report/<project>/index.html
 <report-dir>/regression_report/<project>/<bench>/index.html
 <report-dir>/regression_report/<project>/<bench>/<timestamp>.html
-<report-dir>/regression_report/<project>/open_reports/open_<timestamp>.sh
+<report-dir>/regression_report/open_<timestamp>.sh
 ```
 
 At completion, `simmer` prints the executable launcher for that exact run. Open

@@ -209,6 +209,10 @@ class RegressionReportTest(unittest.TestCase):
             report.run(header, trd, {}, {})
 
             launcher_path = Path(report.write_run_launcher())
+            self.assertEqual(
+                Path(temporary_dir) / "regression_report" / "open_20260716_140000_000001.sh",
+                launcher_path,
+            )
             capture_path = Path(temporary_dir) / "opened reports.txt"
             browser_path = Path(temporary_dir) / "browser stub.sh"
             browser_path.write_text(
