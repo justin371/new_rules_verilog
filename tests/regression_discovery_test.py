@@ -56,6 +56,7 @@ class RegressionDiscoveryTest(unittest.TestCase):
             global_tag=set(),
             global_ntag=set(),
             discovery_only=False,
+            report=None,
         )
 
     def _config(self, proj_dir):

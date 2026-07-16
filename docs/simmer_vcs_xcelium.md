@@ -117,7 +117,7 @@ Result inspection and retention:
 ```bash
 simmer --history
 simmer --history 20
-simmer -t 'sys_tb:*@10' --simulator VCS --report --report-dir "$PWD/report-output"
+simmer -t 'sys_tb:*@10' --simulator VCS --report-dir "$PWD/report-output"
 simmer -t 'sys_tb:*@10' --simulator VCS --nt
 ```
 

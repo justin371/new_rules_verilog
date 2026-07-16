@@ -5,8 +5,10 @@ import json
 import os
 from pathlib import Path
 import re
+import shlex
 import shutil
 import tempfile
+from urllib.parse import quote as url_quote
 
 import jinja2
 
@@ -236,6 +238,66 @@ class RegressionReport:
             bench_summaries=self.dashboard_data().get(self.proj_name, []),
         )
         _write_text_atomic(os.path.join(project_path, "index.html"), rendered_html)
+
+    def write_run_launcher(self, report_url=None):
+        """Write an executable that opens this run's immutable report pages."""
+        timestamp = self.header["time"]
+        targets = []
+        for bench in self.bench_list:
+            if report_url:
+                targets.append("{}/{}/{}/{}.html".format(
+                    report_url.rstrip("/"),
+                    url_quote(self.proj_name, safe=""),
+                    url_quote(bench, safe=""),
+                    url_quote(timestamp, safe=""),
+                ))
+            else:
+                report_path = Path(self.output_path, self.proj_name, bench, "{}.html".format(timestamp)).resolve()
+                targets.append(report_path.as_uri())
+
+        if not targets:
+            return None
+
+        launcher_path = os.path.join(self.output_path, "open_{}.sh".format(timestamp))
+        target_lines = "\n".join("    {}".format(shlex.quote(target)) for target in targets)
+        launcher = """#!/usr/bin/env bash
+
+set -Eeuo pipefail
+
+REPORT_TARGETS=(
+{targets}
+)
+
+open_report() {{
+    local report_target=$1
+    if [ -n "${{BROWSER:-}}" ]; then
+        "$BROWSER" "$report_target"
+    elif command -v xdg-open >/dev/null 2>&1; then
+        xdg-open "$report_target"
+    elif command -v gio >/dev/null 2>&1; then
+        gio open "$report_target"
+    elif command -v firefox >/dev/null 2>&1; then
+        firefox "$report_target"
+    elif command -v google-chrome >/dev/null 2>&1; then
+        google-chrome "$report_target"
+    else
+        printf 'ERROR: No browser launcher found. Report: %s\n' "$report_target" >&2
+        return 1
+    fi
+}}
+
+for report_target in "${{REPORT_TARGETS[@]}}"; do
+    printf 'Opening Simmer report: %s\n' "$report_target"
+    open_report "$report_target"
+done
+""".format(targets=target_lines)
+        _write_text_atomic(launcher_path, launcher)
+        os.chmod(launcher_path, 0o755)
+
+        launchers = sorted(Path(self.output_path).glob("open_*.sh"))
+        for stale_launcher in launchers[:-MAX_HISTORY]:
+            stale_launcher.unlink()
+        return launcher_path
 
     def _copy_logs(self, bench_path, details):
         timestamp = self.header["time"]
