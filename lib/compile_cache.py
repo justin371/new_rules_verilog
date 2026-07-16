@@ -72,6 +72,16 @@ def _extra_inputs_content_digest(paths):
     return _digest_bytes(*(digest.encode("ascii") for digest in file_digests))
 
 
+def normalize_compile_script_paths(compile_script, path_replacements):
+    """Replace host-specific absolute paths with stable fingerprint tokens."""
+    normalized = compile_script
+    replacements = ((os.path.abspath(os.fspath(path)), "<{}>".format(name)) for name, path in path_replacements.items()
+                    if path)
+    for path, token in sorted(replacements, key=lambda item: len(item[0]), reverse=True):
+        normalized = normalized.replace(path, token)
+    return normalized
+
+
 def compile_fingerprint(project_dir,
                         compile_script,
                         compile_args_path,
@@ -119,6 +129,19 @@ def invalidate_compile_fingerprint(job_dir):
         pass
 
 
+def _changed_fingerprint_fields(actual, expected, prefix=""):
+    changed = []
+    for key in sorted(set(actual) | set(expected)):
+        field = "{}.{}".format(prefix, key) if prefix else key
+        actual_value = actual.get(key)
+        expected_value = expected.get(key)
+        if isinstance(actual_value, dict) and isinstance(expected_value, dict):
+            changed.extend(_changed_fingerprint_fields(actual_value, expected_value, field))
+        elif actual_value != expected_value:
+            changed.append(field)
+    return changed
+
+
 def validate_compile_fingerprint(job_dir, expected):
     path = _fingerprint_path(job_dir)
     if not os.path.isfile(path):
@@ -126,7 +149,9 @@ def validate_compile_fingerprint(job_dir, expected):
     with open(path, "r", encoding="utf-8") as filep:
         actual = json.load(filep)
     if actual != expected:
-        raise RuntimeError("--no-compile build fingerprint mismatch in {}. Recompile this testbench.".format(job_dir))
+        changed = ", ".join(_changed_fingerprint_fields(actual, expected))
+        raise RuntimeError("Compile build fingerprint mismatch in {} (changed: {}). Recompile this testbench.".format(
+            job_dir, changed))
 
 
 def can_reuse_compile(job_dir, expected, validate_artifacts):

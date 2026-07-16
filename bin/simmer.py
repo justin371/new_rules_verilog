@@ -315,9 +315,13 @@ class VCompJob(Job):
         compile_script = compile_template.render(**template_context)
         sim_artifacts.write_executable_script(vcomp_sh_path, compile_script)
         fingerprint_inputs = self.simulator.get_compile_fingerprint_inputs(self)
+        fingerprint_script = compile_cache.normalize_compile_script_paths(
+            self.simulator.compile_script_for_fingerprint(compile_script),
+            {"BAZEL_RUNFILES_MAIN": self.bazel_runfiles_main},
+        )
         self.compile_fingerprint = compile_cache.compile_fingerprint(
             self.rcfg.proj_dir,
-            self.simulator.compile_script_for_fingerprint(compile_script),
+            fingerprint_script,
             self.bazel_compile_args,
             os.path.join(self.bazel_runfiles_main, self.tb_options["compile_inputs"])
             if self.tb_options["compile_inputs"] else None,
