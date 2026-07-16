@@ -763,16 +763,40 @@ class VcsRuntimeContractTest(unittest.TestCase):
         self.assertEqual(3, simulator.get_partcomp_jobs())
         self.assertIn("jAUTO", simulator.compile_script_for_fingerprint("vcs -fastpartcomp=j3"))
         self.assertEqual("auto", parse_args(["--simulator", "VCS"]).vcs_partcomp_jobs)
+
+    def test_vcs_tool_identity_ignores_runner_and_host_noise(self):
+        options = parse_args(["--simulator", "VCS"])
         with mock.patch.dict(os.environ, {"RV_VCS_TOOL_ID": "VCS Y-2026.03"}):
+            simulator = VcsSimulator(options, DummyRegressionConfig(), None)
             self.assertEqual("VCS Y-2026.03", simulator.get_tool_identity())
 
-        probe = VcsSimulator(options, DummyRegressionConfig(), None)
+        identities = []
+        for host in ("sh-cloud24", "sh-cloud25"):
+            stdout = ("runmod: selected host {}\n"
+                      "Compiler version = VCS X-2025.06-SP2-4_Full64; "
+                      "Runtime version = VCS X-2025.06-SP2-4_Full64; Jul 16 2026\n".format(host))
+            probe = VcsSimulator(options, DummyRegressionConfig(), None)
+            with mock.patch("lib.simulators.vcs.subprocess.run",
+                            return_value=SimpleNamespace(returncode=0,
+                                                         stdout=stdout,
+                                                         stderr="transient license warning\n")) as run:
+                identities.append(probe.get_tool_identity())
+            self.assertEqual(["vcs", "-full64", "-ID"], run.call_args.args[0][-3:])
+
+        self.assertEqual([
+            "Compiler version = VCS X-2025.06-SP2-4_Full64",
+            "Compiler version = VCS X-2025.06-SP2-4_Full64",
+        ], identities)
+
+    def test_vcs_tool_identity_rejects_unstructured_runner_output(self):
+        options = parse_args(["--simulator", "VCS"])
+        simulator = VcsSimulator(options, DummyRegressionConfig(), None)
         with mock.patch("lib.simulators.vcs.subprocess.run",
                         return_value=SimpleNamespace(returncode=0,
-                                                     stdout="VCS Y-2026.03\n",
-                                                     stderr="transient license warning\n")) as run:
-            self.assertEqual("VCS Y-2026.03", probe.get_tool_identity())
-        self.assertEqual(["vcs", "-full64", "-ID"], run.call_args.args[0][-3:])
+                                                     stdout="runmod: selected host sh-cloud24\n",
+                                                     stderr="")):
+            with self.assertRaisesRegex(RuntimeError, "Unable to find a stable 'Compiler version'"):
+                simulator.get_tool_identity()
 
     def test_vcs_partcomp_default_preserves_single_slot_lsf_job(self):
         lsf_environment = {

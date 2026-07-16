@@ -21,6 +21,16 @@ from .vcs_jobs import IcoInitJob, VsoAskJob, VsoInitJob
 log = logging.getLogger(__name__)
 
 PARTCOMP_MANIFEST_FILENAME = ".rules_verilog_partcomp.json"
+_VCS_COMPILER_VERSION_RE = re.compile(
+    r"(?im)\bCompiler[ \t]+version[ \t]*(?:=|:)?[ \t]*(.+?)(?=[ \t]+Runtime[ \t]+version\b|[;\r\n]|$)")
+
+
+def _stable_vcs_compiler_identity(output):
+    match = _VCS_COMPILER_VERSION_RE.search(output or "")
+    if match is None:
+        return None
+    version = " ".join(match.group(1).split())
+    return "Compiler version = {}".format(version) if version else None
 
 
 def _positive_integer(value):
@@ -175,13 +185,18 @@ class VcsSimulator(SimulatorInterface):
             raise RuntimeError(
                 "Unable to resolve the VCS build ID with '{}'. Set RV_VCS_TOOL_ID to the site VCS release ID: {}".
                 format(shlex.join(command), exc)) from exc
-        identity = result.stdout.strip()
-        if result.returncode != 0 or not identity:
-            diagnostic = "\n".join(part.strip() for part in (result.stdout, result.stderr) if part.strip())
+        diagnostic = "\n".join(part.strip() for part in (result.stdout, result.stderr) if part.strip())
+        if result.returncode != 0:
             raise RuntimeError(
                 "Unable to resolve the VCS build ID with '{}'. Set RV_VCS_TOOL_ID to the site VCS release ID.\n{}".
                 format(shlex.join(command), diagnostic))
+        identity = _stable_vcs_compiler_identity(result.stdout)
+        if identity is None:
+            raise RuntimeError(
+                "Unable to find a stable 'Compiler version' in the output from '{}'. Set RV_VCS_TOOL_ID to the "
+                "site VCS release ID.\n{}".format(shlex.join(command), diagnostic))
         self._vcs_tool_identity = identity
+        log.info("Resolved VCS tool identity: %s", identity)
         return self._vcs_tool_identity
 
     def validate_resolved_options(self):
