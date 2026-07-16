@@ -56,6 +56,19 @@ class DummyVcompJob:
 
 class VcsRuntimeContractTest(unittest.TestCase):
 
+    def test_html_reports_default_to_each_users_regression_directory(self):
+        options = parse_args(["--simulator", "VCS"])
+        self.assertTrue(options.report)
+        self.assertFalse(parse_args(["--simulator", "VCS", "--no-report"]).report)
+
+        options.report_dir = None
+        rcfg = SimpleNamespace(regression_dir="/nfs/regression/another_user/project")
+        self.assertEqual("/nfs/regression/another_user/project/regression_results",
+                         simmer.resolve_report_root(rcfg, options))
+
+        options.report_dir = "/shared/custom-report-root"
+        self.assertEqual("/shared/custom-report-root", simmer.resolve_report_root(rcfg, options))
+
     def test_simmer_help_documents_every_option_and_critical_preparation(self):
         parser = create_parser()
         for action in parser._actions:

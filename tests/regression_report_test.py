@@ -1,5 +1,6 @@
 import json
 import os
+import subprocess
 import tempfile
 import unittest
 from pathlib import Path
@@ -185,6 +186,46 @@ class RegressionReportTest(unittest.TestCase):
             self.assertNotIn(oldest, retained)
             self.assertFalse((bench_path / "{}.html".format(oldest)).exists())
             self.assertFalse(old_logs.exists())
+
+    def test_run_launcher_opens_only_this_regression_snapshot(self):
+        with tempfile.TemporaryDirectory(prefix="report launcher ") as temporary_dir:
+            report = RegressionReport(SimpleNamespace(log=_Log()), self._report_environment(), temporary_dir)
+            header = {
+                "branch": "main",
+                "commit": "",
+                "project_name": "project name",
+                "revision": "abc",
+                "simulator": "VCS",
+                "tag": "",
+                "time": "20260716_140000_000001",
+                "username": "user",
+            }
+            trd = [
+                ("bench one", "vcomp", "", "1", "", "", "1", "", ""),
+                ("", "test", "0:00:01", "1", "", "", "1", "", ""),
+                ("bench two", "vcomp", "", "1", "", "", "1", "", ""),
+                ("", "test", "0:00:01", "1", "", "", "1", "", ""),
+            ]
+            report.run(header, trd, {}, {})
+
+            launcher_path = Path(report.write_run_launcher())
+            capture_path = Path(temporary_dir) / "opened reports.txt"
+            browser_path = Path(temporary_dir) / "browser stub.sh"
+            browser_path.write_text(
+                "#!/usr/bin/env bash\n"
+                "printf '%s\\n' \"$1\" >> \"$REPORT_CAPTURE\"\n",
+                encoding="utf-8",
+            )
+            browser_path.chmod(0o755)
+            environment = dict(os.environ, BROWSER=str(browser_path), REPORT_CAPTURE=str(capture_path))
+
+            subprocess.run([str(launcher_path)], env=environment, check=True, capture_output=True, text=True)
+
+            self.assertTrue(os.access(launcher_path, os.X_OK))
+            opened_reports = capture_path.read_text(encoding="utf-8").splitlines()
+            self.assertEqual(2, len(opened_reports))
+            self.assertTrue(all(path.endswith("/20260716_140000_000001.html") for path in opened_reports))
+            self.assertTrue(all("index.html" not in path for path in opened_reports))
 
 
 if __name__ == "__main__":

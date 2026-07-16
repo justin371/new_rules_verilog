@@ -6,9 +6,7 @@ PROJ_DIR = os.environ.get('PROJ_DIR', os.getcwd())
 SIM_PLATFORM = os.environ.get('SIM_PLATFORM', 'XRUN')
 _COVFILE = os.environ.get('COVFILE', "coverage.ccf")
 COVFILE = _COVFILE if os.path.isabs(_COVFILE) else os.path.join(PROJ_DIR, _COVFILE)
-_STATE_HOME = os.environ.get("XDG_STATE_HOME", os.path.expanduser("~/.local/state"))
-_SIMRESULTS = os.path.expanduser(os.environ.get("SIMRESULTS") or os.path.join(_STATE_HOME, "simmer"))
-REPORT_DIR = os.environ.get("SIMMER_REPORT_DIR", os.path.join(_SIMRESULTS, "webroot"))
+REPORT_DIR = os.environ.get("SIMMER_REPORT_DIR")
 
 
 def add_child_argument(container, *args, parent, **kwargs):
@@ -291,15 +289,22 @@ def add_flow_control_arguments(parser):
         action='store_true',
         help=('Skip Bazel build and reuse existing bazel-bin/runfiles outputs. Use only when BUILD files, generated '
               'filelists, source dependencies, and rule inputs are unchanged; commonly paired with --no-compile.'))
-    flow_control_group.add_argument(
+    report_toggle_group = flow_control_group.add_mutually_exclusive_group()
+    report_toggle_group.add_argument(
         '--report',
-        default=False,
+        dest='report',
+        default=True,
         action='store_true',
-        help='Generate/update the retained static HTML regression dashboard after coverage processing.')
+        help='Generate/update the retained static HTML regression dashboard after coverage processing (default).')
+    report_toggle_group.add_argument('--no-report',
+                                     dest='report',
+                                     action='store_false',
+                                     help='Disable HTML report generation for this regression.')
     flow_control_group.add_argument('--report-dir',
                                     default=REPORT_DIR,
                                     help=('Set the dashboard output root. Default comes from SIMMER_REPORT_DIR or '
-                                          '$XDG_STATE_HOME/simmer/webroot; entry page: regression_report/index.html.'))
+                                          '<regression-dir>/regression_results; entry page: '
+                                          'regression_report/index.html.'))
 
 
 def add_basic_arguments(parser):
