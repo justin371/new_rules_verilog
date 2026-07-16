@@ -104,23 +104,28 @@ class VcsRuntimeContractTest(unittest.TestCase):
         test_srcdir = os.environ["TEST_SRCDIR"]
         return (Path(test_srcdir) / test_workspace / relative_path).read_text(encoding="utf-8")
 
-    def _render_sim_template(self, project_dir, job_dir, simulation_command, sockets=(), sim_working_dir=None):
-        environment = jinja2.Environment(undefined=jinja2.StrictUndefined)
-        environment.filters["shell_quote"] = shlex.quote
-        template = environment.from_string(self._read_repo_file("bin/templates/sim_template.sh.j2"))
-        runfiles_dir = Path(job_dir) / "runfiles"
-        runfiles_dir.mkdir(exist_ok=True)
-        job = SimpleNamespace(
+    def _render_simulation_script(self,
+                                  project_dir,
+                                  job_dir,
+                                  simulation_command,
+                                  socket_sidecars=(),
+                                  sim_working_dir=None):
+        jinja_environment = jinja2.Environment(undefined=jinja2.StrictUndefined)
+        jinja_environment.filters["shell_quote"] = shlex.quote
+        simulation_template = jinja_environment.from_string(self._read_repo_file("bin/templates/sim_template.sh.j2"))
+        runfiles_root = Path(job_dir) / "runfiles"
+        runfiles_root.mkdir(exist_ok=True)
+        test_job = SimpleNamespace(
             _log_path=str(Path(job_dir) / "simulation.log"),
             job_dir=str(job_dir),
             vcomper=SimpleNamespace(
-                bazel_runfiles_main=str(runfiles_dir),
+                bazel_runfiles_main=str(runfiles_root),
                 rcfg=SimpleNamespace(proj_dir=str(project_dir)),
             ),
         )
-        return template.render(
+        return simulation_template.render(
             check_test_path=str(Path(project_dir) / "check test"),
-            job=job,
+            job=test_job,
             log_check_args="",
             options=SimpleNamespace(skip_parse_sim_log=1),
             post_sim_commands=[],
@@ -128,7 +133,7 @@ class VcsRuntimeContractTest(unittest.TestCase):
             pre_sim_commands=[],
             sim_working_dir=str(sim_working_dir or Path(job_dir) / "sim work"),
             simulation_command=simulation_command,
-            sockets=sockets,
+            sockets=socket_sidecars,
         )
 
     def setUp(self):
@@ -1099,31 +1104,31 @@ class VcsRuntimeContractTest(unittest.TestCase):
         self.assertIn("database -close shm_db", rendered)
 
     def test_vcs_wave_template_uses_returned_fsdb_id_and_unlimited_default_depth(self):
-        template = self._read_repo_file("bin/templates/vcs_wave_cmd_template.tcl.j2")
-        options = SimpleNamespace(
+        wave_template = self._read_repo_file("bin/templates/vcs_wave_cmd_template.tcl.j2")
+        wave_options = SimpleNamespace(
             probes=["hdl_top.dut"],
             wave_depth=999,
             wave_end=100,
             wave_start=20,
         )
 
-        rendered = jinja2.Template(template, undefined=jinja2.StrictUndefined).render(
-            options=options,
+        rendered_tcl = jinja2.Template(wave_template, undefined=jinja2.StrictUndefined).render(
+            options=wave_options,
             waves_db="/tmp/waves.fsdb",
         )
 
-        self.assertIn('set wave_fid [dump -file "/tmp/waves.fsdb" -type FSDB]', rendered)
-        self.assertNotIn("FSDB0", rendered)
-        self.assertIn("-fid $wave_fid -depth 0", rendered)
-        self.assertIn("dump -close", rendered)
-        self.assertNotIn("dump -close $wave_fid", rendered)
+        self.assertIn('set wave_fid [dump -file "/tmp/waves.fsdb" -type FSDB]', rendered_tcl)
+        self.assertNotIn("FSDB0", rendered_tcl)
+        self.assertIn("-fid $wave_fid -depth 0", rendered_tcl)
+        self.assertIn("dump -close", rendered_tcl)
+        self.assertNotIn("dump -close $wave_fid", rendered_tcl)
 
-        options.wave_depth = 8
-        rendered = jinja2.Template(template, undefined=jinja2.StrictUndefined).render(
-            options=options,
+        wave_options.wave_depth = 8
+        rendered_tcl = jinja2.Template(wave_template, undefined=jinja2.StrictUndefined).render(
+            options=wave_options,
             waves_db="/tmp/waves.fsdb",
         )
-        self.assertIn("-fid $wave_fid -depth 8", rendered)
+        self.assertIn("-fid $wave_fid -depth 8", rendered_tcl)
 
     def test_vcs_fsdb_glitch_and_force_capture_is_enabled_with_waves(self):
         options, simulator = self._validated([
@@ -1132,16 +1137,16 @@ class VcsRuntimeContractTest(unittest.TestCase):
             "--waves",
         ])
         sim_options = shlex.split(simulator.generate_sim_options(SimpleNamespace(name="smoke", iteration=1), 42))
-        template = self._read_repo_file("bin/templates/vcs_wave_cmd_template.tcl.j2")
+        wave_template = self._read_repo_file("bin/templates/vcs_wave_cmd_template.tcl.j2")
         options.probes = ["hdl_top.dut"]
-        rendered = jinja2.Template(template, undefined=jinja2.StrictUndefined).render(
+        rendered_tcl = jinja2.Template(wave_template, undefined=jinja2.StrictUndefined).render(
             options=options,
             waves_db="/tmp/waves.fsdb",
         )
 
         self.assertIn("+fsdb+glitch=0", sim_options)
         self.assertIn("+fsdb+force", sim_options)
-        self.assertIn("dump -glitch on -fid $wave_fid", rendered)
+        self.assertIn("dump -glitch on -fid $wave_fid", rendered_tcl)
 
     def test_vcs_custom_wave_tcl_example_controls_scope_depth_and_time(self):
         example = self._read_repo_file("docs/examples/vcs_fsdb_dump.tcl")
@@ -1157,62 +1162,63 @@ class VcsRuntimeContractTest(unittest.TestCase):
         self.assertNotIn("dump -close $wave_fid", example)
 
     def test_shell_templates_preserve_failures_and_argv(self):
-        coverage = self._read_repo_file("bin/templates/vcs_cov_merge_template.sh.j2")
-        vcs_compile = self._read_repo_file("bin/templates/vcs_compile_template.sh.j2")
-        sim = self._read_repo_file("bin/templates/sim_template.sh.j2")
-        svunit = self._read_repo_file("vendors/cadence/verilog_rtl_unit_test_svunit.sh.template")
-        cdc = self._read_repo_file("vendors/cadence/verilog_rtl_cdc_test.sh.template")
+        coverage_template = self._read_repo_file("bin/templates/vcs_cov_merge_template.sh.j2")
+        vcs_compile_template = self._read_repo_file("bin/templates/vcs_compile_template.sh.j2")
+        simulation_template = self._read_repo_file("bin/templates/sim_template.sh.j2")
+        svunit_template = self._read_repo_file("vendors/cadence/verilog_rtl_unit_test_svunit.sh.template")
+        cdc_template = self._read_repo_file("vendors/cadence/verilog_rtl_cdc_test.sh.template")
         lint_templates = [
             self._read_repo_file("vendors/cadence/verilog_rtl_lint_test.sh.template"),
             self._read_repo_file("vendors/synopsys/verilog_rtl_lint_test.sh.template"),
             self._read_repo_file("vendors/real_intent/verilog_rtl_lint_test.sh.template"),
         ]
 
-        self.assertIn("set -Eeuo pipefail", coverage)
-        self.assertIn("set -Eeuo pipefail", vcs_compile)
-        self.assertIn("VCS compile failed at line", vcs_compile)
-        self.assertIn("simulation script failed at line", sim)
-        self.assertNotIn("final_result + sim_exit_code", sim)
-        self.assertNotIn("sockets_exit_code + socket_exit_code", sim)
-        self.assertNotIn('time eval "{{ simulation_command }}"', sim)
-        self.assertIn("time {{ simulation_command }}", sim)
-        self.assertIn("SIM_DURATION_FILE", sim)
-        self.assertIn("SIM_TIMEOUT_START_FILE", sim)
-        self.assertIn(': > "$SIM_TIMEOUT_START_FILE"', sim)
-        self.assertIn("SIM_START_SECONDS=$SECONDS", sim)
-        self.assertIn('kill -TERM -- "-$SOCKET_{{ loop.index }}_PID"', sim)
-        self.assertIn('kill -KILL -- "-$current_pid"', sim)
-        simmer = self._read_repo_file("bin/simmer.py")
-        self.assertNotIn("socket_command.format(socket_file=socket_file)", simmer)
-        self.assertIn('socket_command.replace("{socket_file}", socket_file)', simmer)
-        self.assertIn("socket_file.encode('utf-8')", simmer)
-        self.assertNotIn("socket_file.encode('ascii')", simmer)
-        self.assertIn("'check_test_path': sim_artifacts.find_bazel_executable", simmer)
-        self.assertIn("trap cleanup_socket_artifacts EXIT", sim)
-        self.assertIn("bash -c {{ socket_command|shell_quote }}", sim)
-        self.assertIn("set -m", sim)
-        self.assertIn('kill -TERM -- "-$child_pid"', sim)
+        self.assertIn("set -Eeuo pipefail", coverage_template)
+        self.assertIn("set -Eeuo pipefail", vcs_compile_template)
+        self.assertIn("VCS compile failed at line", vcs_compile_template)
+        self.assertIn("simulation script failed at line", simulation_template)
+        self.assertNotIn("overall_exit_code + simulation_exit_code", simulation_template)
+        self.assertNotIn("sidecar_failure_detected + sidecar_exit_code", simulation_template)
+        self.assertNotIn('time eval "{{ simulation_command }}"', simulation_template)
+        self.assertIn("time {{ simulation_command }}", simulation_template)
+        self.assertIn("SIM_DURATION_FILE", simulation_template)
+        self.assertIn("SIM_TIMEOUT_START_FILE", simulation_template)
+        self.assertIn(': > "$SIM_TIMEOUT_START_FILE"', simulation_template)
+        self.assertIn("SIMULATION_START_SECONDS=$SECONDS", simulation_template)
+        self.assertIn('kill -TERM -- "-$SOCKET_SIDECAR_{{ loop.index }}_PID"', simulation_template)
+        self.assertIn('kill -KILL -- "-$sidecar_pid"', simulation_template)
+        simmer_source = self._read_repo_file("bin/simmer.py")
+        self.assertNotIn("sidecar_command_template.format", simmer_source)
+        self.assertIn('sidecar_command_template.replace("{socket_file}", socket_endpoint_path)', simmer_source)
+        self.assertIn("socket_identity.encode('utf-8')", simmer_source)
+        self.assertNotIn("socket_identity.encode('ascii')", simmer_source)
+        self.assertIn("'check_test_path': sim_artifacts.find_bazel_executable", simmer_source)
+        self.assertIn("trap terminate_socket_sidecars EXIT", simulation_template)
+        self.assertIn("bash -c {{ sidecar_command|shell_quote }}", simulation_template)
+        self.assertIn("set -m", simulation_template)
+        self.assertIn('kill -TERM -- "-$sidecar_pid"', simulation_template)
         dv_rule = self._read_repo_file("verilog/private/dv.bzl")
         self.assertIn("must match [A-Za-z_][A-Za-z0-9_]*", dv_rule)
         self.assertIn("other shell braces are preserved", dv_rule)
-        self.assertIn("{POST_FLIST_ARGS} \\", svunit)
-        self.assertIn('"${remaining_args[@]}"', svunit)
-        self.assertIn("completed without cdc_run/jg.log", cdc)
+        self.assertIn("{POST_FLIST_ARGS} \\", svunit_template)
+        self.assertIn('"${remaining_args[@]}"', svunit_template)
+        self.assertIn("completed without cdc_run/jg.log", cdc_template)
         for template in lint_templates:
             self.assertIn("set -Eeuo pipefail", template)
             self.assertIn('"$@"', template)
         self.assertIn('"${PYTHON:-python3}" ./{LINT_PARSER}', lint_templates[1])
 
     def test_sim_template_cleans_socket_sidecar_after_unexpected_failure(self):
-        root = Path(tempfile.mkdtemp(prefix="sim socket contract "))
-        project_dir = root / "project root"
-        job_dir = root / "job output"
+        # Given: a long-running socket sidecar and an invalid simulation work directory.
+        temporary_root = Path(tempfile.mkdtemp(prefix="sim socket contract "))
+        project_dir = temporary_root / "project root"
+        job_dir = temporary_root / "job output"
         project_dir.mkdir()
         job_dir.mkdir()
-        socket_file = root / "sidecar.socket"
-        sidecar_pid_file = root / "sidecar.pid"
-        sidecar = root / "socket sidecar.sh"
-        sidecar.write_text(
+        socket_endpoint = temporary_root / "sidecar.socket"
+        sidecar_pid_file = temporary_root / "sidecar.pid"
+        sidecar_script = temporary_root / "socket sidecar.sh"
+        sidecar_script.write_text(
             "#!/usr/bin/env bash\n"
             "printf '%s\\n' \"$PWD\"\n"
             "printf '%s\\n' \"$$\" > \"$2\"\n"
@@ -1221,22 +1227,28 @@ class VcsRuntimeContractTest(unittest.TestCase):
             "while :; do sleep 1; done\n",
             encoding="utf-8",
         )
-        sidecar.chmod(0o755)
-        socket_command = shlex.join([str(sidecar), str(socket_file), str(sidecar_pid_file)])
-        rendered = self._render_sim_template(
+        sidecar_script.chmod(0o755)
+        sidecar_command = shlex.join([str(sidecar_script), str(socket_endpoint), str(sidecar_pid_file)])
+        rendered_script = self._render_simulation_script(
             project_dir,
             job_dir,
             "true",
-            sockets=[("bridge", socket_command, str(socket_file))],
+            socket_sidecars=[("bridge", sidecar_command, str(socket_endpoint))],
             sim_working_dir="/dev/null/not-a-directory",
         )
         sim_script = job_dir / "sim.sh"
-        sim_script.write_text(rendered, encoding="utf-8")
+        sim_script.write_text(rendered_script, encoding="utf-8")
 
-        result = subprocess.run(["bash", str(sim_script)], cwd=root, capture_output=True, text=True, timeout=10)
+        # When: strict shell setup fails after the sidecar starts.
+        completed_process = subprocess.run(["bash", str(sim_script)],
+                                           cwd=temporary_root,
+                                           capture_output=True,
+                                           text=True,
+                                           timeout=10)
 
-        self.assertNotEqual(0, result.returncode)
-        self.assertFalse(socket_file.exists())
+        # Then: the script fails, removes the endpoint, and terminates the sidecar group.
+        self.assertNotEqual(0, completed_process.returncode)
+        self.assertFalse(socket_endpoint.exists())
         self.assertEqual(str(project_dir), (job_dir / "bridge.log").read_text(encoding="utf-8").splitlines()[0])
         sidecar_pid = int(sidecar_pid_file.read_text(encoding="utf-8"))
         for _ in range(20):
@@ -1249,19 +1261,26 @@ class VcsRuntimeContractTest(unittest.TestCase):
             self.fail("socket sidecar was left running after the simulation script exited")
 
     def test_sim_template_does_not_report_captured_sim_failure_as_shell_error(self):
-        root = Path(tempfile.mkdtemp(prefix="sim failure contract "))
-        project_dir = root / "project root"
-        job_dir = root / "job output"
+        # Given: a simulation command that exits with a known non-zero status.
+        temporary_root = Path(tempfile.mkdtemp(prefix="sim failure contract "))
+        project_dir = temporary_root / "project root"
+        job_dir = temporary_root / "job output"
         project_dir.mkdir()
         job_dir.mkdir()
-        rendered = self._render_sim_template(project_dir, job_dir, "bash -c 'exit 7'")
+        rendered_script = self._render_simulation_script(project_dir, job_dir, "bash -c 'exit 7'")
         sim_script = job_dir / "sim.sh"
-        sim_script.write_text(rendered, encoding="utf-8")
+        sim_script.write_text(rendered_script, encoding="utf-8")
 
-        result = subprocess.run(["bash", str(sim_script)], cwd=root, capture_output=True, text=True, timeout=10)
+        # When: the generated wrapper runs the simulation.
+        completed_process = subprocess.run(["bash", str(sim_script)],
+                                           cwd=temporary_root,
+                                           capture_output=True,
+                                           text=True,
+                                           timeout=10)
 
-        self.assertEqual(7, result.returncode)
-        self.assertNotIn("simulation script failed at line", result.stderr)
+        # Then: the simulator status is preserved without a misleading ERR-trap message.
+        self.assertEqual(7, completed_process.returncode)
+        self.assertNotIn("simulation script failed at line", completed_process.stderr)
 
     def test_cdc_template_passes_one_command_payload(self):
         template = self._read_repo_file("vendors/cadence/verilog_rtl_cdc_test.sh.template")

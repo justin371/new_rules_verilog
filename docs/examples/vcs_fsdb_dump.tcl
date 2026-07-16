@@ -1,5 +1,6 @@
 # VCS UCLI FSDB example. Edit scopes, depths, and times for the failing test.
 # SIMRESULTS is exported by simmer and keeps waves.fsdb in the expected result directory.
+# Keep the returned file ID; UCLI does not guarantee a fixed identifier.
 set wave_fid [dump -file "$::env(SIMRESULTS)/waves.fsdb" -type FSDB]
 
 # Optional filters must precede the first dump -add command.

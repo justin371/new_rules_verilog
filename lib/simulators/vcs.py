@@ -485,6 +485,8 @@ class VcsSimulator(SimulatorInterface):
                 "+ntb_solver_bias_test_name={}".format(coverage_name),
             ])
         if self.options.waves is not None:
+            # VCS enables force-value capture at runtime. The generated UCLI Tcl
+            # separately enables per-file glitch dumping on the returned FSDB ID.
             sim_args.extend(["+fsdb+glitch=0", "+fsdb+force"])
         sim_args.extend(["+ntb_random_seed={}".format(seed), "-xlrm", "hier_inst_seed", "-assert", "nopostproc"])
         if self.options.fgp is not None:
@@ -519,10 +521,9 @@ class VcsSimulator(SimulatorInterface):
         return shlex.join(sim_args)
 
     def get_wave_capture_options(self, test_job, wave_tcl_path):
-        wave_type = self.options.wave_type.lower()
-        waves_db = test_job.job_dir
-        default_capture = 'hdl_top'
-        sim_opts = ""
+        requested_wave_format = self.options.wave_type.lower()
+        wave_database_path = test_job.job_dir
+        default_capture_scope = 'hdl_top'
 
         if self.options.wave_tcl:
             if os.path.exists(self.options.wave_tcl):
@@ -531,17 +532,19 @@ class VcsSimulator(SimulatorInterface):
             else:
                 raise ValueError("{} not exists".format(self.options.wave_tcl))
 
-        if wave_type == 'fsdb':
-            waves_db = os.path.join(waves_db, "waves.fsdb")
+        if requested_wave_format == 'fsdb':
+            wave_database_path = os.path.join(wave_database_path, "waves.fsdb")
         else:
             raise ValueError("{} wave dumping is not supported for VCS".format(self.options.wave_type))
 
-        sim_opts += " " + shlex.join(["-ucli", "-do", wave_tcl_path])
+        # UCLI owns both generated and user-provided FSDB dump scripts. Keeping
+        # this option here prevents VCS-specific runtime arguments reaching XRUN.
+        simulation_options = " " + shlex.join(["-ucli", "-do", wave_tcl_path])
         return {
-            'sim_opts': sim_opts,
+            'sim_opts': simulation_options,
             'wave_tcl_path': wave_tcl_path,
-            'waves_db': waves_db,
-            'default_capture': default_capture,
+            'waves_db': wave_database_path,
+            'default_capture': default_capture_scope,
             'render_template': not self.options.wave_tcl,
         }
 

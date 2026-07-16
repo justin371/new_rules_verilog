@@ -285,77 +285,71 @@ def verilog_dv_test_cfg(name = None, tags = None, abstract = None, inherits = No
     pre_opts = dict(pre_opts) if pre_opts != None else {}
     post_opts = dict(post_opts) if post_opts != None else {}
 
-    #get testcase arguments
-    params = {}
+    rule_args = {}
     if name != None:
-        params["name"] = name
+        rule_args["name"] = name
     if abstract != None:
-        params["abstract"] = abstract
+        rule_args["abstract"] = abstract
     if inherits != None:
-        params["inherits"] = inherits
+        rule_args["inherits"] = inherits
     if uvm_testname != None:
-        params["uvm_testname"] = uvm_testname
+        rule_args["uvm_testname"] = uvm_testname
     if tb != None:
-        params["tb"] = tb
+        rule_args["tb"] = tb
     if simulator != None:
-        params["simulator"] = simulator
+        rule_args["simulator"] = simulator
     if no_run != None:
-        params["no_run"] = no_run
+        rule_args["no_run"] = no_run
     if sockets != None:
-        params["sockets"] = sockets
+        rule_args["sockets"] = sockets
     if pre_run != None:
-        params["pre_run"] = pre_run
+        rule_args["pre_run"] = pre_run
     if timeout != None:
-        params["timeout"] = timeout
+        rule_args["timeout"] = timeout
     if description != None:
-        params["description"] = description
+        rule_args["description"] = description
 
-    #bazel case for pre_sim
     pre_sim_opts = dict(sim_opts)
     pre_sim_opts.update(pre_opts)
+    rule_args["sim_opts"] = pre_sim_opts
 
-    params["sim_opts"] = pre_sim_opts
-
-    #bazel case for pre_sim
-    #remove "gatesim" keyword in tags when pre_sim
-    temp_tags = []
+    # The base target represents pre-layout simulation; gatesim expands into
+    # separate corner targets below and must not tag the base target itself.
+    pre_sim_tags = []
     if tags != None:
         for tag in tags:
             if tag != "gatesim":
-                temp_tags.append(tag)
+                pre_sim_tags.append(tag)
 
-    #replace temp_tags without "gatesim" with params['tags']
-    params["tags"] = temp_tags
-    _verilog_dv_test_cfg_rule(**params)
+    rule_args["tags"] = pre_sim_tags
+    _verilog_dv_test_cfg_rule(**rule_args)
 
-    #bazel case for post_sim
     if tags != None and "gatesim" in tags:
         post_sim_opts = dict(sim_opts)
         post_sim_opts.update(post_opts)
+        rule_args["sim_opts"] = post_sim_opts
 
-        params["sim_opts"] = post_sim_opts
-
-        #remove "ci_gate", "nightly", "weekly" keyword in tags when post_sim
-        temp_tags = []
+        # Schedule tags stay on the base target so each generated timing corner
+        # does not independently enter the same CI cadence.
+        post_sim_tags = []
         for tag in tags:
             if tag != "ci_gate" and tag != "nightly" and tag != "weekly":
-                temp_tags.append(tag)
-        params["tags"] = temp_tags
+                post_sim_tags.append(tag)
+        rule_args["tags"] = post_sim_tags
 
-        #add suffix for name,tb,inherits according gatesim corner to create post_sim testcase
+        # Each corner rewrites all generated-label relationships consistently.
         for corner in gatesim_modes:
-            params["name"] = name + "_" + corner
+            rule_args["name"] = name + "_" + corner
             if inherits != None:
-                params["inherits"] = [_gatesim_target(inherit, corner) for inherit in inherits]
+                rule_args["inherits"] = [_gatesim_target(inherit, corner) for inherit in inherits]
 
-            #determin gatesim tb when gls_tb is transmited
             if gls_tb != None:
-                params["tb"] = _gatesim_target(gls_tb, corner)
+                rule_args["tb"] = _gatesim_target(gls_tb, corner)
             elif tb != None:
-                params["tb"] = _gatesim_target(tb, corner)
+                rule_args["tb"] = _gatesim_target(tb, corner)
             if uvm_testname != None:
-                params["uvm_testname"] = uvm_testname
-            _verilog_dv_test_cfg_rule(**params)
+                rule_args["uvm_testname"] = uvm_testname
+            _verilog_dv_test_cfg_rule(**rule_args)
 
 def _is_dpi_shared_lib(path):
     return path.endswith(".so") or path.endswith(".dll") or path.endswith(".dylib")
