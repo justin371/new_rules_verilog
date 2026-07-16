@@ -36,6 +36,12 @@ DISCOVERY_ROOT_FILES = {
 }
 
 
+def resolve_report_generation(report_option, total_simulations):
+    if report_option is None:
+        return total_simulations > 1
+    return report_option
+
+
 class RegressionConfig():
     """Configuration class for managing regression tests"""
 
@@ -90,6 +96,7 @@ class RegressionConfig():
         total_tests = sum([iterations for vcomp in self.all_vcomp.values() for test, iterations in vcomp.items()])
         if total_tests == 0:
             self.log.critical("Test globbing resulted in no tests to run")
+        self.options.report = resolve_report_generation(self.options.report, total_tests)
 
         # Determine if passing tests should be cleaned up
         self.tidy = True

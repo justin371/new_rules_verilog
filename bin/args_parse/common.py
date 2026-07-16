@@ -293,9 +293,10 @@ def add_flow_control_arguments(parser):
     report_toggle_group.add_argument(
         '--report',
         dest='report',
-        default=True,
+        default=None,
         action='store_true',
-        help='Generate/update the retained static HTML regression dashboard after coverage processing (default).')
+        help=('Generate/update the retained static HTML regression dashboard after coverage processing. By default, '
+              'reports are generated only when more than one simulation is planned.'))
     report_toggle_group.add_argument('--no-report',
                                      dest='report',
                                      action='store_false',

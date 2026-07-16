@@ -27,6 +27,7 @@ from args_parse.parser import create_parser
 from lint_parser_hal import HalLintLog
 import simmer
 from lib.job_lib import Job, JobManager, JobStatus
+from lib.regression import resolve_report_generation
 from lib.runtime_options import format_sim_opts_dict, resolve_test_timeout_hours
 from lib.simulators.vcs import PARTCOMP_MANIFEST_FILENAME, VcsSimulator, detect_allocated_cpus
 from lib.simulators.xcelium import XceliumSimulator
@@ -58,7 +59,10 @@ class VcsRuntimeContractTest(unittest.TestCase):
 
     def test_html_reports_default_to_each_users_regression_directory(self):
         options = parse_args(["--simulator", "VCS"])
-        self.assertTrue(options.report)
+        self.assertIsNone(options.report)
+        self.assertFalse(resolve_report_generation(options.report, 1))
+        self.assertTrue(resolve_report_generation(options.report, 2))
+        self.assertTrue(resolve_report_generation(parse_args(["--simulator", "VCS", "--report"]).report, 1))
         self.assertFalse(parse_args(["--simulator", "VCS", "--no-report"]).report)
 
         options.report_dir = None
