@@ -95,11 +95,41 @@ class VcsRuntimeContractTest(unittest.TestCase):
     def test_simulation_directory_name_separates_iteration_and_optional_suffix(self):
         common_arguments = ("unit_tb", "VCS", "smoke", 42, 1)
 
-        self.assertEqual("unit_tb__VCS__smoke__42__i1", simmer._format_simulation_directory_name(*common_arguments, ""))
-        self.assertEqual("unit_tb__VCS__smoke__42__i1_sdf_wc",
+        self.assertEqual("unit_tb__VCS__smoke__42", simmer._format_simulation_directory_name(*common_arguments, ""))
+        self.assertEqual("unit_tb__VCS__smoke__42_sdf_wc",
                          simmer._format_simulation_directory_name(*common_arguments, "sdf_wc"))
-        self.assertEqual("unit_tb__VCS__smoke__42__i1_sdf_wc",
+        self.assertEqual("unit_tb__VCS__smoke__42_sdf_wc",
                          simmer._format_simulation_directory_name(*common_arguments, "_sdf_wc"))
+        self.assertEqual("unit_tb__VCS__smoke__42__i2",
+                         simmer._format_simulation_directory_name("unit_tb", "VCS", "smoke", 42, 2, ""))
+
+    def test_vcs_wave_viewer_does_not_force_apex_or_lca_licenses(self):
+        options = parse_args(["--simulator", "VCS", "--waves"])
+        simulator = VcsSimulator(options, DummyRegressionConfig(), None)
+
+        command = simulator.get_wave_view_command("/tmp/waves.fsdb")
+
+        self.assertEqual(["runmod", "vcs", "--", "verdi", "-ssf", "/tmp/waves.fsdb"], shlex.split(command))
+        self.assertNotIn("-apex", command)
+        self.assertNotIn("-lca", command)
+
+        with tempfile.TemporaryDirectory() as job_dir:
+            Path(job_dir, "stdout.log").touch()
+            command = simulator.get_wave_view_command("/tmp/waves.fsdb", job_dir)
+
+        self.assertIn("-smlog", shlex.split(command))
+        self.assertNotIn("-apex", command)
+        self.assertNotIn("-lca", command)
+
+    def test_simulation_duration_is_read_from_stdout_log(self):
+        with tempfile.NamedTemporaryFile(mode="w", encoding="utf-8", delete=False) as log_file:
+            log_file.write("simulator output\n%I:sim: Simulation duration: 17 seconds\n")
+            log_path = log_file.name
+        self.addCleanup(os.remove, log_path)
+        test_job = simmer.TestJob.__new__(simmer.TestJob)
+        test_job._log_path = log_path
+
+        self.assertEqual(17, test_job._read_simulation_duration())
 
     def _read_repo_file(self, relative_path):
         test_workspace = os.environ.get("TEST_WORKSPACE", "__main__")
@@ -1188,9 +1218,11 @@ class VcsRuntimeContractTest(unittest.TestCase):
         self.assertIn("simulation script failed at line", simulation_template)
         self.assertNotIn('time eval "{{ simulation_command }}"', simulation_template)
         self.assertIn("time {{ simulation_command }}", simulation_template)
-        self.assertIn("SIM_DURATION_FILE", simulation_template)
-        self.assertIn("SIM_TIMEOUT_START_FILE", simulation_template)
-        self.assertIn(': > "$SIM_TIMEOUT_START_FILE"', simulation_template)
+        self.assertNotIn("simulation_duration_s", simulation_template)
+        self.assertNotIn("simulation_started", simulation_template)
+        self.assertIn("record_simulation_duration", simulation_template)
+        self.assertIn("%I:sim: Simulation duration:", simulation_template)
+        self.assertIn(': > "$TEST_LOG_PATH"', simulation_template)
         self.assertIn("SIMULATION_START_SECONDS=$SECONDS", simulation_template)
         simmer_source = self._read_repo_file("bin/simmer.py")
         self.assertNotIn("sidecar_command_template.format", simmer_source)
@@ -1283,6 +1315,9 @@ class VcsRuntimeContractTest(unittest.TestCase):
         # Then: the simulator status is preserved without a misleading ERR-trap message.
         self.assertEqual(7, completed_process.returncode)
         self.assertNotIn("simulation script failed at line", completed_process.stderr)
+        self.assertFalse((job_dir / "simulation_duration_s").exists())
+        self.assertFalse((job_dir / "simulation_started").exists())
+        self.assertIn("%I:sim: Simulation duration:", (job_dir / "simulation.log").read_text(encoding="utf-8"))
 
     def test_cdc_template_passes_one_command_payload(self):
         template = self._read_repo_file("vendors/cadence/verilog_rtl_cdc_test.sh.template")

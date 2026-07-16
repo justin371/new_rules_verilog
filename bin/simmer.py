@@ -78,7 +78,10 @@ RUN_WAVE_TEMPLATE = jinja2_env.get_template('run_waves_template.sh.j2')
 def _format_simulation_directory_name(vcomp_name, simulator_name, test_name, seed, iteration, directory_suffix):
     normalized_suffix = directory_suffix.lstrip('_')
     suffix_component = "_{}".format(normalized_suffix) if normalized_suffix else ""
-    return "%s__%s__%s__%d__i%d%s" % (vcomp_name, simulator_name, test_name, seed, iteration, suffix_component)
+    result_name = "%s__%s__%s__%d" % (vcomp_name, simulator_name, test_name, seed)
+    if iteration > 1:
+        result_name += "__i%d" % iteration
+    return result_name + suffix_component
 
 
 def get_bazel_bin():
@@ -566,8 +569,8 @@ class TestJob(Job):
             seed = random.randint(0, (1 << 31) - 1) # xrun treats the seed as a signed integer
         self.seed = seed
 
-        # The iteration marker keeps repeated test@N runs distinct. An optional
-        # --dir-suffix remains the final component for named reruns and MSIE stages.
+        # The first iteration uses the base name; later test@N iterations remain distinct.
+        # An optional --dir-suffix is the final component for named reruns and MSIE stages.
         simulation_directory_name = _format_simulation_directory_name(
             self.vcomper.name,
             self.simulator.get_name(),
@@ -579,7 +582,7 @@ class TestJob(Job):
         self.simname = simulation_directory_name
         self.job_dir = os.path.join(self.rcfg.regression_dir, simulation_directory_name)
         self._log_path = os.path.join(self.job_dir, self.LOG_NAME)
-        self.timeout_start_path = os.path.join(self.job_dir, "simulation_started")
+        self.timeout_start_path = self._log_path
 
         # --- Create job directory immediately --- Required before simulator methods use it
         # Note: super().pre_run() might also try to create it, but -p makes it safe.
@@ -587,11 +590,10 @@ class TestJob(Job):
         os.makedirs(self.rcfg.regression_dir, exist_ok=True)
         # Now create the specific job directory
         os.makedirs(self.job_dir, exist_ok=True)
-        for stale_path in (self.timeout_start_path, os.path.join(self.job_dir, "simulation_duration_s")):
-            try:
-                os.remove(stale_path)
-            except FileNotFoundError:
-                pass
+        try:
+            os.remove(self._log_path)
+        except FileNotFoundError:
+            pass
 
         # --- Super pre_run and Socket Logic ---
         super(TestJob, self).pre_run()
@@ -766,7 +768,7 @@ class TestJob(Job):
         abs_wave_path = None
         super(TestJob, self).post_run()
 
-        # Parse file for duration
+        # Parse simulator statistics and simmer's duration marker from stdout.log.
         net_time_str, cps_str = self._get_stats_from_log_file()
         self.simulation_duration_s = self._read_simulation_duration()
         self.job_time = self.simulation_duration_s or 0
@@ -891,12 +893,16 @@ class TestJob(Job):
         return self._format_duration(self.job_time)
 
     def _read_simulation_duration(self):
-        path = os.path.join(self.job_dir, "simulation_duration_s")
+        duration_re = re.compile(r'^%I:sim: Simulation duration: (?P<duration>[0-9]+) seconds$')
+        duration = None
         try:
-            with open(path, "r", encoding="utf-8") as filep:
-                duration = int(filep.read().strip())
-            return duration if duration >= 0 else None
-        except (OSError, ValueError):
+            with open(self._log_path, "r", encoding="utf-8", errors="ignore") as filep:
+                for line in filep:
+                    match = duration_re.match(line.strip())
+                    if match:
+                        duration = int(match.group('duration'))
+            return duration
+        except OSError:
             return None
 
     def _get_stats_from_log_file(self):

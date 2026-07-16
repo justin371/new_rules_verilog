@@ -282,7 +282,7 @@ class VcsSimulator(SimulatorInterface):
         return self.options.smartlog or self.options.waves is not None or self.options.gui
 
     def get_wave_view_command(self, wave_file_path, job_dir=None):
-        cmd = '{} -apex -lca -ssf "{}"'.format(self.get_tool_command("verdi"), wave_file_path)
+        cmd = '{} -ssf "{}"'.format(self.get_tool_command("verdi"), wave_file_path)
         if job_dir is not None:
             smartlog_path = os.path.join(job_dir, "stdout.log")
             if os.path.exists(smartlog_path):
