@@ -154,6 +154,7 @@ py_test(
     name = "vcs_runtime_contract_test",
     srcs = ["validate_vcs_runtime_contract_test.py"],
     data = [
+        "//bin:check_test.py",
         "//bin:simmer.py",
         "//bin:templates/rerun_template.sh.j2",
         "//bin:templates/run_waves_template.sh.j2",
