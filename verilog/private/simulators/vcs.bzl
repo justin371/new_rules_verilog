@@ -33,6 +33,16 @@ def _validate_tb(ctx, has_msie_primary, has_msie_extras):
     if has_msie_primary or has_msie_extras:
         fail("verilog_dv_tb {} MSIE attributes are Xcelium-only".format(ctx.label))
 
+def _materialize_library_flist(ctx, source_lines, default_flist):
+    if not ctx.attr.makelib:
+        return default_flist
+    output = ctx.actions.declare_file(ctx.label.name + "_vcs.f")
+    ctx.actions.write(
+        output = output,
+        content = "\n".join(source_lines),
+    )
+    return output
+
 def _config_arg(cfg):
     return cfg
 
@@ -83,6 +93,7 @@ vcs_dv_backend = struct(
     compile_config = _compile_config,
     config_arg = _config_arg,
     extra_compile_outputs = _extra_compile_outputs,
+    materialize_library_flist = _materialize_library_flist,
     runtime_config = _runtime_config,
     tb_options = _tb_options,
     validate_tb = _validate_tb,

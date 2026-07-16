@@ -4,8 +4,8 @@
 load("//deps:gatesim_modes_list.bzl", "GATESIM_MODES")
 load(":simulators/pldm.bzl", "pldm_dv_backend")
 load(":simulators/vcs.bzl", "vcs_dv_backend")
-load(":simulators/xcelium.bzl", "xcelium_dv_backend")
-load(":verilog.bzl", "ToolEncapsulationInfo", "VerilogInfo", "flists_to_arguments", "gather_shell_defines", "get_transitive_srcs", "merge_default_runfiles", "runfiles_relative_short_path", "verilog_input_inventory")
+load(":simulators/xcelium.bzl", "xcelium_dv_backend", "xcelium_dv_unit_test_impl")
+load(":verilog.bzl", "VerilogInfo", "gather_shell_defines", "get_transitive_srcs", "merge_default_runfiles", "runfiles_relative_short_path", "verilog_input_inventory")
 
 DVTestInfo = provider("Runtime configuration for a DV test.", fields = {
     "sim_opts": "Simulation :options to carry forward.",
@@ -354,15 +354,11 @@ def verilog_dv_test_cfg(name = None, tags = None, abstract = None, inherits = No
 def _is_dpi_shared_lib(path):
     return path.endswith(".so") or path.endswith(".dll") or path.endswith(".dylib")
 
-def _dv_library_flist_content(directories, in_flist, makelib = ""):
+def _dv_library_source_lines(directories, in_flist):
     content = []
-    if makelib:
-        content.extend(["-makelib", makelib])
     for directory in directories:
         content.append("+incdir+{}".format(directory if directory else "."))
     content.extend([runfiles_relative_short_path(f) for f in in_flist])
-    if makelib:
-        content.append("-endlib")
     return content
 
 def _verilog_dv_library_impl(ctx):
@@ -380,7 +376,7 @@ def _verilog_dv_library_impl(ctx):
     else:
         in_flist = ctx.files.srcs
 
-    content = _dv_library_flist_content(directories, in_flist, ctx.attr.makelib)
+    source_lines = _dv_library_source_lines(directories, in_flist)
 
     all_sos = []
     for dpi in ctx.attr.dpi:
@@ -392,18 +388,8 @@ def _verilog_dv_library_impl(ctx):
             fail("Expected to find exactly one shared library (.so/.dll/.dylib) for verilog_dv_library dpi argument '", dpi, "'. Found: ", sos)
         all_sos.extend(sos)
 
-    out = ctx.outputs.out
-    ctx.actions.write(
-        output = out,
-        content = "\n".join(content),
-    )
-    vcs_out = out
-    if ctx.attr.makelib:
-        vcs_out = ctx.actions.declare_file(ctx.label.name + "_vcs.f")
-        ctx.actions.write(
-            output = vcs_out,
-            content = "\n".join(_dv_library_flist_content(directories, in_flist)),
-        )
+    out = xcelium_dv_backend.materialize_library_flist(ctx, source_lines)
+    vcs_out = vcs_dv_backend.materialize_library_flist(ctx, source_lines, out)
 
     trans_srcs = get_transitive_srcs(ctx.files.srcs, ctx.attr.deps + ctx.attr.dpi, VerilogInfo, "transitive_sources", allow_other_outputs = True)
     trans_flists = get_transitive_srcs([out], ctx.attr.deps, VerilogInfo, "transitive_flists", allow_other_outputs = False)
@@ -811,57 +797,6 @@ verilog_dv_tb = rule(
     executable = True,
 )
 
-def _verilog_dv_unit_test_impl(ctx):
-    trans_srcs = get_transitive_srcs([], ctx.attr.deps, VerilogInfo, "transitive_sources")
-    srcs_list = trans_srcs.to_list()
-    flists = get_transitive_srcs([], ctx.attr.deps, VerilogInfo, "transitive_flists")
-    flists_list = flists.to_list()
-    dpi = get_transitive_srcs([], ctx.attr.deps, VerilogInfo, "transitive_dpi")
-    simulator = ctx.attr.simulator
-    if simulator == "VCS":
-        fail("verilog_dv_unit_test {} does not support simulator = 'VCS'. Use the VCS two-step flow via verilog_dv_tb + simmer instead.".format(ctx.label))
-    backend = _dv_backend(simulator)
-    unit_test_template = ctx.file.ut_sim_template
-    default_sim_opts = ctx.file.default_sim_opts
-    simulator_command = ctx.attr._command_override[ToolEncapsulationInfo].command
-    filelist_flag = "-f"
-    dpi_tool = None
-    compile_args = ctx.attr.sim_args + ctx.attr.compile_args
-    run_args = ctx.attr.run_args
-    unit_test_config = backend.unit_test_config(
-        ctx,
-        unit_test_template,
-        default_sim_opts,
-        simulator_command,
-        filelist_flag,
-        dpi_tool,
-    )
-
-    ctx.actions.expand_template(
-        template = unit_test_config.unit_test_template,
-        output = ctx.outputs.out,
-        substitutions = {
-            "{SIMULATOR_COMMAND}": unit_test_config.simulator_command,
-            "{DEFAULT_SIM_OPTS}": "{} {}".format(unit_test_config.filelist_flag, runfiles_relative_short_path(unit_test_config.default_sim_opts)),
-            "{DPI_LIBS}": flists_to_arguments(ctx.attr.deps, VerilogInfo, "transitive_dpi", "-sv_lib", "", unit_test_config.dpi_tool),
-            "{FLISTS}": " ".join(["{} {}".format(unit_test_config.filelist_flag, runfiles_relative_short_path(f)) for f in flists_list]),
-            "{SIM_ARGS}": " ".join(ctx.attr.sim_args),
-            "{COMPILE_ARGS}": " ".join(compile_args),
-            "{RUN_ARGS}": " ".join(run_args),
-        },
-        is_executable = True,
-    )
-
-    runfiles = merge_default_runfiles(
-        ctx,
-        files = flists_list + srcs_list + dpi.to_list() + [unit_test_config.default_sim_opts],
-        targets = ctx.attr.deps + [ctx.attr.default_sim_opts],
-    )
-    return [DefaultInfo(
-        runfiles = runfiles,
-        executable = ctx.outputs.out,
-    )]
-
 verilog_dv_unit_test = rule(
     doc = """Compiles and runs a small unit test for DV.
 
@@ -872,7 +807,7 @@ verilog_dv_unit_test = rule(
     For ci testing purposes:
       bazel test //hw/dv/interfaces/apb_pkg:test
     """,
-    implementation = _verilog_dv_unit_test_impl,
+    implementation = xcelium_dv_unit_test_impl,
     attrs = {
         "deps": attr.label_list(
             mandatory = True,
