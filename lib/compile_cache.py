@@ -133,7 +133,7 @@ def compile_fingerprint(project_dir,
                         environment=None):
     """Return the source, generated filelist and compile-mode identity."""
     fingerprint = {
-        "schema_version": 6,
+        "schema_version": 7,
         "compile_script_sha256": _digest_bytes(compile_script.encode("utf-8")),
         "compile_args_sha256": _digest_bytes(_file_bytes(compile_args_path)),
         "environment": dict(sorted((environment or {}).items())),
