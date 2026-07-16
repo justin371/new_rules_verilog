@@ -24,6 +24,7 @@ dir_path = os.path.dirname(os.path.realpath(__file__))
 ################################################################################
 # rules_verilog lib imports
 from args_parser import parse_args
+import check_test
 from lib.job_lib import Job, JobStatus
 from lib import cmn_logging
 from lib import compile_cache
@@ -742,6 +743,8 @@ class TestJob(Job):
 
         testscript_path = os.path.join(self.job_dir, "sim.sh")
         rerun_script_path = os.path.join(self.job_dir, "rerun.sh")
+        check_test_path = sim_artifacts.materialize_python_script(check_test.__file__,
+                                                                  os.path.join(self.job_dir, "check_test.py"))
 
         sim_working_dir = self.simulator.get_sim_working_dir(self)
         pre_sim_commands = self.simulator.get_pre_sim_commands(self)
@@ -763,7 +766,8 @@ class TestJob(Job):
             'pre_sim_commands': pre_sim_commands,
             'post_sim_commands': post_sim_commands,
             'test_name_seed': getattr(self, 'test_name_seed', None),
-            'check_test_path': sim_artifacts.find_bazel_executable(self.rcfg.proj_dir, "check_test"),
+            'check_test_path': check_test_path,
+            'check_test_python': sys.executable,
             'log_check_args': log_check_args,
         }
 

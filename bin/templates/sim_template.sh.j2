@@ -218,12 +218,13 @@ function run_test {
 
  {%- if options.skip_parse_sim_log == 0 %}
     cd "$SIMRESULTS"
+    local log_check_python={{ check_test_python|shell_quote }}
     local log_check_script={{ check_test_path|shell_quote }}
     local simulation_log_file={{ job._log_path|shell_quote }}
 
-    if [ -f "$log_check_script" ] && [ -f "$simulation_log_file" ]; then
+    if [ -x "$log_check_python" ] && [ -f "$log_check_script" ] && [ -f "$simulation_log_file" ]; then
         local log_check_exit_code
-        if "$log_check_script" "$simulation_log_file" {{ log_check_args }}; then
+        if "$log_check_python" "$log_check_script" "$simulation_log_file" {{ log_check_args }}; then
             log_check_exit_code=0
         else
             log_check_exit_code=$?
@@ -234,6 +235,9 @@ function run_test {
                  overall_exit_code=$log_check_exit_code
             fi
         fi
+    elif [ ! -x "$log_check_python" ]; then
+        echo "%E- ERROR: Python interpreter not found or not executable at $log_check_python. Skipping log parsing."
+        overall_exit_code=1
     elif [ ! -f "$log_check_script" ]; then
         echo "%E- ERROR: check_test script not found at $log_check_script. Skipping log parsing."
         overall_exit_code=1
