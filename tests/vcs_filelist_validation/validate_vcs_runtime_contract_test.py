@@ -148,7 +148,9 @@ class VcsRuntimeContractTest(unittest.TestCase):
                                   job_dir,
                                   simulation_command,
                                   socket_sidecars=(),
-                                  sim_working_dir=None):
+                                  sim_working_dir=None,
+                                  pre_run_cmd="",
+                                  pre_sim_commands=()):
         jinja_environment = jinja2.Environment(undefined=jinja2.StrictUndefined)
         jinja_environment.filters["shell_quote"] = shlex.quote
         simulation_template = jinja_environment.from_string(self._read_repo_file("bin/templates/sim_template.sh.j2"))
@@ -168,8 +170,8 @@ class VcsRuntimeContractTest(unittest.TestCase):
             log_check_args="",
             options=SimpleNamespace(skip_parse_sim_log=1),
             post_sim_commands=[],
-            pre_run_cmd="",
-            pre_sim_commands=[],
+            pre_run_cmd=pre_run_cmd,
+            pre_sim_commands=pre_sim_commands,
             sim_working_dir=str(sim_working_dir or Path(job_dir) / "sim work"),
             simulation_command=simulation_command,
             sockets=socket_sidecars,
@@ -477,6 +479,7 @@ class VcsRuntimeContractTest(unittest.TestCase):
             vcs_simulator._vcs_tool_identity = "VCS Y-2026.03 unit test"
             vcs_inputs = vcs_simulator.get_compile_fingerprint_inputs(DummyVcompJob())
             self.assertIn(vcs_hier.name, vcs_inputs["extra_input_paths"])
+            self.assertNotIn("LM_LICENSE_FILE", vcs_inputs["environment"])
 
             xrun_options = parse_args([
                 "--simulator",
@@ -759,7 +762,9 @@ class VcsRuntimeContractTest(unittest.TestCase):
 
         probe = VcsSimulator(options, DummyRegressionConfig(), None)
         with mock.patch("lib.simulators.vcs.subprocess.run",
-                        return_value=SimpleNamespace(returncode=0, stdout="VCS Y-2026.03\n", stderr="")) as run:
+                        return_value=SimpleNamespace(returncode=0,
+                                                     stdout="VCS Y-2026.03\n",
+                                                     stderr="transient license warning\n")) as run:
             self.assertEqual("VCS Y-2026.03", probe.get_tool_identity())
         self.assertEqual(["vcs", "-full64", "-ID"], run.call_args.args[0][-3:])
 
@@ -1318,6 +1323,33 @@ class VcsRuntimeContractTest(unittest.TestCase):
         self.assertFalse((job_dir / "simulation_duration_s").exists())
         self.assertFalse((job_dir / "simulation_started").exists())
         self.assertIn("%I:sim: Simulation duration:", (job_dir / "simulation.log").read_text(encoding="utf-8"))
+
+    def test_sim_template_skips_simulation_after_preparation_failure(self):
+        temporary_root = Path(tempfile.mkdtemp(prefix="sim preparation failure "))
+        project_dir = temporary_root / "project root"
+        job_dir = temporary_root / "job output"
+        simulation_marker = temporary_root / "simulation-ran"
+        project_dir.mkdir()
+        job_dir.mkdir()
+        rendered_script = self._render_simulation_script(
+            project_dir,
+            job_dir,
+            "touch {}".format(shlex.quote(str(simulation_marker))),
+            pre_sim_commands=["false"],
+        )
+        sim_script = job_dir / "sim.sh"
+        sim_script.write_text(rendered_script, encoding="utf-8")
+
+        completed_process = subprocess.run(["bash", str(sim_script)],
+                                           cwd=temporary_root,
+                                           capture_output=True,
+                                           text=True,
+                                           timeout=10)
+
+        self.assertEqual(1, completed_process.returncode)
+        self.assertFalse(simulation_marker.exists())
+        self.assertFalse((job_dir / "simulation.log").exists())
+        self.assertIn("Simulation preparation failed; skipping main simulation.", completed_process.stdout)
 
     def test_cdc_template_passes_one_command_payload(self):
         template = self._read_repo_file("vendors/cadence/verilog_rtl_cdc_test.sh.template")

@@ -175,11 +175,12 @@ class VcsSimulator(SimulatorInterface):
             raise RuntimeError(
                 "Unable to resolve the VCS build ID with '{}'. Set RV_VCS_TOOL_ID to the site VCS release ID: {}".
                 format(shlex.join(command), exc)) from exc
-        identity = "\n".join(part.strip() for part in (result.stdout, result.stderr) if part.strip())
+        identity = result.stdout.strip()
         if result.returncode != 0 or not identity:
+            diagnostic = "\n".join(part.strip() for part in (result.stdout, result.stderr) if part.strip())
             raise RuntimeError(
                 "Unable to resolve the VCS build ID with '{}'. Set RV_VCS_TOOL_ID to the site VCS release ID.\n{}".
-                format(shlex.join(command), identity))
+                format(shlex.join(command), diagnostic))
         self._vcs_tool_identity = identity
         return self._vcs_tool_identity
 
@@ -263,9 +264,7 @@ class VcsSimulator(SimulatorInterface):
         xprop_config = getattr(vcomp_job, "vcs_xprop_config_path", None)
         if xprop_config:
             inputs["extra_input_paths"].append(xprop_config)
-        inputs["environment"].update(
-            {key: os.environ.get(key, "")
-             for key in ("LM_LICENSE_FILE", "VCS_HOME", "VSO_HOME")})
+        inputs["environment"].update({key: os.environ.get(key, "") for key in ("VCS_HOME", "VSO_HOME")})
         inputs["environment"]["VCS_TOOL_ID"] = self.get_tool_identity()
         return inputs
 

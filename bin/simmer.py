@@ -229,8 +229,28 @@ class VCompJob(Job):
         self.main_cmdline = None
         self.cov_work_dir = None
         self.compile_cache_hit = False
+        self._compile_lock = None
+
+    def _acquire_compile_lock(self):
+        # Keep the lock outside the mutable compile directory so recompile cleanup cannot replace it.
+        lock_path = self.job_dir + ".compile.lock"
+        self._compile_lock = compile_cache.CompileDirectoryLock(lock_path)
+        if not self._compile_lock.acquire(blocking=False):
+            log.info("Waiting for compile directory lock %s", lock_path)
+            self._compile_lock.acquire()
+        log.debug("Acquired compile directory lock %s", lock_path)
+
+    def _release_compile_lock(self):
+        compile_lock = getattr(self, "_compile_lock", None)
+        if compile_lock is None:
+            return
+        lock_path = compile_lock.path
+        compile_lock.release()
+        self._compile_lock = None
+        log.debug("Released compile directory lock %s", lock_path)
 
     def pre_run(self):
+        self._acquire_compile_lock()
         super(VCompJob, self).pre_run()
 
         options = self.rcfg.options
@@ -481,19 +501,26 @@ class VCompJob(Job):
         # log_level is determined by initial return code and potential warning failures
         log_level("%s vcomp %s in %s", self.name, self.jobstatus, self.job_dir)
         simmer_results.record_compile_job(getattr(self.rcfg, "simmer_results_run", None), self)
+        self._release_compile_lock()
 
         # Base class post_run might handle completion, but setting explicitly ensures it
         # Note: '_completed' isn't standard, jobstatus.completed is the way to check
         # self._completed = True # This line might be unnecessary if super() handles it
 
     def launch_failed(self, exc):
-        super().launch_failed(exc)
-        self.error_message = str(exc)
-        simmer_results.record_compile_job(getattr(self.rcfg, "simmer_results_run", None), self)
+        try:
+            super().launch_failed(exc)
+            self.error_message = str(exc)
+            simmer_results.record_compile_job(getattr(self.rcfg, "simmer_results_run", None), self)
+        finally:
+            self._release_compile_lock()
 
     def post_run_failed(self, exc):
-        super().post_run_failed(exc)
-        simmer_results.record_compile_job(getattr(self.rcfg, "simmer_results_run", None), self)
+        try:
+            super().post_run_failed(exc)
+            simmer_results.record_compile_job(getattr(self.rcfg, "simmer_results_run", None), self)
+        finally:
+            self._release_compile_lock()
 
     def __repr__(self):
         sim_name = self.simulator.get_name() if hasattr(self, 'simulator') else '???'

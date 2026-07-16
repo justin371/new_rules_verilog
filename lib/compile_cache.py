@@ -8,6 +8,48 @@ import tempfile
 FINGERPRINT_FILE = ".compile_fingerprint.json"
 
 
+class CompileDirectoryLock:
+    """Advisory lock held while validating or updating a compile directory."""
+
+    def __init__(self, path):
+        self.path = os.path.abspath(os.fspath(path))
+        self._filep = None
+
+    def acquire(self, blocking=True):
+        if self._filep is not None:
+            return True
+
+        import fcntl
+
+        os.makedirs(os.path.dirname(self.path), exist_ok=True)
+        filep = open(self.path, "a+", encoding="utf-8")
+        operation = fcntl.LOCK_EX
+        if not blocking:
+            operation |= fcntl.LOCK_NB
+        try:
+            fcntl.flock(filep, operation)
+        except BlockingIOError:
+            filep.close()
+            return False
+        except BaseException:
+            filep.close()
+            raise
+        self._filep = filep
+        return True
+
+    def release(self):
+        if self._filep is None:
+            return
+
+        import fcntl
+
+        try:
+            fcntl.flock(self._filep, fcntl.LOCK_UN)
+        finally:
+            self._filep.close()
+            self._filep = None
+
+
 def _digest_bytes(*values):
     digest = hashlib.sha256()
     for value in values:
@@ -91,7 +133,7 @@ def compile_fingerprint(project_dir,
                         environment=None):
     """Return the source, generated filelist and compile-mode identity."""
     fingerprint = {
-        "schema_version": 5,
+        "schema_version": 6,
         "compile_script_sha256": _digest_bytes(compile_script.encode("utf-8")),
         "compile_args_sha256": _digest_bytes(_file_bytes(compile_args_path)),
         "environment": dict(sorted((environment or {}).items())),
