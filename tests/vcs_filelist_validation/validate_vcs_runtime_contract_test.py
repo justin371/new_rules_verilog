@@ -1438,6 +1438,8 @@ class VcsRuntimeContractTest(unittest.TestCase):
         self.assertIn("{% elif options.vso_ccex -%}", template)
         self.assertNotIn("-partcomp", compile_args)
         self.assertNotIn("-std=1800-2023", compile_args)
+        self.assertIn("-sverilog", compile_args)
+        self.assertNotIn("+systemverilogext", compile_args)
         self.assertIn("-Mupdate", compile_args)
 
     def test_vcs_no_compile_requires_simv(self):

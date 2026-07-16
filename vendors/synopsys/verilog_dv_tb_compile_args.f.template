@@ -7,7 +7,6 @@
 -lca
 -lrt
 +libext+.sv+.svh+.v+.vh+.vams+.vp+.svp
-+systemverilogext+.sv+.svh
 
 # Enable the IEEE Std. 1800-2012 compliant SVA features
 -assert svaext
