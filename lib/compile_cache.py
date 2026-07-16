@@ -8,6 +8,48 @@ import tempfile
 FINGERPRINT_FILE = ".compile_fingerprint.json"
 
 
+class CompileDirectoryLock:
+    """Advisory lock held while validating or updating a compile directory."""
+
+    def __init__(self, path):
+        self.path = os.path.abspath(os.fspath(path))
+        self._filep = None
+
+    def acquire(self, blocking=True):
+        if self._filep is not None:
+            return True
+
+        import fcntl
+
+        os.makedirs(os.path.dirname(self.path), exist_ok=True)
+        filep = open(self.path, "a+", encoding="utf-8")
+        operation = fcntl.LOCK_EX
+        if not blocking:
+            operation |= fcntl.LOCK_NB
+        try:
+            fcntl.flock(filep, operation)
+        except BlockingIOError:
+            filep.close()
+            return False
+        except BaseException:
+            filep.close()
+            raise
+        self._filep = filep
+        return True
+
+    def release(self):
+        if self._filep is None:
+            return
+
+        import fcntl
+
+        try:
+            fcntl.flock(self._filep, fcntl.LOCK_UN)
+        finally:
+            self._filep.close()
+            self._filep = None
+
+
 def _digest_bytes(*values):
     digest = hashlib.sha256()
     for value in values:
@@ -72,6 +114,16 @@ def _extra_inputs_content_digest(paths):
     return _digest_bytes(*(digest.encode("ascii") for digest in file_digests))
 
 
+def normalize_compile_script_paths(compile_script, path_replacements):
+    """Replace host-specific absolute paths with stable fingerprint tokens."""
+    normalized = compile_script
+    replacements = ((os.path.abspath(os.fspath(path)), "<{}>".format(name)) for name, path in path_replacements.items()
+                    if path)
+    for path, token in sorted(replacements, key=lambda item: len(item[0]), reverse=True):
+        normalized = normalized.replace(path, token)
+    return normalized
+
+
 def compile_fingerprint(project_dir,
                         compile_script,
                         compile_args_path,
@@ -81,7 +133,7 @@ def compile_fingerprint(project_dir,
                         environment=None):
     """Return the source, generated filelist and compile-mode identity."""
     fingerprint = {
-        "schema_version": 5,
+        "schema_version": 6,
         "compile_script_sha256": _digest_bytes(compile_script.encode("utf-8")),
         "compile_args_sha256": _digest_bytes(_file_bytes(compile_args_path)),
         "environment": dict(sorted((environment or {}).items())),
@@ -119,6 +171,19 @@ def invalidate_compile_fingerprint(job_dir):
         pass
 
 
+def _changed_fingerprint_fields(actual, expected, prefix=""):
+    changed = []
+    for key in sorted(set(actual) | set(expected)):
+        field = "{}.{}".format(prefix, key) if prefix else key
+        actual_value = actual.get(key)
+        expected_value = expected.get(key)
+        if isinstance(actual_value, dict) and isinstance(expected_value, dict):
+            changed.extend(_changed_fingerprint_fields(actual_value, expected_value, field))
+        elif actual_value != expected_value:
+            changed.append(field)
+    return changed
+
+
 def validate_compile_fingerprint(job_dir, expected):
     path = _fingerprint_path(job_dir)
     if not os.path.isfile(path):
@@ -126,7 +191,9 @@ def validate_compile_fingerprint(job_dir, expected):
     with open(path, "r", encoding="utf-8") as filep:
         actual = json.load(filep)
     if actual != expected:
-        raise RuntimeError("--no-compile build fingerprint mismatch in {}. Recompile this testbench.".format(job_dir))
+        changed = ", ".join(_changed_fingerprint_fields(actual, expected))
+        raise RuntimeError("Compile build fingerprint mismatch in {} (changed: {}). Recompile this testbench.".format(
+            job_dir, changed))
 
 
 def can_reuse_compile(job_dir, expected, validate_artifacts):

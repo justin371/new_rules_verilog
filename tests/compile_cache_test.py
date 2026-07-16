@@ -1,9 +1,12 @@
+import os
 import subprocess
+import sys
 import tempfile
 import unittest
 from pathlib import Path
 
-from lib.compile_cache import (can_reuse_compile, compile_fingerprint, invalidate_compile_fingerprint,
+from lib.compile_cache import (CompileDirectoryLock, can_reuse_compile, compile_fingerprint,
+                               invalidate_compile_fingerprint, normalize_compile_script_paths,
                                validate_compile_fingerprint, write_compile_fingerprint)
 
 
@@ -36,6 +39,22 @@ class CompileCacheTest(unittest.TestCase):
         self.assertEqual(initial["compile_inputs_manifest_sha256"], source_changed["compile_inputs_manifest_sha256"])
         self.assertNotEqual(source_changed, mode_changed)
 
+    @unittest.skipUnless(os.name == "posix", "fcntl locks require POSIX")
+    def test_compile_directory_lock_serializes_independent_processes(self):
+        lock_path = Path(tempfile.mkdtemp()) / "vcomp.compile.lock"
+        first = CompileDirectoryLock(lock_path)
+        probe = ("import fcntl, sys\n"
+                 "with open(sys.argv[1], 'a+', encoding='utf-8') as filep:\n"
+                 "    try:\n"
+                 "        fcntl.flock(filep, fcntl.LOCK_EX | fcntl.LOCK_NB)\n"
+                 "    except BlockingIOError:\n"
+                 "        sys.exit(1)\n")
+
+        self.assertTrue(first.acquire(blocking=False))
+        self.assertEqual(1, subprocess.run([sys.executable, "-c", probe, str(lock_path)], check=False).returncode)
+        first.release()
+        self.assertEqual(0, subprocess.run([sys.executable, "-c", probe, str(lock_path)], check=False).returncode)
+
     def test_fingerprint_ignores_unrelated_tracked_changes(self):
         project, _, compile_args = self._project()
         inventory = project / "compile_inputs.txt"
@@ -67,6 +86,43 @@ class CompileCacheTest(unittest.TestCase):
         validate_compile_fingerprint(job_dir, fingerprint)
         with self.assertRaises(RuntimeError):
             validate_compile_fingerprint(job_dir, dict(fingerprint, compile_script="changed"))
+
+    def test_fingerprint_normalizes_host_specific_runfiles_root(self):
+        project, _, compile_args = self._project()
+        first_root = project / "host-a" / "bazel-bin" / "tb.runfiles" / "__main__"
+        second_root = project / "host-b" / "bazel-bin" / "tb.runfiles" / "__main__"
+        first_script = "cd {}\nvcs -file {}/tb_compile_args.f\n".format(first_root, first_root)
+        second_script = "cd {}\nvcs -file {}/tb_compile_args.f\n".format(second_root, second_root)
+
+        first = normalize_compile_script_paths(first_script, {"BAZEL_RUNFILES_MAIN": first_root})
+        second = normalize_compile_script_paths(second_script, {"BAZEL_RUNFILES_MAIN": second_root})
+
+        self.assertEqual(first, second)
+        self.assertEqual(
+            compile_fingerprint(project, first, compile_args),
+            compile_fingerprint(project, second, compile_args),
+        )
+
+    def test_fingerprint_mismatch_reports_changed_fields(self):
+        project, _, compile_args = self._project()
+        job_dir = project / "vcomp"
+        job_dir.mkdir()
+        fingerprint = compile_fingerprint(
+            project,
+            "vcs -f compile.f",
+            compile_args,
+            environment={"PATH": "/tools/vcs/bin"},
+        )
+        write_compile_fingerprint(job_dir, fingerprint)
+        changed = compile_fingerprint(
+            project,
+            "vcs -debug_access -f compile.f",
+            compile_args,
+            environment={"PATH": "/different/tools/vcs/bin"},
+        )
+
+        with self.assertRaisesRegex(RuntimeError, r"compile_script_sha256, environment\.PATH"):
+            validate_compile_fingerprint(job_dir, changed)
 
     def test_automatic_reuse_turns_validation_failure_into_cache_miss(self):
         project, _, compile_args = self._project()
