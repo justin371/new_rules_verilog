@@ -19,8 +19,19 @@ TEST_EXIT_CODE=0
 {%- if sockets %}
 function cleanup_socket_artifacts {
     local child_pid
-    for child_pid in $(jobs -pr); do
-        kill "$child_pid" 2>/dev/null || true
+    local child_pids
+    child_pids="$(jobs -pr)"
+    for child_pid in $child_pids; do
+        kill -TERM -- "-$child_pid" 2>/dev/null || true
+    done
+    if [ -n "$child_pids" ]; then
+        sleep 1
+    fi
+    for child_pid in $child_pids; do
+        if kill -0 -- "-$child_pid" 2>/dev/null; then
+            kill -KILL -- "-$child_pid" 2>/dev/null || true
+        fi
+        wait "$child_pid" 2>/dev/null || true
     done
  {%- for _, _, socket_file in sockets %}
     rm -f {{ socket_file|shell_quote }}
@@ -44,8 +55,10 @@ function testFunction {
     rm -f {{ socket_file|shell_quote }}
     # Spawn socket process
     printf 'Spawning: %s\n' {{ socket_command|shell_quote }}
+    set -m
     bash -c {{ socket_command|shell_quote }} > {{ (job.job_dir ~ '/' ~ socket_name ~ '.log')|shell_quote }} 2>&1 &
     declare SOCKET_{{ loop.index }}_PID=$!
+    set +m
     printf 'Socket %s started with PID %s (Log: %s)\n' {{ socket_name|shell_quote }} "$SOCKET_{{ loop.index }}_PID" {{ (job.job_dir ~ '/' ~ socket_name ~ '.log')|shell_quote }}
 
     # Wait for socket file to be created by the process
@@ -68,7 +81,7 @@ function testFunction {
         if [ "$wait_count" -ge "$max_wait" ]; then
             printf '%%E- ERROR: Timeout waiting for socket %s (PID %s) to create %s.\n' {{ socket_name|shell_quote }} "$SOCKET_{{ loop.index }}_PID" {{ socket_file|shell_quote }}
             final_result=1
-            kill "$SOCKET_{{ loop.index }}_PID" 2>/dev/null || true
+            kill -TERM -- "-$SOCKET_{{ loop.index }}_PID" 2>/dev/null || true
             break
         fi
     done
@@ -181,20 +194,20 @@ function testFunction {
         local current_pid="${!SOCKET_PID_VARNAME}"
         echo "Waiting up to 5 seconds for socket {{ socket_name }} (PID $current_pid) to exit..."
         local socket_wait_count=0
-        while kill -0 "$current_pid" 2>/dev/null && [ "$socket_wait_count" -lt 5 ]; do
+        while kill -0 -- "-$current_pid" 2>/dev/null && [ "$socket_wait_count" -lt 5 ]; do
             sleep 1
             socket_wait_count=$((socket_wait_count + 1))
         done
-        if kill -0 "$current_pid" 2>/dev/null; then
+        if kill -0 -- "-$current_pid" 2>/dev/null; then
             echo "Stopping socket {{ socket_name }} after simulation."
-            kill "$current_pid" 2>/dev/null || true
+            kill -TERM -- "-$current_pid" 2>/dev/null || true
             local socket_term_wait_count=0
-            while kill -0 "$current_pid" 2>/dev/null && [ "$socket_term_wait_count" -lt 5 ]; do
+            while kill -0 -- "-$current_pid" 2>/dev/null && [ "$socket_term_wait_count" -lt 5 ]; do
                 sleep 1
                 socket_term_wait_count=$((socket_term_wait_count + 1))
             done
-            if kill -0 "$current_pid" 2>/dev/null; then
-                kill -KILL "$current_pid" 2>/dev/null || true
+            if kill -0 -- "-$current_pid" 2>/dev/null; then
+                kill -KILL -- "-$current_pid" 2>/dev/null || true
             fi
         fi
         local socket_exit_code
@@ -276,7 +289,7 @@ function signal_exit {
         printf '%s\n' "$((SECONDS - SIM_START_SECONDS))" > "$SIM_DURATION_FILE"
     fi
     for child_pid in $(jobs -pr); do
-        kill "$child_pid" 2>/dev/null || true
+        kill -TERM -- "-$child_pid" 2>/dev/null || true
     done
     exit 1 # Exit with a non-zero status
 }
