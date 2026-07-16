@@ -173,7 +173,9 @@ class VcsRuntimeContractTest(unittest.TestCase):
                                   socket_sidecars=(),
                                   sim_working_dir=None,
                                   pre_run_cmd="",
-                                  pre_sim_commands=()):
+                                  pre_sim_commands=(),
+                                  skip_parse_sim_log=1,
+                                  check_test_path=None):
         jinja_environment = jinja2.Environment(undefined=jinja2.StrictUndefined)
         jinja_environment.filters["shell_quote"] = shlex.quote
         simulation_template = jinja_environment.from_string(self._read_repo_file("bin/templates/sim_template.sh.j2"))
@@ -188,10 +190,11 @@ class VcsRuntimeContractTest(unittest.TestCase):
             ),
         )
         return simulation_template.render(
-            check_test_path=str(Path(project_dir) / "check test"),
+            check_test_path=str(check_test_path or Path(project_dir) / "check test.py"),
+            check_test_python=sys.executable,
             job=test_job,
             log_check_args="",
-            options=SimpleNamespace(skip_parse_sim_log=1),
+            options=SimpleNamespace(skip_parse_sim_log=skip_parse_sim_log),
             post_sim_commands=[],
             pre_run_cmd=pre_run_cmd,
             pre_sim_commands=pre_sim_commands,
@@ -1281,7 +1284,9 @@ class VcsRuntimeContractTest(unittest.TestCase):
         self.assertIn('sidecar_command_template.replace("{socket_file}", socket_endpoint_path)', simmer_source)
         self.assertIn("socket_identity.encode('utf-8')", simmer_source)
         self.assertNotIn("socket_identity.encode('ascii')", simmer_source)
-        self.assertIn("'check_test_path': sim_artifacts.find_bazel_executable", simmer_source)
+        self.assertIn("sim_artifacts.materialize_python_script(check_test.__file__", simmer_source)
+        self.assertIn("'check_test_python': sys.executable", simmer_source)
+        self.assertNotIn("find_bazel_executable", simmer_source)
         self.assertIn("set -m", simulation_template)
         dv_rule = self._read_repo_file("verilog/private/dv.bzl")
         self.assertIn("must match [A-Za-z_][A-Za-z0-9_]*", dv_rule)
@@ -1370,6 +1375,35 @@ class VcsRuntimeContractTest(unittest.TestCase):
         self.assertFalse((job_dir / "simulation_duration_s").exists())
         self.assertFalse((job_dir / "simulation_started").exists())
         self.assertIn("%I:sim: Simulation duration:", (job_dir / "simulation.log").read_text(encoding="utf-8"))
+
+    def test_sim_template_runs_job_local_log_checker_with_python(self):
+        temporary_root = Path(tempfile.mkdtemp(prefix="sim log checker contract "))
+        project_dir = temporary_root / "project root"
+        job_dir = temporary_root / "job output"
+        project_dir.mkdir()
+        job_dir.mkdir()
+        checker = job_dir / "check test.py"
+        checker.write_text(self._read_repo_file("bin/check_test.py"), encoding="utf-8")
+        simulation_command = "printf '%s\\n' 'finish at simulation time' >> \"$TEST_LOG_PATH\""
+        rendered_script = self._render_simulation_script(
+            project_dir,
+            job_dir,
+            simulation_command,
+            skip_parse_sim_log=0,
+            check_test_path=checker,
+        )
+        sim_script = job_dir / "sim.sh"
+        sim_script.write_text(rendered_script, encoding="utf-8")
+
+        completed_process = subprocess.run(["bash", str(sim_script)],
+                                           cwd=temporary_root,
+                                           capture_output=True,
+                                           text=True,
+                                           timeout=10)
+
+        self.assertEqual(0, completed_process.returncode, completed_process.stderr)
+        self.assertTrue((job_dir / "simulation.log.pass").is_file())
+        self.assertNotIn("Cannot exec()", completed_process.stderr)
 
     def test_sim_template_skips_simulation_after_preparation_failure(self):
         temporary_root = Path(tempfile.mkdtemp(prefix="sim preparation failure "))
@@ -1807,6 +1841,8 @@ class VcsRuntimeContractTest(unittest.TestCase):
         waves_template = self._read_repo_file("bin/templates/run_waves_template.sh.j2")
 
         self.assertIn("{{ check_test_path|shell_quote }}", sim_template)
+        self.assertIn("{{ check_test_python|shell_quote }}", sim_template)
+        self.assertIn('"$log_check_python" "$log_check_script"', sim_template)
         self.assertNotIn("bazel-bin/external/rules_verilog", sim_template)
         self.assertIn("SIMMER_WAVE_LAUNCHER", waves_template)
         self.assertNotIn("/global/tools/lsf", waves_template)
