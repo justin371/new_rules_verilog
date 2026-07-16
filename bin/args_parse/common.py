@@ -111,6 +111,7 @@ def add_debug_arguments(parser):
         type=str,
         default="",
         help=("Append a stable suffix to VCOMP and simulation result directories for side-by-side runs. "
+              "Simmer inserts one underscore separator, whether or not the value starts with one. "
               "Reusing the same suffix reuses or overwrites that suffixed run."))
     debug_group.add_argument('--use-color',
                              default=False,

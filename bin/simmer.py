@@ -75,6 +75,12 @@ RERUN_TEMPLATE = jinja2_env.get_template('rerun_template.sh.j2')
 RUN_WAVE_TEMPLATE = jinja2_env.get_template('run_waves_template.sh.j2')
 
 
+def _format_simulation_directory_name(vcomp_name, simulator_name, test_name, seed, iteration, directory_suffix):
+    normalized_suffix = directory_suffix.lstrip('_')
+    suffix_component = "_{}".format(normalized_suffix) if normalized_suffix else ""
+    return "%s__%s__%s__%d__i%d%s" % (vcomp_name, simulator_name, test_name, seed, iteration, suffix_component)
+
+
 def get_bazel_bin():
     result = subprocess.run(["bazel", "info", "bazel-bin"], capture_output=True, text=True)
     if result.returncode != 0:
@@ -560,13 +566,18 @@ class TestJob(Job):
             seed = random.randint(0, (1 << 31) - 1) # xrun treats the seed as a signed integer
         self.seed = seed
 
-        # Using the timestamp as the name uniquifier is causing issues when trying to spawn many jobs at once
-        # strdate = time.strftime("%Y_%m_%d_%H_%M_%S", time.localtime(time.time()))
-        # simname = "%s__%s__%s" % (self.vcomper.name, self.name, strdate)
-        simname = "%s__%s__%s__%d__i%d%s" % (self.vcomper.name, self.simulator.get_name(), self.name, seed,
-                                             self.iteration, self.rcfg.options.dir_suffix)
-        self.simname = simname
-        self.job_dir = os.path.join(self.rcfg.regression_dir, simname)
+        # The iteration marker keeps repeated test@N runs distinct. An optional
+        # --dir-suffix remains the final component for named reruns and MSIE stages.
+        simulation_directory_name = _format_simulation_directory_name(
+            self.vcomper.name,
+            self.simulator.get_name(),
+            self.name,
+            seed,
+            self.iteration,
+            self.rcfg.options.dir_suffix,
+        )
+        self.simname = simulation_directory_name
+        self.job_dir = os.path.join(self.rcfg.regression_dir, simulation_directory_name)
         self._log_path = os.path.join(self.job_dir, self.LOG_NAME)
         self.timeout_start_path = os.path.join(self.job_dir, "simulation_started")
 
@@ -603,8 +614,8 @@ class TestJob(Job):
         )
         log.debug("Resolved timeout for %s: %s hours", self.name, self.timeout)
         for socket_name, sidecar_command_template in runtime_options['sockets'].items():
-            # AF_UNIX endpoint paths are short on supported workstation OSes. Hash
-            # the stable job identity into /tmp so deeply nested result paths work.
+            # AF_UNIX endpoint path limits are restrictive on supported workstation
+            # OSes. Hash the stable job identity into /tmp so deep result paths work.
             socket_identity = os.path.join(self.job_dir, "{}.socket".format(socket_name))
             socket_endpoint_path = os.path.join("/tmp", sha1(socket_identity.encode('utf-8')).hexdigest())
             sim_opts += " " + shlex.join(["+SOCKET__{}={}".format(socket_name, socket_endpoint_path)])

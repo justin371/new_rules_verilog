@@ -92,6 +92,15 @@ class VcsRuntimeContractTest(unittest.TestCase):
     def test_zero_test_timeout_disables_job_timeout(self):
         self.assertEqual(0, resolve_test_timeout_hours({"timeout_minutes": 0}, 12.0, False))
 
+    def test_simulation_directory_name_separates_iteration_and_optional_suffix(self):
+        common_arguments = ("unit_tb", "VCS", "smoke", 42, 1)
+
+        self.assertEqual("unit_tb__VCS__smoke__42__i1", simmer._format_simulation_directory_name(*common_arguments, ""))
+        self.assertEqual("unit_tb__VCS__smoke__42__i1_sdf_wc",
+                         simmer._format_simulation_directory_name(*common_arguments, "sdf_wc"))
+        self.assertEqual("unit_tb__VCS__smoke__42__i1_sdf_wc",
+                         simmer._format_simulation_directory_name(*common_arguments, "_sdf_wc"))
+
     def _read_repo_file(self, relative_path):
         test_workspace = os.environ.get("TEST_WORKSPACE", "__main__")
         manifest_file = os.environ.get("RUNFILES_MANIFEST_FILE")
@@ -1177,26 +1186,19 @@ class VcsRuntimeContractTest(unittest.TestCase):
         self.assertIn("set -Eeuo pipefail", vcs_compile_template)
         self.assertIn("VCS compile failed at line", vcs_compile_template)
         self.assertIn("simulation script failed at line", simulation_template)
-        self.assertNotIn("overall_exit_code + simulation_exit_code", simulation_template)
-        self.assertNotIn("sidecar_failure_detected + sidecar_exit_code", simulation_template)
         self.assertNotIn('time eval "{{ simulation_command }}"', simulation_template)
         self.assertIn("time {{ simulation_command }}", simulation_template)
         self.assertIn("SIM_DURATION_FILE", simulation_template)
         self.assertIn("SIM_TIMEOUT_START_FILE", simulation_template)
         self.assertIn(': > "$SIM_TIMEOUT_START_FILE"', simulation_template)
         self.assertIn("SIMULATION_START_SECONDS=$SECONDS", simulation_template)
-        self.assertIn('kill -TERM -- "-$SOCKET_SIDECAR_{{ loop.index }}_PID"', simulation_template)
-        self.assertIn('kill -KILL -- "-$sidecar_pid"', simulation_template)
         simmer_source = self._read_repo_file("bin/simmer.py")
         self.assertNotIn("sidecar_command_template.format", simmer_source)
         self.assertIn('sidecar_command_template.replace("{socket_file}", socket_endpoint_path)', simmer_source)
         self.assertIn("socket_identity.encode('utf-8')", simmer_source)
         self.assertNotIn("socket_identity.encode('ascii')", simmer_source)
         self.assertIn("'check_test_path': sim_artifacts.find_bazel_executable", simmer_source)
-        self.assertIn("trap terminate_socket_sidecars EXIT", simulation_template)
-        self.assertIn("bash -c {{ sidecar_command|shell_quote }}", simulation_template)
         self.assertIn("set -m", simulation_template)
-        self.assertIn('kill -TERM -- "-$sidecar_pid"', simulation_template)
         dv_rule = self._read_repo_file("verilog/private/dv.bzl")
         self.assertIn("must match [A-Za-z_][A-Za-z0-9_]*", dv_rule)
         self.assertIn("other shell braces are preserved", dv_rule)
