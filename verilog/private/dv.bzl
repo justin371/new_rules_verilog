@@ -4,8 +4,8 @@
 load("//deps:gatesim_modes_list.bzl", "GATESIM_MODES")
 load(":simulators/pldm.bzl", "pldm_dv_backend")
 load(":simulators/vcs.bzl", "vcs_dv_backend")
-load(":simulators/xcelium.bzl", "xcelium_dv_backend")
-load(":verilog.bzl", "ToolEncapsulationInfo", "VerilogInfo", "flists_to_arguments", "gather_shell_defines", "get_transitive_srcs", "merge_default_runfiles", "runfiles_relative_short_path", "verilog_input_inventory")
+load(":simulators/xcelium.bzl", "xcelium_dv_backend", "xcelium_dv_unit_test_impl")
+load(":verilog.bzl", "VerilogInfo", "gather_shell_defines", "get_transitive_srcs", "merge_default_runfiles", "runfiles_relative_short_path", "verilog_input_inventory")
 
 DVTestInfo = provider("Runtime configuration for a DV test.", fields = {
     "sim_opts": "Simulation :options to carry forward.",
@@ -250,7 +250,7 @@ _verilog_dv_test_cfg_rule = rule(
                   "Simmer has the ability to spawn parallel processes to the primary simulation that are connected via sockets.\n" +
                   "For each entry in the dictionary, simmer will create a separate process and pass a unique temporary file path to both the simulator and the socket_command.\n" +
                   "The socket name must match [A-Za-z_][A-Za-z0-9_]* and is passed as \"+SOCKET__<socket_name>=<socket_file>\" to the simulator.\n" +
-                  "The socket_file is a path to a unique temporary file in the simulation results directory created by simmer.\n" +
+                  "The socket_file is a short, unique path under /tmp created by simmer to stay within Unix-domain socket path limits.\n" +
                   "The socket_command is a bash command that must contain the literal placeholder \"{socket_file}\"; other shell braces are preserved.\n" +
                   "The socket_command will be run from the root of the project tree.",
         ),
@@ -285,90 +285,80 @@ def verilog_dv_test_cfg(name = None, tags = None, abstract = None, inherits = No
     pre_opts = dict(pre_opts) if pre_opts != None else {}
     post_opts = dict(post_opts) if post_opts != None else {}
 
-    #get testcase arguments
-    params = {}
+    rule_args = {}
     if name != None:
-        params["name"] = name
+        rule_args["name"] = name
     if abstract != None:
-        params["abstract"] = abstract
+        rule_args["abstract"] = abstract
     if inherits != None:
-        params["inherits"] = inherits
+        rule_args["inherits"] = inherits
     if uvm_testname != None:
-        params["uvm_testname"] = uvm_testname
+        rule_args["uvm_testname"] = uvm_testname
     if tb != None:
-        params["tb"] = tb
+        rule_args["tb"] = tb
     if simulator != None:
-        params["simulator"] = simulator
+        rule_args["simulator"] = simulator
     if no_run != None:
-        params["no_run"] = no_run
+        rule_args["no_run"] = no_run
     if sockets != None:
-        params["sockets"] = sockets
+        rule_args["sockets"] = sockets
     if pre_run != None:
-        params["pre_run"] = pre_run
+        rule_args["pre_run"] = pre_run
     if timeout != None:
-        params["timeout"] = timeout
+        rule_args["timeout"] = timeout
     if description != None:
-        params["description"] = description
+        rule_args["description"] = description
 
-    #bazel case for pre_sim
     pre_sim_opts = dict(sim_opts)
     pre_sim_opts.update(pre_opts)
+    rule_args["sim_opts"] = pre_sim_opts
 
-    params["sim_opts"] = pre_sim_opts
-
-    #bazel case for pre_sim
-    #remove "gatesim" keyword in tags when pre_sim
-    temp_tags = []
+    # The base target represents pre-layout simulation; gatesim expands into
+    # separate corner targets below and must not tag the base target itself.
+    pre_sim_tags = []
     if tags != None:
         for tag in tags:
             if tag != "gatesim":
-                temp_tags.append(tag)
+                pre_sim_tags.append(tag)
 
-    #replace temp_tags without "gatesim" with params['tags']
-    params["tags"] = temp_tags
-    _verilog_dv_test_cfg_rule(**params)
+    rule_args["tags"] = pre_sim_tags
+    _verilog_dv_test_cfg_rule(**rule_args)
 
-    #bazel case for post_sim
     if tags != None and "gatesim" in tags:
         post_sim_opts = dict(sim_opts)
         post_sim_opts.update(post_opts)
+        rule_args["sim_opts"] = post_sim_opts
 
-        params["sim_opts"] = post_sim_opts
-
-        #remove "ci_gate", "nightly", "weekly" keyword in tags when post_sim
-        temp_tags = []
+        # Schedule tags stay on the base target so each generated timing corner
+        # does not independently enter the same CI cadence.
+        post_sim_tags = []
         for tag in tags:
             if tag != "ci_gate" and tag != "nightly" and tag != "weekly":
-                temp_tags.append(tag)
-        params["tags"] = temp_tags
+                post_sim_tags.append(tag)
+        rule_args["tags"] = post_sim_tags
 
-        #add suffix for name,tb,inherits according gatesim corner to create post_sim testcase
+        # Each corner rewrites all generated-label relationships consistently.
         for corner in gatesim_modes:
-            params["name"] = name + "_" + corner
+            rule_args["name"] = name + "_" + corner
             if inherits != None:
-                params["inherits"] = [_gatesim_target(inherit, corner) for inherit in inherits]
+                rule_args["inherits"] = [_gatesim_target(inherit, corner) for inherit in inherits]
 
-            #determin gatesim tb when gls_tb is transmited
             if gls_tb != None:
-                params["tb"] = _gatesim_target(gls_tb, corner)
+                rule_args["tb"] = _gatesim_target(gls_tb, corner)
             elif tb != None:
-                params["tb"] = _gatesim_target(tb, corner)
+                rule_args["tb"] = _gatesim_target(tb, corner)
             if uvm_testname != None:
-                params["uvm_testname"] = uvm_testname
-            _verilog_dv_test_cfg_rule(**params)
+                rule_args["uvm_testname"] = uvm_testname
+            _verilog_dv_test_cfg_rule(**rule_args)
 
 def _is_dpi_shared_lib(path):
     return path.endswith(".so") or path.endswith(".dll") or path.endswith(".dylib")
 
-def _dv_library_flist_content(directories, in_flist, makelib = ""):
+def _dv_library_source_lines(directories, in_flist):
     content = []
-    if makelib:
-        content.extend(["-makelib", makelib])
     for directory in directories:
         content.append("+incdir+{}".format(directory if directory else "."))
     content.extend([runfiles_relative_short_path(f) for f in in_flist])
-    if makelib:
-        content.append("-endlib")
     return content
 
 def _verilog_dv_library_impl(ctx):
@@ -386,7 +376,7 @@ def _verilog_dv_library_impl(ctx):
     else:
         in_flist = ctx.files.srcs
 
-    content = _dv_library_flist_content(directories, in_flist, ctx.attr.makelib)
+    source_lines = _dv_library_source_lines(directories, in_flist)
 
     all_sos = []
     for dpi in ctx.attr.dpi:
@@ -398,18 +388,8 @@ def _verilog_dv_library_impl(ctx):
             fail("Expected to find exactly one shared library (.so/.dll/.dylib) for verilog_dv_library dpi argument '", dpi, "'. Found: ", sos)
         all_sos.extend(sos)
 
-    out = ctx.outputs.out
-    ctx.actions.write(
-        output = out,
-        content = "\n".join(content),
-    )
-    vcs_out = out
-    if ctx.attr.makelib:
-        vcs_out = ctx.actions.declare_file(ctx.label.name + "_vcs.f")
-        ctx.actions.write(
-            output = vcs_out,
-            content = "\n".join(_dv_library_flist_content(directories, in_flist)),
-        )
+    out = xcelium_dv_backend.materialize_library_flist(ctx, source_lines)
+    vcs_out = vcs_dv_backend.materialize_library_flist(ctx, source_lines, out)
 
     trans_srcs = get_transitive_srcs(ctx.files.srcs, ctx.attr.deps + ctx.attr.dpi, VerilogInfo, "transitive_sources", allow_other_outputs = True)
     trans_flists = get_transitive_srcs([out], ctx.attr.deps, VerilogInfo, "transitive_flists", allow_other_outputs = False)
@@ -817,57 +797,6 @@ verilog_dv_tb = rule(
     executable = True,
 )
 
-def _verilog_dv_unit_test_impl(ctx):
-    trans_srcs = get_transitive_srcs([], ctx.attr.deps, VerilogInfo, "transitive_sources")
-    srcs_list = trans_srcs.to_list()
-    flists = get_transitive_srcs([], ctx.attr.deps, VerilogInfo, "transitive_flists")
-    flists_list = flists.to_list()
-    dpi = get_transitive_srcs([], ctx.attr.deps, VerilogInfo, "transitive_dpi")
-    simulator = ctx.attr.simulator
-    if simulator == "VCS":
-        fail("verilog_dv_unit_test {} does not support simulator = 'VCS'. Use the VCS two-step flow via verilog_dv_tb + simmer instead.".format(ctx.label))
-    backend = _dv_backend(simulator)
-    unit_test_template = ctx.file.ut_sim_template
-    default_sim_opts = ctx.file.default_sim_opts
-    simulator_command = ctx.attr._command_override[ToolEncapsulationInfo].command
-    filelist_flag = "-f"
-    dpi_tool = None
-    compile_args = ctx.attr.sim_args + ctx.attr.compile_args
-    run_args = ctx.attr.run_args
-    unit_test_config = backend.unit_test_config(
-        ctx,
-        unit_test_template,
-        default_sim_opts,
-        simulator_command,
-        filelist_flag,
-        dpi_tool,
-    )
-
-    ctx.actions.expand_template(
-        template = unit_test_config.unit_test_template,
-        output = ctx.outputs.out,
-        substitutions = {
-            "{SIMULATOR_COMMAND}": unit_test_config.simulator_command,
-            "{DEFAULT_SIM_OPTS}": "{} {}".format(unit_test_config.filelist_flag, runfiles_relative_short_path(unit_test_config.default_sim_opts)),
-            "{DPI_LIBS}": flists_to_arguments(ctx.attr.deps, VerilogInfo, "transitive_dpi", "-sv_lib", "", unit_test_config.dpi_tool),
-            "{FLISTS}": " ".join(["{} {}".format(unit_test_config.filelist_flag, runfiles_relative_short_path(f)) for f in flists_list]),
-            "{SIM_ARGS}": " ".join(ctx.attr.sim_args),
-            "{COMPILE_ARGS}": " ".join(compile_args),
-            "{RUN_ARGS}": " ".join(run_args),
-        },
-        is_executable = True,
-    )
-
-    runfiles = merge_default_runfiles(
-        ctx,
-        files = flists_list + srcs_list + dpi.to_list() + [unit_test_config.default_sim_opts],
-        targets = ctx.attr.deps + [ctx.attr.default_sim_opts],
-    )
-    return [DefaultInfo(
-        runfiles = runfiles,
-        executable = ctx.outputs.out,
-    )]
-
 verilog_dv_unit_test = rule(
     doc = """Compiles and runs a small unit test for DV.
 
@@ -878,7 +807,7 @@ verilog_dv_unit_test = rule(
     For ci testing purposes:
       bazel test //hw/dv/interfaces/apb_pkg:test
     """,
-    implementation = _verilog_dv_unit_test_impl,
+    implementation = xcelium_dv_unit_test_impl,
     attrs = {
         "deps": attr.label_list(
             mandatory = True,

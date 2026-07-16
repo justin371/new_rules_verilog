@@ -425,16 +425,33 @@ simmer -t <bench>:<test> --simulator VCS \
 ```
 
 Successful wave runs create an executable `run_waves.sh` beside `waves.fsdb`.
-It launches Verdi directly by default. Sites using LSF can provide a launcher
-without editing the generated script:
+It launches the standard Verdi FSDB viewer with `verdi -ssf`; it does not force
+the Apex/VERDI-ULTRA or LCA feature tiers. Sites using LSF can provide a
+launcher without editing the generated script:
 
 ```bash
 SIMMER_WAVE_LAUNCHER="bsub -I -q syn" ./run_waves.sh
 ```
 
-Use `--wave-tcl <file>` for project-specific FSDB dump/probe commands. Keep the
-generated default as the reference for `dump -file`, `dump -add`, timed enable/
-disable, flush and close ordering.
+The generated UCLI script uses the file ID returned by `dump -file`, so it does
+not assume `FSDB0` when another dump file is already open. The default
+`--wave-depth 999` maps to UCLI `-depth 0`, which is the documented unlimited
+hierarchy depth; explicit smaller depths are preserved.
+
+VCS FSDB waves enable glitch and force information by default. Simmer passes
+`+fsdb+glitch=0` and `+fsdb+force` to `simv`; generated UCLI also runs
+`dump -glitch on` on the actual FSDB file ID. The generated `dump -add` keeps
+`-fsdb_opt +packedmda+struct+parameter` because those object-selection options
+are separate from glitch and force capture. Do not add `dump -forceEvent`: it
+is a VPD command, while FSDB force/release/deposit data comes from
+`+fsdb+force`.
+
+Use `--wave-tcl <file>` for project-specific FSDB dump/probe commands. The
+[editable VCS FSDB example](examples/vcs_fsdb_dump.tcl) shows per-scope depth,
+timed enable/disable, glitch capture, flush and close ordering. A custom Tcl
+file owns scopes, depths, timing, and `dump -glitch on`; keep its output at
+`$::env(SIMRESULTS)/waves.fsdb` so simmer can find it and generate
+`run_waves.sh`.
 
 ## Xcelium defaults
 

@@ -213,6 +213,7 @@ class SubprocessJobRunner(JobRunner):
         self._timed_out = False
         self._term_deadline = None
         self._kill_sent = False
+        self._timeout_start = None
         self.log = job.log
 
         if self.job.suppress_output or self.job.rcfg.options.no_stdout:
@@ -291,10 +292,13 @@ class SubprocessJobRunner(JobRunner):
         timeout_start = self._start_time
         timeout_start_path = getattr(self.job, "timeout_start_path", None)
         if timeout_start_path:
-            try:
-                timeout_start = datetime.datetime.fromtimestamp(os.path.getmtime(timeout_start_path))
-            except OSError:
-                timeout_start = None
+            timeout_start = getattr(self, "_timeout_start", None)
+            if timeout_start is None:
+                try:
+                    timeout_start = datetime.datetime.fromtimestamp(os.path.getmtime(timeout_start_path))
+                except OSError:
+                    return False
+                self._timeout_start = timeout_start
         if timeout_start is None:
             return False
         delta = now - timeout_start

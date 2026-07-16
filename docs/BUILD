@@ -1,5 +1,8 @@
 # vim: set ft=bzl :
 exports_files(
-    glob(["*.md"]),
+    glob([
+        "*.md",
+        "examples/*.tcl",
+    ]),
     visibility = ["//visibility:public"],
 )

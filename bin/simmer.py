@@ -75,6 +75,15 @@ RERUN_TEMPLATE = jinja2_env.get_template('rerun_template.sh.j2')
 RUN_WAVE_TEMPLATE = jinja2_env.get_template('run_waves_template.sh.j2')
 
 
+def _format_simulation_directory_name(vcomp_name, simulator_name, test_name, seed, iteration, directory_suffix):
+    normalized_suffix = directory_suffix.lstrip('_')
+    suffix_component = "_{}".format(normalized_suffix) if normalized_suffix else ""
+    result_name = "%s__%s__%s__%d" % (vcomp_name, simulator_name, test_name, seed)
+    if iteration > 1:
+        result_name += "__i%d" % iteration
+    return result_name + suffix_component
+
+
 def get_bazel_bin():
     result = subprocess.run(["bazel", "info", "bazel-bin"], capture_output=True, text=True)
     if result.returncode != 0:
@@ -560,15 +569,20 @@ class TestJob(Job):
             seed = random.randint(0, (1 << 31) - 1) # xrun treats the seed as a signed integer
         self.seed = seed
 
-        # Using the timestamp as the name uniquifier is causing issues when trying to spawn many jobs at once
-        # strdate = time.strftime("%Y_%m_%d_%H_%M_%S", time.localtime(time.time()))
-        # simname = "%s__%s__%s" % (self.vcomper.name, self.name, strdate)
-        simname = "%s__%s__%s__%d__i%d%s" % (self.vcomper.name, self.simulator.get_name(), self.name, seed,
-                                             self.iteration, self.rcfg.options.dir_suffix)
-        self.simname = simname
-        self.job_dir = os.path.join(self.rcfg.regression_dir, simname)
+        # The first iteration uses the base name; later test@N iterations remain distinct.
+        # An optional --dir-suffix is the final component for named reruns and MSIE stages.
+        simulation_directory_name = _format_simulation_directory_name(
+            self.vcomper.name,
+            self.simulator.get_name(),
+            self.name,
+            seed,
+            self.iteration,
+            self.rcfg.options.dir_suffix,
+        )
+        self.simname = simulation_directory_name
+        self.job_dir = os.path.join(self.rcfg.regression_dir, simulation_directory_name)
         self._log_path = os.path.join(self.job_dir, self.LOG_NAME)
-        self.timeout_start_path = os.path.join(self.job_dir, "simulation_started")
+        self.timeout_start_path = self._log_path
 
         # --- Create job directory immediately --- Required before simulator methods use it
         # Note: super().pre_run() might also try to create it, but -p makes it safe.
@@ -576,24 +590,23 @@ class TestJob(Job):
         os.makedirs(self.rcfg.regression_dir, exist_ok=True)
         # Now create the specific job directory
         os.makedirs(self.job_dir, exist_ok=True)
-        for stale_path in (self.timeout_start_path, os.path.join(self.job_dir, "simulation_duration_s")):
-            try:
-                os.remove(stale_path)
-            except FileNotFoundError:
-                pass
+        try:
+            os.remove(self._log_path)
+        except FileNotFoundError:
+            pass
 
         # --- Super pre_run and Socket Logic ---
         super(TestJob, self).pre_run()
 
         sim_opts = self.simulator.generate_sim_options(self, seed)
 
-        sockets = []
+        socket_sidecars = []
         runtime_options = self.btcj.dynamic_args(self.target)
-        dynamic_simulator = runtime_options['simulator']
-        if dynamic_simulator != self.simulator.get_name().upper():
+        configured_simulator = runtime_options['simulator']
+        if configured_simulator != self.simulator.get_name().upper():
             raise ValueError("Test cfg {} resolved simulator {} but simmer is running with {}.".format(
                 self.target,
-                dynamic_simulator,
+                configured_simulator,
                 self.simulator.get_name().upper(),
             ))
         self.timeout = resolve_test_timeout_hours(
@@ -602,16 +615,14 @@ class TestJob(Job):
             getattr(options, "timeout_was_explicit", False),
         )
         log.debug("Resolved timeout for %s: %s hours", self.name, self.timeout)
-        for socket_name, socket_command in runtime_options['sockets'].items():
-            # While it would be nice to have the socket live in the job_dir,
-            # Unfortunately, the paths are frequently too long resulting in:
-            #  OSError: AF_UNIX path too long
-            # As such, we'll use that name as the unique value to create hash
-            socket_file = os.path.join(self.job_dir, "{}.socket".format(socket_name))
-            socket_file = os.path.join("/tmp", sha1(socket_file.encode('ascii')).hexdigest())
-            sim_opts += " " + shlex.join(["+SOCKET__{}={}".format(socket_name, socket_file)])
-            socket_command = socket_command.replace("{socket_file}", socket_file)
-            sockets.append((socket_name, socket_command, socket_file))
+        for socket_name, sidecar_command_template in runtime_options['sockets'].items():
+            # AF_UNIX endpoint path limits are restrictive on supported workstation
+            # OSes. Hash the stable job identity into /tmp so deep result paths work.
+            socket_identity = os.path.join(self.job_dir, "{}.socket".format(socket_name))
+            socket_endpoint_path = os.path.join("/tmp", sha1(socket_identity.encode('utf-8')).hexdigest())
+            sim_opts += " " + shlex.join(["+SOCKET__{}={}".format(socket_name, socket_endpoint_path)])
+            sidecar_command = sidecar_command_template.replace("{socket_file}", socket_endpoint_path)
+            socket_sidecars.append((socket_name, sidecar_command, socket_endpoint_path))
 
         # --- Add Test Name and Merge CLI/Bazel Options (Common Logic) ---
         sim_opts += " " + shlex.join(["+UVM_TESTNAME={}".format(runtime_options['uvm_testname'])])
@@ -621,44 +632,45 @@ class TestJob(Job):
 
         pre_run_cmd = shlex.quote(runtime_options['pre_run']) if runtime_options['pre_run'] else ""
 
-        default_capture = 'hdl_top'
-        waves_db = self.job_dir
+        default_capture_scope = 'hdl_top'
+        wave_database_path = self.job_dir
 
         wave_cmd_template = self.simulator.get_wave_cmd_template()
-        wave_tcl_path = os.path.join(self.job_dir, "waves.tcl") # Standard name
+        wave_tcl_path = os.path.join(self.job_dir, "waves.tcl")
 
         if options.waves is not None:
-            wave_capture = self.simulator.get_wave_capture_options(self, wave_tcl_path)
-            sim_opts += wave_capture['sim_opts']
-            wave_tcl_path = wave_capture['wave_tcl_path']
-            waves_db = wave_capture['waves_db']
-            default_capture = wave_capture['default_capture']
+            wave_capture_settings = self.simulator.get_wave_capture_options(self, wave_tcl_path)
+            sim_opts += wave_capture_settings['sim_opts']
+            wave_tcl_path = wave_capture_settings['wave_tcl_path']
+            wave_database_path = wave_capture_settings['waves_db']
+            default_capture_scope = wave_capture_settings['default_capture']
 
-            options.probes = options.waves if options.waves != [] else [default_capture]
-            delta = " -event" if options.wave_delta else ""
+            options.probes = options.waves if options.waves != [] else [default_capture_scope]
+            wave_delta_option = " -event" if options.wave_delta else ""
 
-            # Render the wave command template
+            # Simulator adapters own the template and artifact format; simmer
+            # supplies only backend-neutral capture scopes and timing controls.
             wave_tcl_context = {
                 'options': options,
                 'job': self,
-                'waves_db': waves_db, # Pass the determined path
+                'waves_db': wave_database_path,
                 'probes': options.probes,
-                'delta': delta,
-                'simulator_name': self.simulator.get_name(), # Pass simulator name
+                'delta': wave_delta_option,
+                'simulator_name': self.simulator.get_name(),
             }
 
-            if wave_capture.get('render_template', True):
+            if wave_capture_settings.get('render_template', True):
                 with open(wave_tcl_path, 'w') as filep:
                     filep.write(wave_cmd_template.render(**wave_tcl_context))
 
-        else: # No waves requested
-            # Still need a basic run Tcl for -input/-do
-            nwaves_tcl_path = os.path.join(self.job_dir, "nwaves.tcl")
-            no_wave_capture = self.simulator.get_no_wave_capture_options(self, nwaves_tcl_path)
-            sim_opts += no_wave_capture['sim_opts']
-            tcl_commands = no_wave_capture['tcl_commands']
+        else:
+            # GUI backends can still require a run Tcl even without wave capture.
+            no_waves_tcl_path = os.path.join(self.job_dir, "nwaves.tcl")
+            no_wave_capture_settings = self.simulator.get_no_wave_capture_options(self, no_waves_tcl_path)
+            sim_opts += no_wave_capture_settings['sim_opts']
+            tcl_commands = no_wave_capture_settings['tcl_commands']
             if tcl_commands:
-                with open(nwaves_tcl_path, 'w') as filep:
+                with open(no_waves_tcl_path, 'w') as filep:
                     filep.write("\n".join(tcl_commands))
 
         sim_opts = append_uvm_control_options(sim_opts, options)
@@ -666,7 +678,7 @@ class TestJob(Job):
             sim_opts += self.simulator.get_gui_command_options()
 
         # --- Runtime Args File (Delegate path) ---
-        bazel_runtime_args_file = self.vcomper.bazel_runtime_args # Get path from vcomper
+        bazel_runtime_args_file = self.vcomper.bazel_runtime_args
         if os.path.exists(bazel_runtime_args_file):
             sim_opts += " " + shlex.join([
                 "-f",
@@ -678,20 +690,13 @@ class TestJob(Job):
         self.sim_opts = sim_opts.strip()
         log.debug("Final calculated sim opts: %s", self.sim_opts)
 
-        # --- Get the fully constructed simulation command from the simulator object ---
-        # User args ($@ in script) are typically handled by the shell automatically appending them
-        # when the script is called, so we don't usually pass them here unless needed otherwise.
-        # Get the path to the vcomp dir (needed for snapshot/simv path)
-        vcomp_directory = self.vcomper.job_dir
-        # Get the full path for the log file
-        log_file_path = self._log_path # self._log_path is set earlier
-
+        # Keep command construction in the adapter so VCS and XRUN arguments do
+        # not leak into this shared job orchestration path.
         simulation_command = self.simulator.get_sim_command(
             test_job=self,
             sim_opts=self.sim_opts,
-            vcomp_job_dir=vcomp_directory,
-            log_path=log_file_path,
-            # user_args_list=None # Or pass specific args if needed
+            vcomp_job_dir=self.vcomper.job_dir,
+            log_path=self._log_path,
         )
         log.debug("Full simulation command from simulator object: %s", simulation_command)
 
@@ -701,38 +706,33 @@ class TestJob(Job):
         if not os.path.exists(self.job_dir):
             os.mkdir(self.job_dir)
 
-        # --- Script Generation (Templates are now potentially simulator specific) ---
         sim_template = self.simulator.get_sim_template()
-        # Rerun/Bugger templates are likely generic shell scripts
         rerun_template = RERUN_TEMPLATE
 
         testscript_path = os.path.join(self.job_dir, "sim.sh")
         rerun_script_path = os.path.join(self.job_dir, "rerun.sh")
 
-        # --- Get Pre/Post Sim Commands and Working Dir ---
-        sim_working_dir = self.simulator.get_sim_working_dir(self) # Get specific working dir
+        sim_working_dir = self.simulator.get_sim_working_dir(self)
         pre_sim_commands = self.simulator.get_pre_sim_commands(self)
         post_sim_commands = self.simulator.get_post_sim_commands(self)
 
-        # Common context for script rendering
+        # This context remains backend-neutral. Simulator adapters provide the
+        # command, working directory, and optional lifecycle hooks.
         script_context = {
-            'job': self, # Pass the TestJob object itself
+            'job': self,
             'options': options,
-            'vcomp_dir': self.vcomper.job_dir, # Keep for reference if needed
-            'sim_opts': self.sim_opts, # Pass original opts for reference if needed
+            'vcomp_dir': self.vcomper.job_dir,
+            'sim_opts': self.sim_opts,
             'seed': seed,
-            'sockets': sockets, # Pass socket info if needed by template
-            'pre_run_cmd': pre_run_cmd, # Pass pre-run command
+            'sockets': socket_sidecars,
+            'pre_run_cmd': pre_run_cmd,
             'simulator_name': self.simulator.get_name(),
-            # --- Pass the new simulator-derived variables ---
             'sim_working_dir': sim_working_dir,
-            'simulation_command': simulation_command, # The full command string
+            'simulation_command': simulation_command,
             'pre_sim_commands': pre_sim_commands,
             'post_sim_commands': post_sim_commands,
-            # ---
-            # Add test_name_seed specifically for VCS template if needed
             'test_name_seed': getattr(self, 'test_name_seed', None),
-            'check_test_path': shlex.quote(sim_artifacts.find_bazel_executable(self.rcfg.proj_dir, "check_test")),
+            'check_test_path': sim_artifacts.find_bazel_executable(self.rcfg.proj_dir, "check_test"),
             'log_check_args': log_check_args,
         }
 
@@ -768,7 +768,7 @@ class TestJob(Job):
         abs_wave_path = None
         super(TestJob, self).post_run()
 
-        # Parse file for duration
+        # Parse simulator statistics and simmer's duration marker from stdout.log.
         net_time_str, cps_str = self._get_stats_from_log_file()
         self.simulation_duration_s = self._read_simulation_duration()
         self.job_time = self.simulation_duration_s or 0
@@ -893,12 +893,16 @@ class TestJob(Job):
         return self._format_duration(self.job_time)
 
     def _read_simulation_duration(self):
-        path = os.path.join(self.job_dir, "simulation_duration_s")
+        duration_re = re.compile(r'^%I:sim: Simulation duration: (?P<duration>[0-9]+) seconds$')
+        duration = None
         try:
-            with open(path, "r", encoding="utf-8") as filep:
-                duration = int(filep.read().strip())
-            return duration if duration >= 0 else None
-        except (OSError, ValueError):
+            with open(self._log_path, "r", encoding="utf-8", errors="ignore") as filep:
+                for line in filep:
+                    match = duration_re.match(line.strip())
+                    if match:
+                        duration = int(match.group('duration'))
+            return duration
+        except OSError:
             return None
 
     def _get_stats_from_log_file(self):
