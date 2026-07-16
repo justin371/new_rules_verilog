@@ -97,6 +97,7 @@ def create_parser():
          "  simmer -t 'gate_tb:test@1' --simulator XRUN --msie-prim dut --msie-primary-name dut_wc --msie-primary-key KEY\n"
          "  simmer -t 'gate_tb:test@1' --simulator XRUN --msie-incr dut_wc --msie-primary-key KEY"),
         formatter_class=SimmerHelpFormatter,
+        allow_abbrev=False,
     )
 
     add_debug_arguments(parser)
