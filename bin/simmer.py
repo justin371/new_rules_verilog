@@ -487,6 +487,13 @@ class VCompJob(Job):
         return 'Vcomp("{}@{}" -> {})'.format(self.bazel_vcomp_target, sim_name, self.name) # Add simulator info
 
 
+def _simulation_result_name(bench, simulator, test, seed, iteration, dir_suffix):
+    name = "{}__{}__{}__{}".format(bench, simulator, test, seed)
+    if iteration > 1:
+        name += "__i{}".format(iteration)
+    return name + dir_suffix
+
+
 class TestJob(Job):
 
     LOG_NAME = 'stdout.log'
@@ -560,15 +567,12 @@ class TestJob(Job):
             seed = random.randint(0, (1 << 31) - 1) # xrun treats the seed as a signed integer
         self.seed = seed
 
-        # Using the timestamp as the name uniquifier is causing issues when trying to spawn many jobs at once
-        # strdate = time.strftime("%Y_%m_%d_%H_%M_%S", time.localtime(time.time()))
-        # simname = "%s__%s__%s" % (self.vcomper.name, self.name, strdate)
-        simname = "%s__%s__%s__%d__i%d%s" % (self.vcomper.name, self.simulator.get_name(), self.name, seed,
-                                             self.iteration, self.rcfg.options.dir_suffix)
+        simname = _simulation_result_name(self.vcomper.name, self.simulator.get_name(), self.name, seed, self.iteration,
+                                          self.rcfg.options.dir_suffix)
         self.simname = simname
         self.job_dir = os.path.join(self.rcfg.regression_dir, simname)
         self._log_path = os.path.join(self.job_dir, self.LOG_NAME)
-        self.timeout_start_path = os.path.join(self.job_dir, "simulation_started")
+        self.timeout_start_path = self._log_path
 
         # --- Create job directory immediately --- Required before simulator methods use it
         # Note: super().pre_run() might also try to create it, but -p makes it safe.
@@ -576,11 +580,10 @@ class TestJob(Job):
         os.makedirs(self.rcfg.regression_dir, exist_ok=True)
         # Now create the specific job directory
         os.makedirs(self.job_dir, exist_ok=True)
-        for stale_path in (self.timeout_start_path, os.path.join(self.job_dir, "simulation_duration_s")):
-            try:
-                os.remove(stale_path)
-            except FileNotFoundError:
-                pass
+        try:
+            os.remove(self._log_path)
+        except FileNotFoundError:
+            pass
 
         # --- Super pre_run and Socket Logic ---
         super(TestJob, self).pre_run()
@@ -768,7 +771,7 @@ class TestJob(Job):
         abs_wave_path = None
         super(TestJob, self).post_run()
 
-        # Parse file for duration
+        # Parse simulator statistics and simmer's duration marker from stdout.log.
         net_time_str, cps_str = self._get_stats_from_log_file()
         self.simulation_duration_s = self._read_simulation_duration()
         self.job_time = self.simulation_duration_s or 0
@@ -893,12 +896,16 @@ class TestJob(Job):
         return self._format_duration(self.job_time)
 
     def _read_simulation_duration(self):
-        path = os.path.join(self.job_dir, "simulation_duration_s")
+        duration_re = re.compile(r'^%I:sim: Simulation duration: (?P<duration>[0-9]+) seconds$')
+        duration = None
         try:
-            with open(path, "r", encoding="utf-8") as filep:
-                duration = int(filep.read().strip())
-            return duration if duration >= 0 else None
-        except (OSError, ValueError):
+            with open(self._log_path, "r", encoding="utf-8", errors="ignore") as filep:
+                for line in filep:
+                    match = duration_re.match(line.strip())
+                    if match:
+                        duration = int(match.group('duration'))
+            return duration
+        except OSError:
             return None
 
     def _get_stats_from_log_file(self):

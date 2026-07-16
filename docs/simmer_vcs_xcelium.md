@@ -425,8 +425,9 @@ simmer -t <bench>:<test> --simulator VCS \
 ```
 
 Successful wave runs create an executable `run_waves.sh` beside `waves.fsdb`.
-It launches Verdi directly by default. Sites using LSF can provide a launcher
-without editing the generated script:
+It launches the standard Verdi FSDB viewer with `verdi -ssf`; it does not force
+the Apex/VERDI-ULTRA or LCA feature tiers. Sites using LSF can provide a
+launcher without editing the generated script:
 
 ```bash
 SIMMER_WAVE_LAUNCHER="bsub -I -q syn" ./run_waves.sh

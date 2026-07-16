@@ -127,6 +127,44 @@ class VcsRuntimeContractTest(unittest.TestCase):
 
         self.assertEqual("runmod vcs --", simulator.get_tool_runner())
 
+    def test_simulation_result_name_omits_only_the_first_iteration_suffix(self):
+        self.assertEqual(
+            "sys_tb__vcs__sys_iod_sanity_test__291663889",
+            simmer._simulation_result_name("sys_tb", "vcs", "sys_iod_sanity_test", 291663889, 1, ""),
+        )
+        self.assertEqual(
+            "sys_tb__vcs__sys_iod_sanity_test__291663889__i2_debug",
+            simmer._simulation_result_name("sys_tb", "vcs", "sys_iod_sanity_test", 291663889, 2, "_debug"),
+        )
+
+    def test_vcs_wave_viewer_does_not_force_apex_or_lca_licenses(self):
+        options = parse_args(["--simulator", "VCS", "--waves"])
+        simulator = VcsSimulator(options, DummyRegressionConfig(), None)
+
+        command = simulator.get_wave_view_command("/tmp/waves.fsdb")
+
+        self.assertEqual(["runmod", "vcs", "--", "verdi", "-ssf", "/tmp/waves.fsdb"], shlex.split(command))
+        self.assertNotIn("-apex", command)
+        self.assertNotIn("-lca", command)
+
+        with tempfile.TemporaryDirectory() as job_dir:
+            Path(job_dir, "stdout.log").touch()
+            command = simulator.get_wave_view_command("/tmp/waves.fsdb", job_dir)
+
+        self.assertIn("-smlog", shlex.split(command))
+        self.assertNotIn("-apex", command)
+        self.assertNotIn("-lca", command)
+
+    def test_simulation_duration_is_read_from_stdout_log(self):
+        with tempfile.NamedTemporaryFile(mode="w", encoding="utf-8", delete=False) as log_file:
+            log_file.write("simulator output\n%I:sim: Simulation duration: 17 seconds\n")
+            log_path = log_file.name
+        self.addCleanup(os.remove, log_path)
+        test_job = simmer.TestJob.__new__(simmer.TestJob)
+        test_job._log_path = log_path
+
+        self.assertEqual(17, test_job._read_simulation_duration())
+
     def test_xprop_is_opt_in_for_vcs_and_defaults_to_fox_for_xcelium(self):
         vcs_options, vcs_simulator = self._validated(["-t", "unit:test", "--simulator", "VCS"])
         xcelium_options, xcelium_simulator = self._validated(["-t", "unit:test", "--simulator", "XRUN"])
@@ -1046,6 +1084,44 @@ class VcsRuntimeContractTest(unittest.TestCase):
         self.assertIn("run 80ns", rendered)
         self.assertIn("database -close shm_db", rendered)
 
+    def test_vcs_wave_template_matches_the_default_fsdb_flow(self):
+        template = self._read_repo_file("bin/templates/vcs_wave_cmd_template.tcl.j2")
+        rendered = jinja2.Template(template, undefined=jinja2.StrictUndefined).render(
+            options=SimpleNamespace(
+                probes=["hdl_top"],
+                wave_depth=999,
+                wave_end=99999999,
+                wave_start=0,
+            ),
+            waves_db="/tmp/waves.fsdb",
+        )
+
+        self.assertEqual([
+            "dump -file /tmp/waves.fsdb -type FSDB",
+            "dump -add hdl_top -fid FSDB0 -depth 999 -aggregates -fsdb_opt +packedmda+struct+parameter",
+            "dump -enable -fid FSDB0",
+            "run",
+            "dump -flush FSDB0",
+            "dump -close",
+            "exit",
+        ], rendered.splitlines())
+
+        bounded = jinja2.Template(template, undefined=jinja2.StrictUndefined).render(
+            options=SimpleNamespace(
+                probes=["hdl_top.dut"],
+                wave_depth=8,
+                wave_end=100,
+                wave_start=20,
+            ),
+            waves_db="/tmp/waves.fsdb",
+        )
+        self.assertIn("dump -disable -fid FSDB0", bounded)
+        self.assertIn("stop -absolute 20ns -command {dump -enable -fid FSDB0} -continue", bounded)
+        self.assertIn(
+            "stop -absolute 100ns -command {dump -disable -fid FSDB0; dump -flush FSDB0} -continue",
+            bounded,
+        )
+
     def test_shell_templates_preserve_failures_and_argv(self):
         coverage = self._read_repo_file("bin/templates/vcs_cov_merge_template.sh.j2")
         vcs_compile = self._read_repo_file("bin/templates/vcs_compile_template.sh.j2")
@@ -1066,9 +1142,11 @@ class VcsRuntimeContractTest(unittest.TestCase):
         self.assertNotIn("sockets_exit_code + socket_exit_code", sim)
         self.assertNotIn('time eval "{{ simulation_command }}"', sim)
         self.assertIn("time {{ simulation_command }}", sim)
-        self.assertIn("SIM_DURATION_FILE", sim)
-        self.assertIn("SIM_TIMEOUT_START_FILE", sim)
-        self.assertIn(': > "$SIM_TIMEOUT_START_FILE"', sim)
+        self.assertNotIn("simulation_duration_s", sim)
+        self.assertNotIn("simulation_started", sim)
+        self.assertIn("record_simulation_duration", sim)
+        self.assertIn("%I:sim: Simulation duration:", sim)
+        self.assertIn(': > "$TEST_LOG_PATH"', sim)
         self.assertIn("SIM_START_SECONDS=$SECONDS", sim)
         self.assertIn('kill "$SOCKET_{{ loop.index }}_PID"', sim)
         self.assertIn('kill -KILL "$current_pid"', sim)

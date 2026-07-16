@@ -268,10 +268,12 @@ class JobManagerLaunchTest(unittest.TestCase):
         runner._term_deadline = datetime.datetime.now() - datetime.timedelta(seconds=1)
         runner._kill_sent = False
 
-        with mock.patch("lib.job_lib.os.killpg") as killpg:
+        with mock.patch("lib.job_lib.os.killpg", create=True) as killpg, mock.patch("lib.job_lib.signal.SIGKILL",
+                                                                                    9,
+                                                                                    create=True):
             self.assertTrue(runner._check_for_done())
 
-        killpg.assert_called_once_with(456, signal.SIGKILL)
+        killpg.assert_called_once_with(456, 9)
 
     def test_runner_exception_kills_and_reaps_process_group(self):
         runner = SubprocessJobRunner.__new__(SubprocessJobRunner)
@@ -283,19 +285,23 @@ class JobManagerLaunchTest(unittest.TestCase):
         runner._process_group_id = 456
         runner._check_for_done = mock.Mock(side_effect=RuntimeError("poll failed"))
 
-        with mock.patch("lib.job_lib.os.killpg") as killpg, mock.patch.object(runner._p, "wait",
-                                                                              wraps=runner._p.wait) as wait:
+        with mock.patch("lib.job_lib.os.killpg", create=True) as killpg, mock.patch("lib.job_lib.signal.SIGKILL",
+                                                                                    9,
+                                                                                    create=True), mock.patch.object(
+                                                                                        runner._p,
+                                                                                        "wait",
+                                                                                        wraps=runner._p.wait) as wait:
             self.assertTrue(runner.check_for_done())
 
-        killpg.assert_called_once_with(456, signal.SIGKILL)
+        killpg.assert_called_once_with(456, 9)
         wait.assert_called_once_with()
 
-    def test_test_timeout_waits_for_simulation_start_marker(self):
+    def test_test_timeout_waits_for_simulator_log_creation(self):
         job_dir = Path(tempfile.mkdtemp())
-        marker = job_dir / "simulation_started"
+        simulator_log = job_dir / "stdout.log"
         job = SimpleNamespace(
             timeout=0.001,
-            timeout_start_path=str(marker),
+            timeout_start_path=str(simulator_log),
             suppress_output=False,
             job_dir=str(job_dir),
             rcfg=SimpleNamespace(options=SimpleNamespace(no_stdout=False)),
@@ -308,9 +314,20 @@ class JobManagerLaunchTest(unittest.TestCase):
         runner._timed_out = False
         runner._term_deadline = None
         runner._kill_sent = False
+        runner._timeout_start = None
+        runner._process_group_id = 456
 
         self.assertFalse(runner._check_for_done())
         self.assertFalse(runner._timed_out)
+
+        simulator_log.touch()
+        old_timestamp = (datetime.datetime.now() - datetime.timedelta(hours=1)).timestamp()
+        os.utime(simulator_log, (old_timestamp, old_timestamp))
+        with mock.patch("lib.job_lib.os.killpg", create=True) as killpg:
+            self.assertFalse(runner._check_for_done())
+
+        self.assertTrue(runner._timed_out)
+        killpg.assert_called_once_with(456, signal.SIGTERM)
 
     def test_simmer_profile_prints_phase_and_job_details(self):
         log = _SummaryLogger()

@@ -9,11 +9,14 @@ export PROJ_DIR={{ job.vcomper.rcfg.proj_dir|shell_quote }}
 export SIMRESULTS={{ job.job_dir|shell_quote }}
 export TEST_LOG_PATH={{ job._log_path|shell_quote }} # Export log path
 export SIM_WORK_DIR={{ sim_working_dir|shell_quote }}
-SIM_DURATION_FILE="$SIMRESULTS/simulation_duration_s"
-SIM_TIMEOUT_START_FILE="$SIMRESULTS/simulation_started"
-rm -f "$SIM_DURATION_FILE" "$SIM_TIMEOUT_START_FILE"
 export VIP_LOG_DIR="$SIMRESULTS"
 export SVT_LOG_DIR="$SIMRESULTS"
+
+function record_simulation_duration {
+    if [ -n "${SIM_START_SECONDS:-}" ]; then
+        printf '%%I:sim: Simulation duration: %s seconds\n' "$((SECONDS - SIM_START_SECONDS))" >> "$TEST_LOG_PATH"
+    fi
+}
 
 # --- Main Test Function ---
 function testFunction {
@@ -116,11 +119,11 @@ function testFunction {
 
     # Execute the main simulation command with timing
     set +o errexit # Disable errexit to capture the simulation's exit code
-    : > "$SIM_TIMEOUT_START_FILE"
+    : > "$TEST_LOG_PATH"
     local SIM_START_SECONDS=$SECONDS
     time {{ simulation_command }}
     local sim_exit_code=$?
-    printf '%s\n' "$((SECONDS - SIM_START_SECONDS))" > "$SIM_DURATION_FILE"
+    record_simulation_duration
     set -o errexit # Re-enable errexit
     echo "Simulation finished with exit code: $sim_exit_code"
     if [ "$sim_exit_code" -ne 0 ] && [ "$final_result" -eq 0 ]; then
@@ -243,9 +246,7 @@ function testFunction {
 function signal_exit {
     # This function is called when specific signals are received
     echo "$(date): TRAPPED SIGNAL. Terminating script."
-    if [ -n "${SIM_START_SECONDS:-}" ]; then
-        printf '%s\n' "$((SECONDS - SIM_START_SECONDS))" > "$SIM_DURATION_FILE"
-    fi
+    record_simulation_duration
     for child_pid in $(jobs -pr); do
         kill "$child_pid" 2>/dev/null || true
     done
