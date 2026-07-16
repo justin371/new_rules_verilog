@@ -92,6 +92,12 @@ class VcsRuntimeContractTest(unittest.TestCase):
     def test_zero_test_timeout_disables_job_timeout(self):
         self.assertEqual(0, resolve_test_timeout_hours({"timeout_minutes": 0}, 12.0, False))
 
+    def test_long_options_require_exact_spelling(self):
+        self.assertTrue(parse_args(["--recompile"]).recompile)
+        self.assertEqual(10, parse_args(["--his"]).history)
+        with self.assertRaises(SystemExit):
+            parse_args(["--recom"])
+
     def test_simulation_directory_name_separates_iteration_and_optional_suffix(self):
         common_arguments = ("unit_tb", "VCS", "smoke", 42, 1)
 
