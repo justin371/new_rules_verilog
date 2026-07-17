@@ -5,7 +5,7 @@ load("//deps:gatesim_modes_list.bzl", "GATESIM_MODES")
 load(":simulators/pldm.bzl", "pldm_dv_backend")
 load(":simulators/vcs.bzl", "vcs_dv_backend")
 load(":simulators/xcelium.bzl", "xcelium_dv_backend", "xcelium_dv_unit_test_impl")
-load(":verilog.bzl", "VerilogInfo", "gather_shell_defines", "get_transitive_srcs", "merge_default_runfiles", "runfiles_relative_short_path", "verilog_input_inventory")
+load(":verilog.bzl", "VerilogInfo", "gather_shell_defines", "get_transitive_srcs", "merge_default_runfiles", "runfiles_relative_short_path", "verilog_input_inventory_records")
 
 DVTestInfo = provider("Runtime configuration for a DV test.", fields = {
     "sim_opts": "Simulation :options to carry forward.",
@@ -562,17 +562,32 @@ def _verilog_dv_tb_impl(ctx):
         ([ctx.file.xcelium_covfile] if ctx.file.xcelium_covfile else []) +
         ([ctx.file.vcs_cm_hier] if ctx.file.vcs_cm_hier else [])
     )
+    compile_input_records = verilog_input_inventory_records(
+        all_deps,
+        compile_input_files,
+        flist_field = compile_config.flist_field,
+        fallback_field = compile_config.fallback_flist_field,
+    )
     ctx.actions.write(
         output = ctx.outputs.compile_inputs,
-        content = verilog_input_inventory(
-            all_deps,
-            compile_input_files,
-            flist_field = compile_config.flist_field,
-            fallback_field = compile_config.fallback_flist_field,
-        ),
+        content = "\n".join([entry for entry, _ in compile_input_records]) + "\n",
+    )
+    digest_manifest = ctx.actions.declare_file(ctx.label.name + "_compile_inputs_digest_manifest.txt")
+    ctx.actions.write(
+        output = digest_manifest,
+        content = "\n".join(["{}\t{}".format(entry, file.path) for entry, file in compile_input_records]) + "\n",
+    )
+    ctx.actions.run(
+        executable = ctx.executable._compile_input_digest,
+        arguments = [digest_manifest.path, ctx.outputs.compile_inputs_digest.path],
+        inputs = depset([digest_manifest] + [file for _, file in compile_input_records]),
+        outputs = [ctx.outputs.compile_inputs_digest],
+        mnemonic = "VerilogCompileInputDigest",
+        progress_message = "Hashing Verilog compile inputs for %{label}",
     )
     tb_options = {
         "compile_inputs": runfiles_relative_short_path(ctx.outputs.compile_inputs),
+        "compile_inputs_digest": runfiles_relative_short_path(ctx.outputs.compile_inputs_digest),
         "dut_instance": ctx.attr.dut_instance,
         "dut_top": ctx.attr.dut_top,
     }
@@ -600,6 +615,7 @@ def _verilog_dv_tb_impl(ctx):
     generated_outputs = [
         ctx.outputs.compile_args,
         ctx.outputs.compile_inputs,
+        ctx.outputs.compile_inputs_digest,
         ctx.outputs.runtime_args,
         ctx.outputs.compile_warning_waivers,
         ctx.outputs.tb_options,
@@ -773,6 +789,11 @@ verilog_dv_tb = rule(
             allow_single_file = True,
             doc = "Template to generate compilation arguments flist.",
         ),
+        "_compile_input_digest": attr.label(
+            default = Label("@rules_verilog//verilog/private:compile_input_digest"),
+            cfg = "exec",
+            executable = True,
+        ),
         "_compile_args_template_pldm_ice": attr.label(
             default = Label("@rules_verilog//vendors/cadence:verilog_dv_tb_compile_args_pldm_ice.f.template"),
             allow_single_file = True,
@@ -788,6 +809,7 @@ verilog_dv_tb = rule(
         "runtime_args": "%{name}_runtime_args.f",
         "compile_args": "%{name}_compile_args.f",
         "compile_inputs": "%{name}_compile_inputs.txt",
+        "compile_inputs_digest": "%{name}_compile_inputs.sha256",
         "compile_args_pldm_ice": "%{name}_compile_args_pldm_ice.f",
         "compile_args_pldm_sa": "%{name}_compile_args_pldm_sa.f",
         "compile_warning_waivers": "%{name}_compile_warning_waivers",

@@ -156,6 +156,42 @@ class CompileCacheTest(unittest.TestCase):
 
         self.assertNotEqual(initial, changed)
 
+    def test_precomputed_compile_input_digest_matches_direct_hash(self):
+        project, _, compile_args = self._project()
+        inventory = project / "compile_inputs.txt"
+        inventory.write_text("source\ttop.sv\n", encoding="utf-8")
+        direct = compile_fingerprint(project, "vcs -f compile.f", compile_args, inventory, project)
+        digest = project / "compile_inputs.sha256"
+        digest.write_text(direct["compile_inputs_sha256"] + "\n", encoding="ascii")
+
+        precomputed = compile_fingerprint(
+            project,
+            "vcs -f compile.f",
+            compile_args,
+            inventory,
+            project,
+            compile_inputs_digest_path=digest,
+        )
+
+        self.assertEqual(direct, precomputed)
+
+    def test_precomputed_compile_input_digest_rejects_malformed_content(self):
+        project, _, compile_args = self._project()
+        inventory = project / "compile_inputs.txt"
+        inventory.write_text("source\ttop.sv\n", encoding="utf-8")
+        digest = project / "compile_inputs.sha256"
+        digest.write_text("not-a-digest\n", encoding="ascii")
+
+        with self.assertRaisesRegex(RuntimeError, "Malformed Bazel compile input digest"):
+            compile_fingerprint(
+                project,
+                "vcs -f compile.f",
+                compile_args,
+                inventory,
+                project,
+                compile_inputs_digest_path=digest,
+            )
+
     def test_fingerprint_rejects_missing_inventory_input(self):
         project, _, compile_args = self._project()
         runfiles = Path(tempfile.mkdtemp())

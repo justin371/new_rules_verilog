@@ -85,7 +85,12 @@ def _format_simulation_directory_name(vcomp_name, simulator_name, test_name, see
     return result_name + suffix_component
 
 
-def get_bazel_bin():
+def get_bazel_bin(project_dir=None):
+    if project_dir:
+        project_bazel_bin = os.path.join(project_dir, "bazel-bin")
+        if os.path.isdir(project_bazel_bin):
+            return os.path.realpath(project_bazel_bin)
+
     result = subprocess.run(["bazel", "info", "bazel-bin"], capture_output=True, text=True)
     if result.returncode != 0:
         raise RuntimeError("bazel info bazel-bin failed:\n{}\n{}".format(result.stdout, result.stderr))
@@ -257,7 +262,7 @@ class VCompJob(Job):
         options = self.rcfg.options
         relpath, bazel_target = self.bazel_vcomp_target.split(':')
         relpath = relpath[2:] # Remove leading //
-        bazel_bin = get_bazel_bin()
+        bazel_bin = get_bazel_bin(self.rcfg.proj_dir)
         self.bazel_runfiles_main = os.path.join(bazel_bin, relpath, "{}.runfiles".format(bazel_target), "__main__")
         self.bazel_compile_args = self.simulator.get_bazel_compile_args_file(self.bazel_runfiles_main, relpath,
                                                                              bazel_target)
@@ -270,6 +275,7 @@ class VCompJob(Job):
             "dut_instance": "hdl_top.dut",
             "dut_top": "dut",
             "compile_inputs": "",
+            "compile_inputs_digest": "",
         }
         if os.path.isfile(tb_options_path):
             with open(tb_options_path, "r", encoding="utf-8") as filep:
@@ -347,6 +353,10 @@ class VCompJob(Job):
             os.path.join(self.bazel_runfiles_main, self.tb_options["compile_inputs"])
             if self.tb_options["compile_inputs"] else None,
             self.bazel_runfiles_main,
+            compile_inputs_digest_path=os.path.join(
+                self.bazel_runfiles_main,
+                self.tb_options["compile_inputs_digest"],
+            ) if self.tb_options["compile_inputs_digest"] else None,
             **fingerprint_inputs,
         )
         self.simulator.validate_compile_cache_context(self)
@@ -999,7 +1009,6 @@ def main(rcfg, options):
     btbj_jobs = []
     trd = []
     webroot_path = resolve_report_root(rcfg, options)
-    report_launcher_path = None
     dynamic_test_plan = simulator.uses_dynamic_test_plan()
     workflow_finalize_failed = False
     coverage_merge_failed = False
@@ -1015,12 +1024,12 @@ def main(rcfg, options):
         vcomper = VCompJob(rcfg, vcomp, simulator)
         vcomp_jobs[vcomp] = vcomper
 
-        btbj = job_lib.BazelTBJob(rcfg, vcomp, vcomper)
+        btbj = job_lib.BazelTBJob(rcfg, vcomp, vcomper, additional_targets=test_list.keys())
         btbj_jobs.append(btbj)
 
         tests = []
         icfgs = []
-        btcj = job_lib.BazelTestCfgJob(rcfg, test_list.keys(), vcomper)
+        btcj = job_lib.BazelTestCfgJob(rcfg, test_list.keys(), vcomper, prebuilt=True)
         btcj_jobs.append(btcj)
         for test, iterations in test_list.items():
             icfg = rv_utils.IterationCfg(iterations)
@@ -1162,7 +1171,7 @@ def main(rcfg, options):
                 import fcntl
                 fcntl.flock(report_lock, fcntl.LOCK_EX)
                 rrt.render_regression_page()
-                report_launcher_path = rrt.write_run_launcher(os.environ.get("SIMMER_REPORT_URL"))
+                rrt.write_run_launcher(os.environ.get("SIMMER_REPORT_URL"))
             with open(index_lock_path, "w") as report_lock:
                 fcntl.flock(report_lock, fcntl.LOCK_EX)
                 rrt.render_bench_page()
@@ -1185,9 +1194,6 @@ def main(rcfg, options):
 
         for message in getattr(rcfg, "deferred_messages", []):
             log.info(message)
-
-        if report_launcher_path:
-            log.info("Open this regression report: %s", shlex.quote(report_launcher_path))
 
         simulator.cleanup_shared_runtime_artifacts(vcomp_jobs)
         total_failures = sum(failures.values())

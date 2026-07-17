@@ -3,6 +3,10 @@
 
 CUSTOM_SHELL = "custom"
 
+_SHELLS_DOC = """List of verilog_rtl_shell Labels.
+For each Label, a gumi define will be placed on the command line to use this shell instead of the original module.
+This requires that the original module was instantiated using \\`gumi_<module_name> instead of just <module_name>."""
+
 VerilogInfo = provider("Transitive Verilog build inputs.", fields = {
     "transitive_sources": "All source files needed by a target. They are retained for compile input tracking and simulator runfiles.",
     "transitive_flists": "All flists which specify ordering of transitive sources.",
@@ -98,17 +102,13 @@ def merge_default_runfiles(ctx, files, targets, transitive_files = None):
         transitive_files = transitive_files,
     ).merge_all([target[DefaultInfo].default_runfiles for target in targets])
 
-def verilog_input_inventory(deps, extra_files, flist_field = "transitive_flists", fallback_field = None):
-    """Return a stable inventory of Verilog compile inputs.
-
-    Args:
-      deps: Targets that provide Verilog inputs.
-      extra_files: Additional compile input files.
+def verilog_input_inventory_records(deps, extra_files, flist_field = "transitive_flists", fallback_field = None):
+    """Return stable inventory entries paired with their source files.
 
     Returns:
-      A newline-delimited compile input inventory.
+      A sorted list of (inventory entry, File) tuples.
     """
-    entries = []
+    records = {}
     sources = get_transitive_srcs([], deps, VerilogInfo, "transitive_sources", allow_other_outputs = True)
     flists = get_transitive_srcs(
         [],
@@ -119,12 +119,25 @@ def verilog_input_inventory(deps, extra_files, flist_field = "transitive_flists"
         fallback_attr_name = fallback_field,
     )
     for source in sources.to_list():
-        entries.append("source\t{}".format(runfiles_relative_short_path(source)))
+        records["source\t{}".format(runfiles_relative_short_path(source))] = source
     for flist in flists.to_list():
-        entries.append("filelist\t{}".format(runfiles_relative_short_path(flist)))
+        records["filelist\t{}".format(runfiles_relative_short_path(flist))] = flist
     for extra_file in extra_files:
-        entries.append("runfile\t{}".format(runfiles_relative_short_path(extra_file)))
-    return "\n".join(sorted(depset(entries).to_list())) + "\n"
+        records["runfile\t{}".format(runfiles_relative_short_path(extra_file))] = extra_file
+    return [(entry, records[entry]) for entry in sorted(records)]
+
+def verilog_input_inventory(deps, extra_files, flist_field = "transitive_flists", fallback_field = None):
+    """Return a stable inventory of Verilog compile inputs.
+
+    Args:
+      deps: Targets that provide Verilog inputs.
+      extra_files: Additional compile input files.
+
+    Returns:
+      A newline-delimited compile input inventory.
+    """
+    records = verilog_input_inventory_records(deps, extra_files, flist_field, fallback_field)
+    return "\n".join([entry for entry, _ in records]) + "\n"
 
 def flists_to_arguments(deps, provider, field, prefix, separator = "", tool_name = None, path_prefix = "", fallback_field = None):
     # Emit Bazel short_path entries so generated filelists stay rooted at the
@@ -157,3 +170,70 @@ def flists_to_arguments(deps, provider, field, prefix, separator = "", tool_name
         formatted_args = [" {} {}{}".format(prefix, path_prefix, runfiles_relative_short_path(flist)) for flist in trans]
 
     return separator.join(formatted_args)
+
+def _verilog_test_impl(ctx):
+    trans_srcs = get_transitive_srcs([], ctx.attr.shells + ctx.attr.deps, VerilogInfo, "transitive_sources")
+    srcs_list = trans_srcs.to_list()
+    flists = get_transitive_srcs([], ctx.attr.shells + ctx.attr.deps, VerilogInfo, "transitive_flists")
+    flists_list = flists.to_list()
+
+    content = []
+
+    if ctx.attr.tool:
+        content.append(ctx.attr.tool[DefaultInfo].files_to_run.executable.short_path)
+
+    flists_args = ["-f {}".format(f.short_path) for f in flists_list]
+    content += ctx.attr.pre_flist_args
+
+    for key, value in gather_shell_defines(ctx.attr.shells).items():
+        content.append("  +define+{}{}".format(key, value))
+
+    content += flists_args
+    for dep in ctx.attr.deps:
+        if VerilogInfo in dep and dep[VerilogInfo].last_module:
+            content.append(dep[VerilogInfo].last_module.short_path)
+    content += ctx.attr.post_flist_args
+
+    content = ctx.expand_location(" ".join(content), targets = ctx.attr.data)
+
+    ctx.actions.write(
+        output = ctx.outputs.out,
+        content = content,
+        is_executable = True,
+    )
+
+    if ctx.attr.tool:
+        tool_runfiles = ctx.attr.tool[DefaultInfo].data_runfiles.files
+    else:
+        tool_runfiles = depset([])
+
+    runfiles = ctx.runfiles(files = flists_list + srcs_list + ctx.files.data, transitive_files = tool_runfiles)
+
+    return [DefaultInfo(
+        runfiles = runfiles,
+        executable = ctx.outputs.out,
+    )]
+
+verilog_test = rule(
+    doc = """Provides a way to run a test against a set of libs.""",
+    implementation = _verilog_test_impl,
+    attrs = {
+        "deps": attr.label_list(
+            mandatory = True,
+            doc = "Other verilog libraries this target is dependent upon.\n" +
+                  "All Labels specified here must provide a VerilogInfo provider.",
+        ),
+        "pre_flist_args": attr.string_list(doc = "Commands and arguments before flist arguments"),
+        "post_flist_args": attr.string_list(doc = "Commands and arguments after flist arguments"),
+        "shells": attr.label_list(
+            doc = _SHELLS_DOC,
+        ),
+        "data": attr.label_list(
+            allow_files = True,
+            doc = "Non-verilog dependencies",
+        ),
+        "tool": attr.label(doc = "Label to a single tool to run. Inserted at before pre_flist_args if set. Do not duplicate in pre_flist_args"),
+    },
+    outputs = {"out": "%{name}_run.sh"},
+    test = True,
+)
