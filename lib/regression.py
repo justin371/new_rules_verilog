@@ -3,6 +3,7 @@
 ################################################################################
 # standard lib imports
 import ast
+from contextlib import contextmanager
 import fnmatch
 import hashlib
 import os
@@ -10,6 +11,7 @@ import re
 import subprocess
 import sys
 import json
+import tempfile
 import time
 
 ################################################################################
@@ -177,9 +179,12 @@ class RegressionConfig():
         """
         path = self._cache_path(j)
         os.makedirs(os.path.dirname(path), exist_ok=True)
-        temporary_path = "{}.{}.tmp".format(path, os.getpid())
+        descriptor, temporary_path = tempfile.mkstemp(prefix=".{}-".format(j),
+                                                      suffix=".tmp",
+                                                      dir=os.path.dirname(path),
+                                                      text=True)
         try:
-            with open(temporary_path, "w") as f:
+            with os.fdopen(descriptor, "w") as f:
                 json.dump(d, f, indent=4)
             os.replace(temporary_path, path)
         except Exception as e:
@@ -208,6 +213,47 @@ class RegressionConfig():
     def _cache_path(self, filename):
         return os.path.join(self.proj_dir, ".simmer", "cache", filename)
 
+    @contextmanager
+    def _discovery_cache_lock(self, exclusive):
+        """Lock complete discovery generations across supported POSIX processes."""
+        cache_dir = os.path.dirname(self._cache_path(".discovery.lock"))
+        os.makedirs(cache_dir, exist_ok=True)
+        lock_path = self._cache_path(".discovery.lock")
+        with open(lock_path, "a+", encoding="utf-8") as lock_file:
+            try:
+                import fcntl
+            except ImportError:
+                # Simmer's licensed runtime is POSIX-only. Keep unit-level
+                # helpers usable on other hosts without claiming IPC safety.
+                yield
+                return
+
+            operation = fcntl.LOCK_EX if exclusive else fcntl.LOCK_SH
+            fcntl.flock(lock_file, operation)
+            try:
+                yield
+            finally:
+                fcntl.flock(lock_file, fcntl.LOCK_UN)
+
+    def _read_discovery_cache_locked(self):
+        generation = []
+        for filename in DISCOVERY_CACHE_FILES:
+            with open(self._cache_path(filename), "r", encoding="utf-8") as filep:
+                generation.append(json.load(filep))
+        return tuple(generation)
+
+    def _load_discovery_cache_generation(self):
+        with self._discovery_cache_lock(exclusive=False):
+            return self._read_discovery_cache_locked()
+
+    def _publish_discovery_cache(self):
+        """Publish all discovery payloads as one advisory-locked generation."""
+        with self._discovery_cache_lock(exclusive=True):
+            self.dict_to_json(self.all_vcomp, "all_vcomp.json")
+            self.dict_to_json(self.tests_to_tags, "tests_to_tags.json")
+            self.dict_to_json(self.tests_to_simulator, "tests_to_simulator.json")
+            self.dict_to_json(self._discovery_dependency_manifest(), "discovery_manifest.json")
+
     def _have_discovery_cache(self):
         return all(os.path.exists(self._cache_path(filename)) for filename in DISCOVERY_CACHE_FILES)
 
@@ -229,7 +275,8 @@ class RegressionConfig():
         }
 
     def _write_discovery_manifest(self):
-        self.dict_to_json(self._discovery_dependency_manifest(), "discovery_manifest.json")
+        with self._discovery_cache_lock(exclusive=True):
+            self.dict_to_json(self._discovery_dependency_manifest(), "discovery_manifest.json")
 
     def _iter_discovery_dependency_paths(self):
         result = subprocess.run(
@@ -259,24 +306,34 @@ class RegressionConfig():
                     yield os.path.join(root, filename)
 
     def _discovery_cache_is_fresh(self):
-        if not self._have_discovery_cache():
-            return False
         try:
-            with open(self._cache_path("discovery_manifest.json"), "r", encoding="utf-8") as filep:
-                cached_manifest = json.load(filep)
+            with self._discovery_cache_lock(exclusive=False):
+                if not self._have_discovery_cache():
+                    return False
+                _, _, _, cached_manifest = self._read_discovery_cache_locked()
+                current_manifest = self._discovery_dependency_manifest()
         except (OSError, ValueError, json.JSONDecodeError):
             return False
-        current_manifest = self._discovery_dependency_manifest()
         if cached_manifest != current_manifest:
             self.log.debug("Discovery cache dependency manifest changed")
             return False
         return True
 
     def _should_use_cached_discovery(self):
-        if self._discovery_cache_is_fresh():
-            self.log.info("Using cached test discovery")
-            return True
-        return False
+        try:
+            with self._discovery_cache_lock(exclusive=False):
+                if not self._have_discovery_cache():
+                    return False
+                all_vcomp, tests_to_tags, tests_to_simulator, cached_manifest = self._read_discovery_cache_locked()
+                if cached_manifest != self._discovery_dependency_manifest():
+                    self.log.debug("Discovery cache dependency manifest changed")
+                    return False
+        except (OSError, ValueError, json.JSONDecodeError):
+            return False
+
+        self._cached_discovery = (all_vcomp, tests_to_tags, tests_to_simulator)
+        self.log.info("Using cached test discovery")
+        return True
 
     def _split_btglob(self, btiglob):
         try:
@@ -446,11 +503,8 @@ class RegressionConfig():
 
         self.log.debug("Tests available:\n%s", "\n".join(table_output))
 
-        # Save test information to JSON files
-        self.dict_to_json(self.all_vcomp, "all_vcomp.json")
-        self.dict_to_json(self.tests_to_tags, "tests_to_tags.json")
-        self.dict_to_json(self.tests_to_simulator, "tests_to_simulator.json")
-        self._write_discovery_manifest()
+        # Save test information as one coherent cache generation.
+        self._publish_discovery_cache()
 
     def test_discovery_match(self):
         """
@@ -459,9 +513,10 @@ class RegressionConfig():
         """
         # Load test information from JSON files if using no_compile or no_bazel
         if self.use_cached_discovery:
-            self.all_vcomp = self.json_to_dict("all_vcomp.json")
-            self.tests_to_tags = self.json_to_dict("tests_to_tags.json")
-            self.tests_to_simulator = self.json_to_dict("tests_to_simulator.json")
+            cached_discovery = getattr(self, "_cached_discovery", None)
+            if cached_discovery is None:
+                cached_discovery = self._load_discovery_cache_generation()[:3]
+            self.all_vcomp, self.tests_to_tags, self.tests_to_simulator = cached_discovery
 
         # Process each test specification from command line
         for ta in self.options.tests:

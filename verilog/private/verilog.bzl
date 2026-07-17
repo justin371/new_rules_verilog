@@ -177,12 +177,14 @@ def _verilog_test_impl(ctx):
     flists = get_transitive_srcs([], ctx.attr.shells + ctx.attr.deps, VerilogInfo, "transitive_flists")
     flists_list = flists.to_list()
 
-    content = []
+    content = ["#!/usr/bin/env bash"]
+    tool_executable = None
 
     if ctx.attr.tool:
-        content.append(ctx.attr.tool[DefaultInfo].files_to_run.executable.short_path)
+        tool_executable = ctx.attr.tool[DefaultInfo].files_to_run.executable
+        content.append(runfiles_relative_short_path(tool_executable))
 
-    flists_args = ["-f {}".format(f.short_path) for f in flists_list]
+    flists_args = ["-f {}".format(runfiles_relative_short_path(f)) for f in flists_list]
     content += ctx.attr.pre_flist_args
 
     for key, value in gather_shell_defines(ctx.attr.shells).items():
@@ -191,10 +193,10 @@ def _verilog_test_impl(ctx):
     content += flists_args
     for dep in ctx.attr.deps:
         if VerilogInfo in dep and dep[VerilogInfo].last_module:
-            content.append(dep[VerilogInfo].last_module.short_path)
+            content.append(runfiles_relative_short_path(dep[VerilogInfo].last_module))
     content += ctx.attr.post_flist_args
 
-    content = ctx.expand_location(" ".join(content), targets = ctx.attr.data)
+    content = ctx.expand_location("\n".join([content[0], " ".join(content[1:])]) + "\n", targets = ctx.attr.data)
 
     ctx.actions.write(
         output = ctx.outputs.out,
@@ -202,12 +204,17 @@ def _verilog_test_impl(ctx):
         is_executable = True,
     )
 
+    runfile_targets = ctx.attr.shells + ctx.attr.deps + ctx.attr.data
+    runfile_files = flists_list + srcs_list + ctx.files.data
     if ctx.attr.tool:
-        tool_runfiles = ctx.attr.tool[DefaultInfo].data_runfiles.files
-    else:
-        tool_runfiles = depset([])
+        runfile_targets.append(ctx.attr.tool)
+        runfile_files.append(tool_executable)
 
-    runfiles = ctx.runfiles(files = flists_list + srcs_list + ctx.files.data, transitive_files = tool_runfiles)
+    runfiles = merge_default_runfiles(
+        ctx,
+        files = runfile_files,
+        targets = runfile_targets,
+    )
 
     return [DefaultInfo(
         runfiles = runfiles,
@@ -232,7 +239,11 @@ verilog_test = rule(
             allow_files = True,
             doc = "Non-verilog dependencies",
         ),
-        "tool": attr.label(doc = "Label to a single tool to run. Inserted at before pre_flist_args if set. Do not duplicate in pre_flist_args"),
+        "tool": attr.label(
+            cfg = "exec",
+            executable = True,
+            doc = "Label to a single executable tool to run. Inserted before pre_flist_args if set. Do not duplicate in pre_flist_args",
+        ),
     },
     outputs = {"out": "%{name}_run.sh"},
     test = True,

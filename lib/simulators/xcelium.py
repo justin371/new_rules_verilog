@@ -6,6 +6,7 @@ import hashlib
 import json
 import shutil
 import logging
+import re
 import shlex
 import subprocess
 import tempfile
@@ -20,6 +21,18 @@ from .xcelium_options import validate_xcelium_runtime_options
 log = logging.getLogger(__name__)
 
 MSIE_MANIFEST = ".msie_primary_manifest.json"
+_XCELIUM_RELEASE_RE = re.compile(r"(?im)\bxrun(?:\(\d+\))?[ \t]*(?::)?[ \t]+(\d{2}\.\d{2}(?:[-_][A-Za-z0-9._-]+)?)\b")
+
+
+def _stable_xcelium_release_identity(output):
+    match = _XCELIUM_RELEASE_RE.search(output or "")
+    return "xrun release = {}".format(match.group(1)) if match else None
+
+
+def _tcl_quote(value):
+    escaped = str(value).replace("\\", "\\\\").replace('"', '\\"').replace("$", "\\$")
+    escaped = escaped.replace("[", "\\[").replace("]", "\\]").replace("\n", "\\n").replace("\r", "\\r")
+    return '"{}"'.format(escaped)
 
 
 def _sha256_file(path):
@@ -48,6 +61,10 @@ def _write_json_atomic(path, value):
 
 class XceliumSimulator(SimulatorInterface):
     """Implementation for Cadence XRUN simulator (including EMU variant)."""
+
+    def __init__(self, options, rcfg, env):
+        super().__init__(options, rcfg, env)
+        self._xcelium_tool_identity = None
 
     def get_name(self):
         return "xrun"
@@ -79,6 +96,7 @@ class XceliumSimulator(SimulatorInterface):
         return self.env.get_template('sim_template.sh.j2')
 
     def get_wave_cmd_template(self):
+        self.env.filters['tcl_quote'] = _tcl_quote
         return self.env.get_template('xrun_wave_cmd_template.tcl.j2')
 
     def get_wave_view_command(self, wave_file_path, job_dir=None):
@@ -97,6 +115,38 @@ class XceliumSimulator(SimulatorInterface):
     def coverage_enabled(self):
         return bool(self.options.coverage)
 
+    def get_tool_identity(self):
+        if self._xcelium_tool_identity is not None:
+            return self._xcelium_tool_identity
+        configured_identity = os.environ.get("RV_XCELIUM_TOOL_ID")
+        if configured_identity:
+            self._xcelium_tool_identity = configured_identity
+            return self._xcelium_tool_identity
+
+        # `xrun -64 -version` is a supported, license-free release query. The
+        # runmod wrapper selects the site installation, so it receives only the
+        # xrun arguments here, matching normal compile/run invocation.
+        command = shlex.split("runmod -t xrun --") + ["-64", "-version"]
+        try:
+            result = subprocess.run(command, capture_output=True, text=True, timeout=30, check=False)
+        except (OSError, subprocess.TimeoutExpired) as exc:
+            raise RuntimeError(
+                "Unable to resolve the Xcelium release with '{}'. Set RV_XCELIUM_TOOL_ID to the site Xcelium "
+                "release ID: {}".format(shlex.join(command), exc)) from exc
+        diagnostic = "\n".join(part.strip() for part in (result.stdout, result.stderr) if part.strip())
+        if result.returncode != 0:
+            raise RuntimeError(
+                "Unable to resolve the Xcelium release with '{}'. Set RV_XCELIUM_TOOL_ID to the site Xcelium "
+                "release ID.\n{}".format(shlex.join(command), diagnostic))
+        identity = _stable_xcelium_release_identity(diagnostic)
+        if identity is None:
+            raise RuntimeError(
+                "Unable to find a stable xrun release in the output from '{}'. Set RV_XCELIUM_TOOL_ID to the "
+                "site Xcelium release ID.\n{}".format(shlex.join(command), diagnostic))
+        self._xcelium_tool_identity = identity
+        log.info("Resolved Xcelium tool identity: %s", identity)
+        return self._xcelium_tool_identity
+
     def get_compile_template_context(self, vcomp_job):
         if not self.options.emulator:
             return {}
@@ -114,7 +164,8 @@ class XceliumSimulator(SimulatorInterface):
         inputs = super().get_compile_fingerprint_inputs(vcomp_job)
         if self.options.coverage and self.options.covfile_was_explicit:
             inputs["extra_input_paths"].append(self.options.covfile)
-        inputs["environment"].update({key: os.environ.get(key, "") for key in ("LM_LICENSE_FILE", "XCELIUMHOME")})
+        inputs["environment"]["XCELIUMHOME"] = os.environ.get("XCELIUMHOME", "")
+        inputs["environment"]["XCELIUM_TOOL_ID"] = self.get_tool_identity()
         return inputs
 
     def get_bazel_compile_args_file(self, bazel_runfiles_main, relpath, bazel_target):
@@ -307,23 +358,24 @@ class XceliumSimulator(SimulatorInterface):
             merged_output = os.path.join(vcomp_job.cov_work_dir, "merged_db")
             with open(merge_exec_tcl, 'w') as filep:
                 filep.write("merge -initial_model union_all -out {} -overwrite {}".format(
-                    merged_output, os.path.join(vcomp_job.cov_work_dir, "scope", "*")))
+                    _tcl_quote(merged_output), _tcl_quote(os.path.join(vcomp_job.cov_work_dir, "scope", "*"))))
             report_output = os.path.join(vcomp_job.cov_work_dir, "imc_report")
             code_report = os.path.join(vcomp_job.cov_work_dir, "coverage_code.txt")
             functional_report = os.path.join(vcomp_job.cov_work_dir, "coverage_functional.txt")
             with open(imc_report_tcl, 'w') as filep:
                 filep.write("".join([
-                    "load {}\n".format(merged_output),
-                    "report -summary -metrics all -all -cumulative on -out {}\n".format(code_report),
-                    "report -summary -metrics covergroup -type -all -out {}\n".format(functional_report),
-                    "report -html -out {} -grading both -overwrite\n".format(report_output),
+                    "load {}\n".format(_tcl_quote(merged_output)),
+                    "report -summary -metrics all -all -cumulative on -out {}\n".format(_tcl_quote(code_report)),
+                    "report -summary -metrics covergroup -type -all -out {}\n".format(_tcl_quote(functional_report)),
+                    "report -html -out {} -grading both -overwrite\n".format(_tcl_quote(report_output)),
                 ]))
             merge_sh = os.path.join(vcomp_job.cov_work_dir, "merge.sh")
             with open(merge_sh, 'w') as filep:
                 filep.write("".join([
                     "#!/usr/bin/env bash\n",
-                    "" if self.options.report else "runmod xrun -- imc -exec {} -verbose\n".format(merge_exec_tcl),
-                    "runmod xrun -- imc -load {}\n".format(merged_output)
+                    "" if self.options.report else
+                    shlex.join(["runmod", "xrun", "--", "imc", "-exec", merge_exec_tcl, "-verbose"]) + "\n",
+                    shlex.join(["runmod", "xrun", "--", "imc", "-load", merged_output]) + "\n",
                 ]))
             st = os.stat(merge_sh)
             os.chmod(merge_sh, st.st_mode | stat.S_IEXEC)
@@ -352,7 +404,7 @@ class XceliumSimulator(SimulatorInterface):
                 xprop_file = 'cat_xprop.txt'
             xprop_file_path = os.path.join(vcomp_job.bench_dir, xprop_file)
             if os.path.exists(xprop_file_path):
-                opts['xprop_cmd'] = '-xfile {} -xverbose'.format(xprop_file_path)
+                opts['xprop_cmd'] = shlex.join(['-xfile', xprop_file_path, '-xverbose'])
             else:
                 log.warning("Xcelium XPROP file not found: %s", xprop_file_path)
 
@@ -410,7 +462,7 @@ class XceliumSimulator(SimulatorInterface):
 
         if self.options.wave_tcl:
             if os.path.exists(self.options.wave_tcl):
-                wave_tcl_path = self.options.wave_tcl
+                wave_tcl_path = os.path.abspath(self.options.wave_tcl)
                 log.info(f"Using user-provided wave Tcl: {wave_tcl_path}")
             else:
                 raise ValueError("{} not exists".format(self.options.wave_tcl))
@@ -588,23 +640,32 @@ class XceliumSimulator(SimulatorInterface):
         """No specific post-simulation commands needed for XRUN directory cleanup."""
         return []
 
+    def validate_reusable_compile_artifacts(self, vcomp_job):
+        job_dir = os.path.abspath(vcomp_job.job_dir)
+        database_roots = (job_dir, os.path.join(job_dir, "xcelium.d"))
+        for database_root in database_roots:
+            if os.path.isdir(database_root) and any(
+                    os.path.isdir(path) for path in glob.glob(os.path.join(database_root, "run.*.d"))):
+                return
+        raise FileNotFoundError(
+            "Xcelium --no-compile requires an existing elaboration database with a run.*.d directory under '{}'".format(
+                job_dir))
+
     def cleanup_shared_runtime_artifacts(self, vcomp_jobs):
         # Only remove simulator scratch files created at the top level of the
         # shared runfiles tree. Never recurse into mirrored source areas such as
         # hw/, external/, odie/, testbench/, tests/, etc., because those
         # directories contain real runfiles and generated filelists needed by
         # the simulation flow.
-        cleanup_patterns = [
-            "xp_elab.log*",
-            "xmsim_*.err",
-            "xmsim_sigbus.*",
+        cleanup_files = [
+            "xp_elab.log",
             "ida_diagnostics.log",
             "lwdgen.log",
             "cdns_dump.log",
-            "environment.*",
+        ]
+        cleanup_directories = [
             "verisium_debug_logs",
             "verisium_debug_logs_backup",
-            "waves.shm",
         ]
 
         cleaned_dirs = set()
@@ -614,18 +675,23 @@ class XceliumSimulator(SimulatorInterface):
                 continue
 
             removed_paths = []
-            for pattern in cleanup_patterns:
-                for path in glob.glob(os.path.join(runfiles_dir, pattern)):
-                    try:
-                        if os.path.isdir(path) and not os.path.islink(path):
-                            shutil.rmtree(path, ignore_errors=False)
-                        else:
-                            os.remove(path)
-                        removed_paths.append(os.path.basename(path))
-                    except FileNotFoundError:
-                        continue
-                    except OSError as exc:
-                        log.warning("Failed to remove XRUN shared runtime artifact %s: %s", path, exc)
+            cleanup_paths = [(os.path.join(runfiles_dir, name), False) for name in cleanup_files]
+            cleanup_paths.extend((os.path.join(runfiles_dir, name), True) for name in cleanup_directories)
+            for path, expect_directory in cleanup_paths:
+                try:
+                    if expect_directory:
+                        if not os.path.isdir(path) or os.path.islink(path):
+                            continue
+                        shutil.rmtree(path, ignore_errors=False)
+                    else:
+                        if not os.path.isfile(path) or os.path.islink(path):
+                            continue
+                        os.remove(path)
+                    removed_paths.append(os.path.basename(path))
+                except FileNotFoundError:
+                    continue
+                except OSError as exc:
+                    log.warning("Failed to remove XRUN shared runtime artifact %s: %s", path, exc)
 
             if removed_paths:
                 log.info(

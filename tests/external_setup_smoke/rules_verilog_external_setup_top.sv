@@ -1,0 +1,2 @@
+module rules_verilog_external_setup_top;
+endmodule

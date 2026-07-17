@@ -1,0 +1,14 @@
+workspace(name = "rules_verilog_external_setup_smoke")
+
+local_repository(
+    name = "rules_verilog",
+    path = "../..",
+)
+
+load("@rules_verilog//:deps.bzl", "verilog_dependencies")
+
+verilog_dependencies()
+
+load("@rules_python//python:repositories.bzl", "py_repositories")
+
+py_repositories()

@@ -91,7 +91,7 @@ def get_bazel_bin(project_dir=None):
         if os.path.isdir(project_bazel_bin):
             return os.path.realpath(project_bazel_bin)
 
-    result = subprocess.run(["bazel", "info", "bazel-bin"], capture_output=True, text=True)
+    result = subprocess.run(["bazel", "info", "bazel-bin"], cwd=project_dir, capture_output=True, text=True)
     if result.returncode != 0:
         raise RuntimeError("bazel info bazel-bin failed:\n{}\n{}".format(result.stdout, result.stderr))
     return result.stdout.strip()
@@ -533,6 +533,9 @@ class VCompJob(Job):
         finally:
             self._release_compile_lock()
 
+    def cancel(self):
+        self._release_compile_lock()
+
     def __repr__(self):
         sim_name = self.simulator.get_name() if hasattr(self, 'simulator') else '???'
         return 'Vcomp("{}@{}" -> {})'.format(self.bazel_vcomp_target, sim_name, self.name) # Add simulator info
@@ -578,6 +581,7 @@ class TestJob(Job):
         # Else expected to be added later when vcomper is set
         self._log_path = None
         self.test_name_seed = None # Initialize attribute used by VCS sim script
+        self._run_directory_lock = None
 
     def clone(self):
         # --- Ensure simulator is passed to cloned job ---
@@ -595,6 +599,33 @@ class TestJob(Job):
                                               sim=self.simulator.get_name())
         except AttributeError:
             return self.rcfg.format_test_name("<???>", self.name, self.iteration, sim='???')
+
+    def _claim_run_directory(self, base_directory_name):
+        collision_index = 0
+        while True:
+            if collision_index == 0:
+                directory_name = base_directory_name
+            else:
+                collision_suffix = "__run_p{}".format(os.getpid())
+                if collision_index > 1:
+                    collision_suffix += "_{}".format(collision_index)
+                directory_name = base_directory_name + collision_suffix
+
+            directory_path = os.path.join(self.rcfg.regression_dir, directory_name)
+            directory_lock = compile_cache.CompileDirectoryLock(directory_path + ".run.lock")
+            if directory_lock.acquire(blocking=False):
+                self._run_directory_lock = directory_lock
+                if collision_index:
+                    self.log.info("Run directory %s is in use; using %s", base_directory_name, directory_name)
+                return directory_name, directory_path
+            collision_index += 1
+
+    def _release_run_directory_lock(self):
+        directory_lock = getattr(self, "_run_directory_lock", None)
+        if directory_lock is None:
+            return
+        directory_lock.release()
+        self._run_directory_lock = None
 
     def pre_run(self):
         log.debug("Preparing test: %s:%s (Simulator: %s)", self.vcomper.name, self.name, self.simulator.get_name())
@@ -621,8 +652,7 @@ class TestJob(Job):
             self.iteration,
             self.rcfg.options.dir_suffix,
         )
-        self.simname = simulation_directory_name
-        self.job_dir = os.path.join(self.rcfg.regression_dir, simulation_directory_name)
+        self.simname, self.job_dir = self._claim_run_directory(simulation_directory_name)
         self._log_path = os.path.join(self.job_dir, self.LOG_NAME)
         self.timeout_start_path = self._log_path
 
@@ -912,17 +942,27 @@ class TestJob(Job):
 
         if self.simulator.should_spawn_test_job(self):
             self.job_lib.manager.add_job(self.clone())
+        self._release_run_directory_lock()
 
     def launch_failed(self, exc):
-        super().launch_failed(exc)
-        self.error_message = str(exc)
-        self.simulation_duration_s = None
-        simmer_results.record_test_job(getattr(self.rcfg, "simmer_results_run", None), self)
+        try:
+            super().launch_failed(exc)
+            self.error_message = str(exc)
+            self.simulation_duration_s = None
+            simmer_results.record_test_job(getattr(self.rcfg, "simmer_results_run", None), self)
+        finally:
+            self._release_run_directory_lock()
 
     def post_run_failed(self, exc):
-        super().post_run_failed(exc)
-        self.simulation_duration_s = None
-        simmer_results.record_test_job(getattr(self.rcfg, "simmer_results_run", None), self)
+        try:
+            super().post_run_failed(exc)
+            self.simulation_duration_s = None
+            simmer_results.record_test_job(getattr(self.rcfg, "simmer_results_run", None), self)
+        finally:
+            self._release_run_directory_lock()
+
+    def cancel(self):
+        self._release_run_directory_lock()
 
     @staticmethod
     def _format_duration(duration_s):
@@ -993,6 +1033,7 @@ def main(rcfg, options):
     resolve_run_simulator(rcfg, options)
 
     # --- Instantiate the selected simulator ---
+    jm = None
     try:
         # Pass the global Jinja environment.
         simulator = get_simulator(options, rcfg, jinja2_env)
@@ -1134,7 +1175,8 @@ def main(rcfg, options):
 
     except KeyboardInterrupt:
         log.info("Saw keyboard interrupt, attempting to shutdown jobs.")
-        jm.kill()
+        if jm is not None:
+            jm.kill()
         log.critical("Exiting due to keyboard interrupt")
 
     workflow_finalize_failed = False
@@ -1208,10 +1250,7 @@ def main(rcfg, options):
                                          or not post_processing_complete
                                          or bool(rcfg.log.warn_count or rcfg.log.error_count)),
             )
-            try:
-                simmer_results.save_run(rcfg.proj_dir, rcfg.simmer_results_run)
-            except OSError as exc:
-                log.error("Failed to write simmer results: %s", exc)
+            persist_simmer_results(rcfg)
 
     if workflow_finalize_failed or coverage_merge_failed:
         log.info("Exiting with status 1 due to backend finalization or coverage merge failure.")
@@ -1222,6 +1261,14 @@ def main(rcfg, options):
     else:
         log.info("All tests passed.")
         sys.exit(0)
+
+
+def persist_simmer_results(rcfg):
+    """Persist local history; inability to do so is a command failure."""
+    try:
+        simmer_results.save_run(rcfg.proj_dir, rcfg.simmer_results_run)
+    except OSError as exc:
+        rcfg.log.critical("Failed to write simmer results: %s", exc)
 
 
 if __name__ == '__main__':
