@@ -1,5 +1,5 @@
 # vim: set ft=bzl :
-load("//verilog:defs.bzl", "verilog_dv_library", "verilog_dv_tb", "verilog_dv_test_cfg", "verilog_rtl_library")
+load("//verilog:defs.bzl", "verilog_dv_library", "verilog_dv_tb", "verilog_dv_test_cfg", "verilog_rtl_library", "verilog_test")
 load(":fixtures.bzl", "concrete_requires_tb_test", "dpi_runfiles_test", "fake_dpi", "gumi_override_test", "runtime_tool_target_config_test", "target_analyzes_test")
 
 fake_dpi(
@@ -11,6 +11,13 @@ verilog_dv_library(
     name = "dpi_library",
     srcs = ["dpi_pkg.sv"],
     dpi = [":fake_dpi"],
+)
+
+verilog_test(
+    name = "dpi_library_consumer",
+    pre_flist_args = ["true"],
+    tags = ["manual"],
+    deps = [":dpi_library"],
 )
 
 verilog_rtl_library(
@@ -76,4 +83,9 @@ target_analyzes_test(
 target_analyzes_test(
     name = "concrete_cfg_test",
     target_under_test = ":concrete_cfg",
+)
+
+target_analyzes_test(
+    name = "dpi_library_consumer_test",
+    target_under_test = ":dpi_library_consumer",
 )

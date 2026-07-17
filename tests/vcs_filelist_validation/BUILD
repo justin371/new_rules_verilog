@@ -102,6 +102,19 @@ verilog_dv_test_cfg(
 )
 
 verilog_dv_test_cfg(
+    name = "dv_cfg_vcs_abstract",
+    abstract = True,
+    tags = ["manual"],
+)
+
+verilog_dv_test_cfg(
+    name = "dv_cfg_vcs_from_abstract",
+    inherits = [":dv_cfg_vcs_abstract"],
+    tags = ["manual"],
+    tb = ":dv_tb_vcs",
+)
+
+verilog_dv_test_cfg(
     name = "dv_cfg_vcs_no_timeout",
     timeout = 0,
     tags = ["manual"],
@@ -128,6 +141,7 @@ py_test(
     srcs = ["validate_vcs_filelist_test.py"],
     data = [
         ":dv_cfg_vcs",
+        ":dv_cfg_vcs_from_abstract",
         ":dv_cfg_vcs_inherited",
         ":dv_cfg_vcs_no_timeout",
         ":dv_makelib",

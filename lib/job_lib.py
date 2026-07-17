@@ -236,8 +236,11 @@ class SubprocessJobRunner(JobRunner):
         super(SubprocessJobRunner, self).__init__(job, manager)
         kwargs = {'shell': True, 'start_new_session': True}
         self._timed_out = False
+        self._orphaned_process_group = False
         self._term_deadline = None
+        self._kill_deadline = None
         self._kill_sent = False
+        self._kill_lock = threading.Lock()
         self._timeout_start = None
         self.log = job.log
 
@@ -281,6 +284,14 @@ class SubprocessJobRunner(JobRunner):
             if stream and not stream.closed:
                 stream.close()
 
+    def _send_sigkill(self, message, now):
+        if self._kill_sent:
+            return
+        self.log.error(message, self.job)
+        self._signal_process_group(signal.SIGKILL)
+        self._kill_sent = True
+        self._kill_deadline = now + datetime.timedelta(seconds=self.KILL_GRACE_SECONDS)
+
     def _get_stdout_capture_path(self):
         """Avoid clobbering simulator-owned stdout.log files.
 
@@ -312,18 +323,34 @@ class SubprocessJobRunner(JobRunner):
 
     def _check_for_done(self):
         if self._p.poll() is not None:
-            if self._timed_out and not self._kill_sent:
-                self._signal_process_group(signal.SIGKILL)
-                self._kill_sent = True
+            now = datetime.datetime.now()
+            if not self._process_group_exists():
+                self._close_output_streams()
+                return True
+            if not self._timed_out and not self._orphaned_process_group:
+                self._orphaned_process_group = True
+                self._term_deadline = now + datetime.timedelta(seconds=self.TERM_GRACE_SECONDS)
+                self.log.error("%s left background processes after its shell exited; sending SIGTERM", self.job)
+                self._signal_process_group(signal.SIGTERM)
+                return False
+            if not self._kill_sent and now >= self._term_deadline:
+                self._send_sigkill("%s left background processes after SIGTERM; sending SIGKILL", now)
+                return False
+            if self._kill_sent and now < self._kill_deadline:
+                return False
+            if self._kill_sent:
+                self.log.error("%s process group still exists after SIGKILL grace period", self.job)
             self._close_output_streams()
             return True
 
         now = datetime.datetime.now()
         if self._timed_out:
             if not self._kill_sent and now >= self._term_deadline:
-                self.log.error("%s did not exit after SIGTERM; sending SIGKILL", self.job)
-                self._signal_process_group(signal.SIGKILL)
-                self._kill_sent = True
+                self._send_sigkill("%s did not exit after SIGTERM; sending SIGKILL", now)
+            elif self._kill_sent and now >= self._kill_deadline:
+                self.log.error("%s process did not exit after SIGKILL grace period", self.job)
+                self._close_output_streams()
+                return True
             return False
 
         timeout_start = self._start_time
@@ -355,41 +382,45 @@ class SubprocessJobRunner(JobRunner):
 
     @property
     def returncode(self):
-        if self._timed_out and self._p.returncode in (None, 0):
+        if (self._timed_out or self._orphaned_process_group) and self._p.returncode in (None, 0):
             return -signal.SIGTERM
         return self._p.returncode
 
     def kill(self):
         """Terminate the complete subprocess group and synchronously reap it."""
-        self._signal_process_group(signal.SIGTERM)
-        term_deadline = time.monotonic() + self.TERM_GRACE_SECONDS
-        try:
-            self._p.wait(timeout=self.TERM_GRACE_SECONDS)
-        except subprocess.TimeoutExpired:
-            pass
+        with self._kill_lock:
+            self._signal_process_group(signal.SIGTERM)
+            term_deadline = time.monotonic() + self.TERM_GRACE_SECONDS
+            try:
+                self._p.wait(timeout=self.TERM_GRACE_SECONDS)
+            except subprocess.TimeoutExpired:
+                pass
 
-        if not self._wait_for_process_group_exit(term_deadline):
-            self.log.warning("%s did not exit after SIGTERM; sending SIGKILL", self.job)
-            self._signal_process_group(signal.SIGKILL)
-            self._kill_sent = True
+            if not self._wait_for_process_group_exit(term_deadline):
+                self.log.warning("%s did not exit after SIGTERM; sending SIGKILL", self.job)
+                self._signal_process_group(signal.SIGKILL)
+                self._kill_sent = True
 
-        try:
-            self._p.wait(timeout=self.KILL_GRACE_SECONDS)
-        except subprocess.TimeoutExpired:
-            # A process outside the new session cannot be reached through the
-            # process-group signal. Reap the shell as a final fallback.
-            self._p.kill()
-            self._p.wait()
-        self._wait_for_process_group_exit(time.monotonic() + self.KILL_GRACE_SECONDS)
-        self._close_output_streams()
-        self.done = True
+            try:
+                self._p.wait(timeout=self.KILL_GRACE_SECONDS)
+            except subprocess.TimeoutExpired:
+                # A process outside the new session cannot be reached through
+                # the process-group signal. Reap the shell as a final fallback.
+                self._p.kill()
+                self._p.wait()
+            group_exited = self._wait_for_process_group_exit(time.monotonic() + self.KILL_GRACE_SECONDS)
+            if not group_exited:
+                self.log.warning("%s process group still exists after SIGKILL", self.job)
+            self._close_output_streams()
+            self.done = True
+            return group_exited
 
 
 class JobManager():
     """Manages multiple concurrent jobs"""
     POLL_SLEEP_SECONDS = 0.25
-    SHUTDOWN_JOIN_SECONDS = 2
     ACTIVE_KILL_JOIN_SECONDS = SubprocessJobRunner.TERM_GRACE_SECONDS + SubprocessJobRunner.KILL_GRACE_SECONDS + 1
+    SHUTDOWN_JOIN_SECONDS = ACTIVE_KILL_JOIN_SECONDS
 
     def __init__(self, options, log):
         self.log = log
@@ -407,6 +438,7 @@ class JobManager():
         self._done_grace_exit = False
         self.exited_prematurely = False
         self._interrupted_jobs = []
+        self._shutdown_incomplete = False
 
         # Jobs must transition from todo->ready->active->done
 
@@ -420,6 +452,10 @@ class JobManager():
 
         # Jobs launched but not yet complete
         self._active = []
+
+        # Jobs whose subprocess exited and whose post-run hook still owns its
+        # compile or simulation directory.
+        self._finalizing = []
 
         # Completed jobs
         self._done = []
@@ -445,7 +481,7 @@ class JobManager():
             self._print_state_locked(log_fn)
 
     def _print_state_locked(self, log_fn):
-        job_queues = ["_todo", "_ready", "_launching", "_active", "_done", "_skipped"]
+        job_queues = ["_todo", "_ready", "_launching", "_active", "_finalizing", "_done", "_skipped"]
         for jq in job_queues:
             log_fn("%s: %s", jq, list(getattr(self, jq)))
 
@@ -476,6 +512,11 @@ class JobManager():
                 with self._condition:
                     if not self._run_jobs_thread_active:
                         return
+                    if completed_job not in self._active:
+                        continue
+                    self._active.remove(completed_job)
+                    self._finalizing.append(completed_job)
+                    self._condition.notify_all()
                 self._complete_job(completed_job)
                 continue
 
@@ -602,10 +643,21 @@ class JobManager():
                 cancel_runner = True
             self._condition.notify_all()
         if cancel_runner:
+            runner_stopped = False
             try:
-                runner.kill()
-            finally:
-                job.cancel()
+                runner_stopped = runner.kill() is not False
+            except Exception as exc:
+                self.log.error("Could not stop runner launched during shutdown for %s: %s", job, exc)
+            if runner_stopped:
+                try:
+                    job.cancel()
+                except Exception as exc:
+                    runner_stopped = False
+                    self.log.error("Could not release launch resources for %s: %s", job, exc)
+            if not runner_stopped:
+                with self._condition:
+                    self._shutdown_incomplete = True
+                    self._condition.notify_all()
 
     def _complete_job(self, job):
         self.log.debug("%s body done", job)
@@ -626,7 +678,7 @@ class JobManager():
                 if self._error_count >= self._quit_count:
                     self._graceful_exit_locked()
                 self._move_children_to_skipped_locked(job)
-            self._active.remove(job)
+            self._finalizing.remove(job)
             self._last_done_or_idle_print = datetime.datetime.now()
             self._done.append(job)
             self._move_todo_to_ready_locked()
@@ -657,7 +709,7 @@ class JobManager():
         """Blocks until no jobs are left."""
         self.log.info("Waiting until all jobs are completed.")
         with self._condition:
-            while self._todo or self._ready or self._launching or self._active:
+            while self._todo or self._ready or self._launching or self._active or self._finalizing:
                 self.log.debug("still waiting")
                 self._condition.wait()
 
@@ -682,7 +734,8 @@ class JobManager():
             queued_jobs = list(self._todo) + list(self._ready)
             launching_jobs = list(self._launching)
             active_jobs = list(self._active)
-            self._interrupted_jobs = launching_jobs + active_jobs
+            finalizing_jobs = list(self._finalizing)
+            self._interrupted_jobs = launching_jobs + active_jobs + finalizing_jobs
             for job in queued_jobs + launching_jobs + active_jobs:
                 job.request_cancel()
             for job in queued_jobs:
@@ -695,13 +748,17 @@ class JobManager():
             self._condition.notify_all()
 
         errors = [None] * len(active_jobs)
+        incomplete_shutdowns = [False] * len(active_jobs)
 
         def terminate(index, job):
+            runner_stopped = False
             try:
-                job.job_lib.kill()
+                runner_stopped = job.job_lib.kill() is not False
+                if not runner_stopped:
+                    incomplete_shutdowns[index] = True
             except Exception as exc: # Keep terminating the remaining process groups.
                 errors[index] = exc
-            finally:
+            if runner_stopped:
                 try:
                     job.cancel()
                 except Exception as exc:
@@ -730,7 +787,8 @@ class JobManager():
         first_error = next((error for error in errors if error is not None), None)
         if first_error is not None:
             raise first_error
-        return not unfinished_kills and scheduler_finished
+        return (not unfinished_kills and not any(incomplete_shutdowns) and scheduler_finished
+                and not self._shutdown_incomplete)
 
 
 class BazelTBJob(Job):

@@ -95,13 +95,13 @@ def _upsert_by_key(items, key, value):
     items.append(value)
 
 
-def record_compile_job(run, vcomp_job):
+def record_compile_job(run, vcomp_job, status=None):
     if run is None:
         return
     compile_record = {
         "bench": vcomp_job.name,
         "vcomp_target": vcomp_job.bazel_vcomp_target,
-        "status": vcomp_job.jobstatus.name,
+        "status": status or vcomp_job.jobstatus.name,
         "compile_dir": vcomp_job.job_dir,
         "cmp_log": vcomp_job.log_path,
         "duration_s": int(getattr(vcomp_job, "duration_s", 0) or 0),
@@ -177,6 +177,8 @@ def finalize_run(run, regression_log_path=None, backend_finalize_failed=False):
     if tests:
         if failed:
             run["status"] = "FAILED"
+        elif interrupted:
+            run["status"] = "INTERRUPTED"
         elif skipped:
             run["status"] = "PARTIAL"
         else:

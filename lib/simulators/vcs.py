@@ -351,6 +351,7 @@ class VcsSimulator(SimulatorInterface):
         # Coverage (Functional/Code)
         if self.options.cm:
             vcomp_job.cov_work_dir = os.path.join(self.rcfg.regression_dir, vcomp_job.name + "__COV_WORK_VCS.vdb")
+            vcomp_job.acquire_shared_runtime_lock(vcomp_job.cov_work_dir)
             cov_args = ["-cm_dir", vcomp_job.cov_work_dir]
             # Translate coverage level options if needed
             cm_level = self.options.cm

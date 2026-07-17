@@ -279,7 +279,7 @@ Compile and run lint on target
 | <a id="verilog_rtl_lint_test-defines"></a>defines |  List of additional \<code>defines for this lint run. LINT is always defined by default If a define is only for control and has no value, e.g. \</code>define USE_AXI, the dictionary entry key should be "USE_AXI" and the value should be the empty string. If a define needs a value, e.g. \<code>define WIDTH 8, the dictionary value must start with '=', e.g. '=8'   | <a href="https://bazel.build/docs/skylark/lib/dict.html">Dictionary: String -> String</a> | optional | {} |
 | <a id="verilog_rtl_lint_test-deps"></a>deps |  Other verilog libraries this target is dependent upon. All Labels specified here must provide a VerilogInfo provider.   | <a href="https://bazel.build/docs/build-ref.html#labels">List of labels</a> | required |  |
 | <a id="verilog_rtl_lint_test-design_info"></a>design_info |  A Cadence design_info file to add additional lint rule/waivers   | <a href="https://bazel.build/docs/build-ref.html#labels">List of labels</a> | optional | [] |
-| <a id="verilog_rtl_lint_test-lint_parser"></a>lint_parser |  Post processor for lint logs allowing for easier waiving of warnings. Parsers for HAL, Ascent, and VCS are included in rules_verilog release at `@rules_verilog//bin:lint_parser_(hal|ascent|vcs)`. When left at the default HAL label and `simulator = "VCS"`, the rule automatically switches to the built-in VCS parser.   | <a href="https://bazel.build/docs/build-ref.html#labels">Label</a> | optional | @rules_verilog//:lint_parser_hal |
+| <a id="verilog_rtl_lint_test-lint_parser"></a>lint_parser |  Post processor for lint logs allowing for easier waiving of warnings. Parsers for HAL, Ascent, and VCS are included in rules_verilog release at `@rules_verilog//bin:lint_parser_(hal|ascent|vcs)`. When left at the default HAL label and `simulator = "VCS"`, the rule automatically switches to the built-in VCS parser.   | <a href="https://bazel.build/docs/build-ref.html#labels">Label</a> | optional | @rules_verilog//bin:lint_parser_hal |
 | <a id="verilog_rtl_lint_test-rulefile"></a>rulefile |  The rules configuration file for this lint run. Each project may write its own tool-specific rulefile. When omitted and `simulator = "VCS"`, rules_verilog uses a built-in Synopsys default lint opts file. When `simulator = "XRUN"`, a project-specific Cadence/HAL rulefile is still required. Example HAL rulefile: https://github.com/freecores/t6507lp/blob/ca7d7ea779082900699310db459a544133fe258a/lint/run/hal.def   | <a href="https://bazel.build/docs/build-ref.html#labels">Label</a> | optional |  |
 | <a id="verilog_rtl_lint_test-run_template"></a>run_template |  The template to generate the script to run the lint test. The command templates are located at @rules_verilog//vendors/&lt;vendor name&gt;/verilog_rtl_lint_test.tcl.template   | <a href="https://bazel.build/docs/build-ref.html#labels">Label</a> | optional | @rules_verilog//vendors/cadence:verilog_rtl_lint_test.sh.template |
 | <a id="verilog_rtl_lint_test-shells"></a>shells |  List of verilog_rtl_shell Labels. For each Label, a gumi define will be placed on the command line to use this shell instead of the original module. This requires that the original module was instantiated using \<code>gumi_&lt;module_name&gt; instead of just &lt;module_name&gt;.   | <a href="https://bazel.build/docs/build-ref.html#labels">List of labels</a> | optional | [] |
@@ -359,7 +359,7 @@ Provides a way to run a test against a set of libs.
 ## verilog_tool_encapsulation
 
 <pre>
-verilog_tool_encapsulation(<a href="#verilog_tool_encapsulation-name">name</a>)
+verilog_tool_encapsulation(<a href="#verilog_tool_encapsulation-name">name</a>, <a href="#verilog_tool_encapsulation-build_setting_default">build_setting_default</a>)
 </pre>
 
 
@@ -370,6 +370,7 @@ verilog_tool_encapsulation(<a href="#verilog_tool_encapsulation-name">name</a>)
 | Name  | Description | Type | Mandatory | Default |
 | :------------- | :------------- | :------------- | :------------- | :------------- |
 | <a id="verilog_tool_encapsulation-name"></a>name |  A unique name for this target.   | <a href="https://bazel.build/docs/build-ref.html#name">Name</a> | required |  |
+| <a id="verilog_tool_encapsulation-build_setting_default"></a>build_setting_default | Initial command value used when the build setting is not overridden. | String | required |  |
 
 
 <a id="verilog_rtl_pkg"></a>

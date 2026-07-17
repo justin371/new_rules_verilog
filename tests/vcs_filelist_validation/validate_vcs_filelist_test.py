@@ -119,6 +119,10 @@ class VcsFilelistValidationTest(unittest.TestCase):
         self.assertEqual("dv_cfg_vcs", inherited_args["uvm_testname"])
         self.assertEqual(17, inherited_args["timeout_minutes"])
 
+        abstract_child_args = ast.literal_eval(
+            read_runfile("tests/vcs_filelist_validation/dv_cfg_vcs_from_abstract_dynamic_args.py", ))
+        self.assertEqual("dv_cfg_vcs_from_abstract", abstract_child_args["uvm_testname"])
+
         no_timeout_args = ast.literal_eval(
             read_runfile("tests/vcs_filelist_validation/dv_cfg_vcs_no_timeout_dynamic_args.py", ))
         self.assertEqual(0, no_timeout_args["timeout_minutes"])

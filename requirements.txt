@@ -1,3 +1,4 @@
+# Locked for the supported CPython 3.12, Linux x86_64 execution environment.
 beautifulsoup4==4.15.0 \
     --hash=sha256:d6f88de62e1d4e38ecb1077eb9724cd0eff29d2a08ca16a401e9b9e93f117cf9
 jinja2==3.1.6 \

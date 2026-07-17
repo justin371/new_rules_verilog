@@ -80,7 +80,7 @@ def _validate_runtime_args(runtime_args, simulator):
                     )
 
 def _verilog_dv_test_cfg_impl(ctx):
-    parent_uvm_testnames = [dep[DVTestInfo].uvm_testname for dep in reversed(ctx.attr.inherits) if hasattr(dep[DVTestInfo], "uvm_testname")]
+    parent_uvm_testnames = [dep[DVTestInfo].uvm_testname for dep in reversed(ctx.attr.inherits) if dep[DVTestInfo].uvm_testname != None]
     parent_tbs = [dep[DVTestInfo].tb for dep in reversed(ctx.attr.inherits) if dep[DVTestInfo].tb != None]
     parent_simulators = [dep[DVTestInfo].simulator for dep in reversed(ctx.attr.inherits) if dep[DVTestInfo].simulator != None]
     parent_timeouts = [dep[DVTestInfo].timeout for dep in reversed(ctx.attr.inherits) if hasattr(dep[DVTestInfo], "timeout")]
@@ -102,7 +102,7 @@ def _verilog_dv_test_cfg_impl(ctx):
         uvm_testname = ctx.attr.uvm_testname
     elif len(parent_uvm_testnames):
         uvm_testname = parent_uvm_testnames[0]
-    else:
+    elif not ctx.attr.abstract:
         uvm_testname = ctx.attr.name
 
     timeout = None
@@ -413,6 +413,7 @@ def _verilog_dv_library_impl(ctx):
             transitive_flists = trans_flists,
             transitive_vcs_flists = trans_vcs_flists,
             transitive_dpi = trans_dpi,
+            last_module = None,
         ),
         DefaultInfo(
             files = all_files,

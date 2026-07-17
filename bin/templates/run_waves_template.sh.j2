@@ -34,9 +34,25 @@ if [[ -z "${WAVE_VIEW_ARGV[0]:-}" ]]; then
 fi
 
 if [ -n "${SIMMER_WAVE_LAUNCHER:-}" ]; then
-    # SIMMER_WAVE_LAUNCHER is a whitespace-delimited argv prefix. Shell syntax
-    # and quoting are not evaluated; each resulting token is prepended literally.
-    read -r -a WAVE_LAUNCHER_ARGV <<< "${SIMMER_WAVE_LAUNCHER}"
+    # Parse shell-style quoting without evaluating operators, substitutions, or
+    # expansions. Each parsed token is prepended literally.
+    if command -v python3.12 >/dev/null 2>&1; then
+        WAVE_LAUNCHER_PYTHON=python3.12
+    elif command -v python3 >/dev/null 2>&1; then
+        WAVE_LAUNCHER_PYTHON=python3
+    else
+        echo "Error: Python 3 is required to parse SIMMER_WAVE_LAUNCHER." >&2
+        exit 1
+    fi
+    mapfile -d '' -t WAVE_LAUNCHER_ARGV < <(
+        "${WAVE_LAUNCHER_PYTHON}" -c \
+            'import os, shlex, sys; sys.stdout.buffer.write(b"".join(os.fsencode(arg) + b"\0" for arg in shlex.split(sys.argv[1])))' \
+            "${SIMMER_WAVE_LAUNCHER}"
+    )
+    if [[ -z "${WAVE_LAUNCHER_ARGV[0]:-}" ]]; then
+        echo "Error: SIMMER_WAVE_LAUNCHER is empty or has invalid quoting." >&2
+        exit 1
+    fi
     printf 'Executing:'
     printf ' %q' "${WAVE_LAUNCHER_ARGV[@]}" "${WAVE_VIEW_ARGV[@]}"
     printf '\n'

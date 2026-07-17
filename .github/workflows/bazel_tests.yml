@@ -2,25 +2,10 @@ name: Run Bazel Tests
 
 on:
   pull_request:
-    paths:
-      - ".bazelrc"
-      - ".bazelversion"
-      - ".github/workflows/**"
-      - "README.md"
-      - "BUILD"
-      - "WORKSPACE"
-      - "docs/**"
-      - "requirements*.txt"
-      - "env.sh"
-      - "**/*.bzl"
-      - "**/BUILD"
-      - "bin/**"
-      - "deps/**"
-      - "lib/**"
-      - "simulators/**"
-      - "tests/**"
-      - "vendors/**"
-      - "verilog/**"
+  push:
+    branches: [main]
+    tags: ["v*"]
+  workflow_dispatch:
 
 permissions:
   contents: read
@@ -40,7 +25,7 @@ jobs:
           python-version: "3.12"
 
       - name: install-python-dependencies
-        run: python -m pip install --require-hashes --only-binary=:all: -r requirements.txt
+        run: 'python -m pip install --require-hashes --only-binary=:all: -r requirements.txt'
 
       - name: install-bazelisk
         uses: vsco/bazelisk-action@170327f90b7b6c4364a97741d6e64f888d76bcb5
@@ -74,7 +59,7 @@ jobs:
         uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
 
       - name: install-python-dependencies
-        run: python3.12 -m pip install --require-hashes --only-binary=:all: -r requirements.txt
+        run: 'python3.12 -m pip install --require-hashes --only-binary=:all: -r requirements.txt'
 
       - name: install-bazelisk
         uses: vsco/bazelisk-action@170327f90b7b6c4364a97741d6e64f888d76bcb5
