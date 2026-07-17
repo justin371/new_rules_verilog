@@ -19,9 +19,11 @@ load(
 )
 load(
     "//verilog/private:verilog.bzl",
+    _verilog_test = "verilog_test",
     _verilog_tool_encapsulation = "verilog_tool_encapsulation",
 )
 
+verilog_test = _verilog_test
 verilog_tool_encapsulation = _verilog_tool_encapsulation
 
 verilog_rtl_cdc_test = _verilog_rtl_cdc_test

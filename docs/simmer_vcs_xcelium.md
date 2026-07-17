@@ -379,7 +379,6 @@ test-config simulation options.
 The following unused or ambiguous interfaces were removed before this workflow
 was merged:
 
-- `verilog_test`; use `verilog_dv_unit_test` or `verilog_rtl_unit_test`.
 - `extra_compile_args_vcs`; use `extra_compile_args` on a VCS testbench.
 - `extra_runtime_args_vcs`; use `extra_runtime_args` on a VCS testbench.
 - the unused CDC `run_template`; use `bash_template`.
