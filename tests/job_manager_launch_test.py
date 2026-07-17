@@ -119,6 +119,24 @@ class JobManagerLaunchTest(unittest.TestCase):
 
         self.assertEqual("bazel build //pkg:tb", job.main_cmdline)
 
+    def test_bazel_tb_job_batches_test_configs_in_initial_build(self):
+        log = _Logger()
+        rcfg = SimpleNamespace(options=SimpleNamespace(timeout=1, no_compile=False, no_bazel=False), log=log)
+        vcomper = SimpleNamespace(job_dir="vcomp_dir", add_dependency=lambda _job: None)
+
+        job = BazelTBJob(rcfg, "//pkg:tb", vcomper, additional_targets=["//pkg/tests:first", "//pkg/tests:second"])
+
+        self.assertEqual("bazel build //pkg:tb //pkg/tests:first //pkg/tests:second", job.main_cmdline)
+
+    def test_no_compile_still_builds_test_configs(self):
+        log = _Logger()
+        rcfg = SimpleNamespace(options=SimpleNamespace(timeout=1, no_compile=True, no_bazel=False), log=log)
+        vcomper = SimpleNamespace(job_dir="vcomp_dir", add_dependency=lambda _job: None)
+
+        job = BazelTBJob(rcfg, "//pkg:tb", vcomper, additional_targets=["//pkg/tests:first", "//pkg/tests:second"])
+
+        self.assertEqual("bazel build //pkg/tests:first //pkg/tests:second", job.main_cmdline)
+
     def test_no_bazel_bypasses_bazel_build_jobs(self):
         log = _Logger()
         rcfg = SimpleNamespace(options=SimpleNamespace(timeout=1, no_compile=False, no_bazel=True), log=log)
@@ -151,6 +169,21 @@ class JobManagerLaunchTest(unittest.TestCase):
             job.dynamic_args("//pkg/tests:second")
         open_file.assert_called_once_with(os.path.join("/repo", "bazel-bin", "pkg/tests", "second_dynamic_args.py"),
                                           'r')
+
+    def test_prebuilt_test_cfg_job_skips_second_bazel_invocation(self):
+        log = _Logger()
+        rcfg = SimpleNamespace(options=SimpleNamespace(timeout=1, no_bazel=False), log=log)
+        vcomper = SimpleNamespace(
+            job_dir="vcomp_dir",
+            _children=[],
+            add_dependency=lambda _job: None,
+            increase_priority=lambda _priority: None,
+        )
+
+        job = BazelTestCfgJob(rcfg, ["//pkg/tests:first", "//pkg/tests:second"], vcomper, prebuilt=True)
+
+        self.assertNotIn("bazel build", job.main_cmdline)
+        self.assertIn("initial Bazel build", job.main_cmdline)
 
     def test_add_job_wakes_idle_scheduler(self):
         log = _Logger()

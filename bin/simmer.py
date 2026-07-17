@@ -85,7 +85,12 @@ def _format_simulation_directory_name(vcomp_name, simulator_name, test_name, see
     return result_name + suffix_component
 
 
-def get_bazel_bin():
+def get_bazel_bin(project_dir=None):
+    if project_dir:
+        project_bazel_bin = os.path.join(project_dir, "bazel-bin")
+        if os.path.isdir(project_bazel_bin):
+            return os.path.realpath(project_bazel_bin)
+
     result = subprocess.run(["bazel", "info", "bazel-bin"], capture_output=True, text=True)
     if result.returncode != 0:
         raise RuntimeError("bazel info bazel-bin failed:\n{}\n{}".format(result.stdout, result.stderr))
@@ -257,7 +262,7 @@ class VCompJob(Job):
         options = self.rcfg.options
         relpath, bazel_target = self.bazel_vcomp_target.split(':')
         relpath = relpath[2:] # Remove leading //
-        bazel_bin = get_bazel_bin()
+        bazel_bin = get_bazel_bin(self.rcfg.proj_dir)
         self.bazel_runfiles_main = os.path.join(bazel_bin, relpath, "{}.runfiles".format(bazel_target), "__main__")
         self.bazel_compile_args = self.simulator.get_bazel_compile_args_file(self.bazel_runfiles_main, relpath,
                                                                              bazel_target)
@@ -1020,12 +1025,12 @@ def main(rcfg, options):
         vcomper = VCompJob(rcfg, vcomp, simulator)
         vcomp_jobs[vcomp] = vcomper
 
-        btbj = job_lib.BazelTBJob(rcfg, vcomp, vcomper)
+        btbj = job_lib.BazelTBJob(rcfg, vcomp, vcomper, additional_targets=test_list.keys())
         btbj_jobs.append(btbj)
 
         tests = []
         icfgs = []
-        btcj = job_lib.BazelTestCfgJob(rcfg, test_list.keys(), vcomper)
+        btcj = job_lib.BazelTestCfgJob(rcfg, test_list.keys(), vcomper, prebuilt=True)
         btcj_jobs.append(btcj)
         for test, iterations in test_list.items():
             icfg = rv_utils.IterationCfg(iterations)

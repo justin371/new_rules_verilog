@@ -57,6 +57,23 @@ class DummyVcompJob:
 
 class VcsRuntimeContractTest(unittest.TestCase):
 
+    def test_get_bazel_bin_prefers_project_symlink(self):
+        with mock.patch("simmer.os.path.isdir", return_value=True), \
+             mock.patch("simmer.os.path.realpath", return_value="/output/bazel-bin") as realpath, \
+             mock.patch("simmer.subprocess.run") as run:
+            self.assertEqual("/output/bazel-bin", simmer.get_bazel_bin("/repo"))
+
+        realpath.assert_called_once_with(os.path.join("/repo", "bazel-bin"))
+        run.assert_not_called()
+
+    def test_get_bazel_bin_falls_back_to_bazel_info(self):
+        completed = SimpleNamespace(returncode=0, stdout="/output/bazel-bin\n", stderr="")
+        with mock.patch("simmer.os.path.isdir", return_value=False), \
+             mock.patch("simmer.subprocess.run", return_value=completed) as run:
+            self.assertEqual("/output/bazel-bin", simmer.get_bazel_bin("/repo"))
+
+        run.assert_called_once_with(["bazel", "info", "bazel-bin"], capture_output=True, text=True)
+
     def test_html_reports_default_to_each_users_regression_directory(self):
         options = parse_args(["--simulator", "VCS"])
         self.assertIsNone(options.report)

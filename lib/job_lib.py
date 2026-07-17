@@ -563,20 +563,25 @@ class JobManager():
 
 
 class BazelTBJob(Job):
-    """Runs bazel to build up a tb compile."""
+    """Build the selected testbench and test configs in one Bazel invocation."""
 
-    def __init__(self, rcfg, target, vcomper):
+    def __init__(self, rcfg, target, vcomper, additional_targets=()):
         self.bazel_target = target
+        self.bazel_targets = []
+        if not rcfg.options.no_compile:
+            self.bazel_targets.append(target)
+        self.bazel_targets.extend(additional_targets)
+        self.bazel_targets = list(dict.fromkeys(self.bazel_targets))
         super(BazelTBJob, self).__init__(rcfg, self)
         self.vcomper = vcomper
         if vcomper:
             self.vcomper.add_dependency(self)
 
         self.job_dir = self.vcomper.job_dir # Don't actually need a dir, but jobrunner/manager want it defined
-        if self.rcfg.options.no_compile or self.rcfg.options.no_bazel:
+        if self.rcfg.options.no_bazel or not self.bazel_targets:
             self.main_cmdline = "echo \"Bypassing {} due to --no-compile/--no-bazel\"".format(target)
         else:
-            self.main_cmdline = "bazel build {}".format(target)
+            self.main_cmdline = "bazel build {}".format(" ".join(self.bazel_targets))
 
     def post_run(self):
         super(BazelTBJob, self).post_run()
@@ -591,9 +596,9 @@ class BazelTBJob(Job):
 
 
 class BazelTestCfgJob(Job):
-    """Build all selected test configs for one vcomp in a single Bazel invocation."""
+    """Make selected test config outputs available after vcomp."""
 
-    def __init__(self, rcfg, targets, vcomper):
+    def __init__(self, rcfg, targets, vcomper, prebuilt=False):
         self.bazel_targets = [targets] if isinstance(targets, str) else list(targets)
         self.bazel_target = self.bazel_targets[0]
         super(BazelTestCfgJob, self).__init__(rcfg, self)
@@ -604,6 +609,8 @@ class BazelTestCfgJob(Job):
         self.job_dir = self.vcomper.job_dir # Don't actually need a dir, but jobrunner/manager want it defined
         if self.rcfg.options.no_bazel:
             self.main_cmdline = "echo \"Bypassing test cfg build due to --no-bazel\""
+        elif prebuilt:
+            self.main_cmdline = "echo \"Using test cfg outputs from initial Bazel build\""
         else:
             self.main_cmdline = "bazel build {}".format(" ".join(self.bazel_targets))
 
