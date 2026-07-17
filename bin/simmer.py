@@ -1009,7 +1009,6 @@ def main(rcfg, options):
     btbj_jobs = []
     trd = []
     webroot_path = resolve_report_root(rcfg, options)
-    report_launcher_path = None
     dynamic_test_plan = simulator.uses_dynamic_test_plan()
     workflow_finalize_failed = False
     coverage_merge_failed = False
@@ -1172,7 +1171,7 @@ def main(rcfg, options):
                 import fcntl
                 fcntl.flock(report_lock, fcntl.LOCK_EX)
                 rrt.render_regression_page()
-                report_launcher_path = rrt.write_run_launcher(os.environ.get("SIMMER_REPORT_URL"))
+                rrt.write_run_launcher(os.environ.get("SIMMER_REPORT_URL"))
             with open(index_lock_path, "w") as report_lock:
                 fcntl.flock(report_lock, fcntl.LOCK_EX)
                 rrt.render_bench_page()
@@ -1195,9 +1194,6 @@ def main(rcfg, options):
 
         for message in getattr(rcfg, "deferred_messages", []):
             log.info(message)
-
-        if report_launcher_path:
-            log.info("Open this regression report: %s", shlex.quote(report_launcher_path))
 
         simulator.cleanup_shared_runtime_artifacts(vcomp_jobs)
         total_failures = sum(failures.values())
