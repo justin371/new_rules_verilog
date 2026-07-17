@@ -270,6 +270,7 @@ class VCompJob(Job):
             "dut_instance": "hdl_top.dut",
             "dut_top": "dut",
             "compile_inputs": "",
+            "compile_inputs_digest": "",
         }
         if os.path.isfile(tb_options_path):
             with open(tb_options_path, "r", encoding="utf-8") as filep:
@@ -347,6 +348,10 @@ class VCompJob(Job):
             os.path.join(self.bazel_runfiles_main, self.tb_options["compile_inputs"])
             if self.tb_options["compile_inputs"] else None,
             self.bazel_runfiles_main,
+            compile_inputs_digest_path=os.path.join(
+                self.bazel_runfiles_main,
+                self.tb_options["compile_inputs_digest"],
+            ) if self.tb_options["compile_inputs_digest"] else None,
             **fingerprint_inputs,
         )
         self.simulator.validate_compile_cache_context(self)

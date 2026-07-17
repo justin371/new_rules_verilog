@@ -3,6 +3,7 @@
 import hashlib
 import json
 import os
+import re
 import tempfile
 
 FINGERPRINT_FILE = ".compile_fingerprint.json"
@@ -99,6 +100,17 @@ def _compile_inputs_manifest_digest(compile_inputs_path):
     return digest.hexdigest()
 
 
+def _read_compile_inputs_digest(path):
+    try:
+        with open(path, "r", encoding="ascii") as filep:
+            digest = filep.read().strip()
+    except OSError as exc:
+        raise RuntimeError("Cannot read Bazel compile input digest '{}': {}".format(path, exc)) from exc
+    if re.fullmatch(r"[0-9a-f]{64}", digest) is None:
+        raise RuntimeError("Malformed Bazel compile input digest '{}': {!r}".format(path, digest))
+    return digest
+
+
 def _extra_inputs_digest(paths):
     digest = hashlib.sha256()
     for path in sorted(os.path.abspath(os.fspath(path)) for path in paths if path):
@@ -129,6 +141,7 @@ def compile_fingerprint(project_dir,
                         compile_args_path,
                         compile_inputs_path=None,
                         runfiles_root=None,
+                        compile_inputs_digest_path=None,
                         extra_input_paths=(),
                         environment=None):
     """Return the source, generated filelist and compile-mode identity."""
@@ -139,7 +152,9 @@ def compile_fingerprint(project_dir,
         "environment": dict(sorted((environment or {}).items())),
     }
     if compile_inputs_path:
-        fingerprint["compile_inputs_sha256"] = _compile_inputs_digest(compile_inputs_path, runfiles_root)
+        fingerprint["compile_inputs_sha256"] = (_read_compile_inputs_digest(compile_inputs_digest_path)
+                                                if compile_inputs_digest_path else _compile_inputs_digest(
+                                                    compile_inputs_path, runfiles_root))
         fingerprint["compile_inputs_manifest_sha256"] = _compile_inputs_manifest_digest(compile_inputs_path)
     if extra_input_paths:
         fingerprint["extra_inputs_sha256"] = _extra_inputs_digest(extra_input_paths)

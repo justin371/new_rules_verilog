@@ -98,17 +98,9 @@ def merge_default_runfiles(ctx, files, targets, transitive_files = None):
         transitive_files = transitive_files,
     ).merge_all([target[DefaultInfo].default_runfiles for target in targets])
 
-def verilog_input_inventory(deps, extra_files, flist_field = "transitive_flists", fallback_field = None):
-    """Return a stable inventory of Verilog compile inputs.
-
-    Args:
-      deps: Targets that provide Verilog inputs.
-      extra_files: Additional compile input files.
-
-    Returns:
-      A newline-delimited compile input inventory.
-    """
-    entries = []
+def verilog_input_inventory_records(deps, extra_files, flist_field = "transitive_flists", fallback_field = None):
+    """Return stable inventory entries paired with their source files."""
+    records = {}
     sources = get_transitive_srcs([], deps, VerilogInfo, "transitive_sources", allow_other_outputs = True)
     flists = get_transitive_srcs(
         [],
@@ -119,12 +111,25 @@ def verilog_input_inventory(deps, extra_files, flist_field = "transitive_flists"
         fallback_attr_name = fallback_field,
     )
     for source in sources.to_list():
-        entries.append("source\t{}".format(runfiles_relative_short_path(source)))
+        records["source\t{}".format(runfiles_relative_short_path(source))] = source
     for flist in flists.to_list():
-        entries.append("filelist\t{}".format(runfiles_relative_short_path(flist)))
+        records["filelist\t{}".format(runfiles_relative_short_path(flist))] = flist
     for extra_file in extra_files:
-        entries.append("runfile\t{}".format(runfiles_relative_short_path(extra_file)))
-    return "\n".join(sorted(depset(entries).to_list())) + "\n"
+        records["runfile\t{}".format(runfiles_relative_short_path(extra_file))] = extra_file
+    return [(entry, records[entry]) for entry in sorted(records)]
+
+def verilog_input_inventory(deps, extra_files, flist_field = "transitive_flists", fallback_field = None):
+    """Return a stable inventory of Verilog compile inputs.
+
+    Args:
+      deps: Targets that provide Verilog inputs.
+      extra_files: Additional compile input files.
+
+    Returns:
+      A newline-delimited compile input inventory.
+    """
+    records = verilog_input_inventory_records(deps, extra_files, flist_field, fallback_field)
+    return "\n".join([entry for entry, _ in records]) + "\n"
 
 def flists_to_arguments(deps, provider, field, prefix, separator = "", tool_name = None, path_prefix = "", fallback_field = None):
     # Emit Bazel short_path entries so generated filelists stay rooted at the
