@@ -34,6 +34,19 @@ class SimmerResultsTest(unittest.TestCase):
     def test_run_ids_are_unique(self):
         self.assertNotEqual(self._completed_run()["run_id"], self._completed_run()["run_id"])
 
+    def test_current_store_schema_records_interrupted_results(self):
+        self.assertEqual(3, simmer_results.SCHEMA_VERSION)
+        self.assertEqual(3, simmer_results.load_store(self.project_dir)["schema_version"])
+
+        run = simmer_results.create_run(["simmer", "-t", "tb:test"], self.rcfg, 1)
+        run["tests"] = [{"status": "INTERRUPTED"}]
+        simmer_results.finalize_run(run)
+        simmer_results.save_run(self.project_dir, run)
+
+        store = simmer_results.load_store(self.project_dir)
+        self.assertEqual(3, store["schema_version"])
+        self.assertEqual(1, store["last_run"]["summary"]["interrupted"])
+
     def test_concurrent_saves_preserve_both_runs(self):
         runs = [self._completed_run(), self._completed_run()]
         errors = []

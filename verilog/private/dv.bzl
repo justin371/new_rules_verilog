@@ -81,8 +81,8 @@ def _validate_runtime_args(runtime_args, simulator):
 
 def _verilog_dv_test_cfg_impl(ctx):
     parent_uvm_testnames = [dep[DVTestInfo].uvm_testname for dep in reversed(ctx.attr.inherits) if hasattr(dep[DVTestInfo], "uvm_testname")]
-    parent_tbs = [dep[DVTestInfo].tb for dep in reversed(ctx.attr.inherits) if hasattr(dep[DVTestInfo], "tb")]
-    parent_simulators = [dep[DVTestInfo].simulator for dep in reversed(ctx.attr.inherits) if hasattr(dep[DVTestInfo], "simulator")]
+    parent_tbs = [dep[DVTestInfo].tb for dep in reversed(ctx.attr.inherits) if dep[DVTestInfo].tb != None]
+    parent_simulators = [dep[DVTestInfo].simulator for dep in reversed(ctx.attr.inherits) if dep[DVTestInfo].simulator != None]
     parent_timeouts = [dep[DVTestInfo].timeout for dep in reversed(ctx.attr.inherits) if hasattr(dep[DVTestInfo], "timeout")]
     parent_pre_run = [dep[DVTestInfo].pre_run for dep in reversed(ctx.attr.inherits) if hasattr(dep[DVTestInfo], "pre_run")]
 
@@ -116,7 +116,7 @@ def _verilog_dv_test_cfg_impl(ctx):
         tb = ctx.attr.tb
     elif len(parent_tbs):
         tb = parent_tbs[0]
-    else:
+    elif not ctx.attr.abstract:
         fail("verilog_dv_test_cfg {} requires tb directly or through inherits".format(ctx.label))
 
     tb_simulator = None
@@ -134,10 +134,10 @@ def _verilog_dv_test_cfg_impl(ctx):
         simulator = parent_simulators[0]
     elif tb_simulator:
         simulator = tb_simulator
-    else:
+    elif not ctx.attr.abstract:
         simulator = "XRUN"
 
-    if simulator not in ["XRUN", "VCS"]:
+    if simulator != None and simulator not in ["XRUN", "VCS"]:
         fail("simulator must be one of ['XRUN', 'VCS'], got '{}'".format(simulator))
     if tb_simulator and simulator != tb_simulator:
         fail(
@@ -204,7 +204,7 @@ _verilog_dv_test_cfg_rule = rule(
         "abstract": attr.bool(
             default = False,
             doc = "When True, this configuration is abstract and does not represent a complete configuration.\n" +
-                  "It is not intended to be executed. It is only intended to be used as a base for other test configurations to inherit from.\n" +
+                  "It may omit tb and is only intended to be used as a base for other test configurations to inherit from.\n" +
                   "See 'inherits' attribute.\n",
         ),
         "inherits": attr.label_list(
@@ -222,12 +222,14 @@ _verilog_dv_test_cfg_rule = rule(
             providers = [DVTBInfo],
             doc = "The testbench to run this test on. This label must be a 'verilog_dv_tb' target." +
                   "This attribute is inheritable. See 'inherits' attribute.\n" +
+                  "Concrete configurations must resolve a testbench directly or through inheritance.\n" +
                   "Future: Allow tb to be a list of labels to allow a test to run on multiple verilog_dv_tb",
         ),
         "simulator": attr.string(
             default = "",
             doc = "Simulator to use for this test configuration. Supported values are XRUN and VCS.\n" +
                   "This attribute is inheritable. If unspecified across the inheritance chain, XRUN is used unless the associated tb already fixes the simulator.\n" +
+                  "An abstract configuration without a testbench may leave the simulator unresolved.\n" +
                   "The resolved simulator must match the associated verilog_dv_tb.\n",
         ),
         "sim_opts": attr.string_dict(
@@ -414,7 +416,12 @@ def _verilog_dv_library_impl(ctx):
         ),
         DefaultInfo(
             files = all_files,
-            runfiles = ctx.runfiles(transitive_files = all_files),
+            runfiles = merge_default_runfiles(
+                ctx,
+                files = [],
+                targets = ctx.attr.deps + ctx.attr.dpi,
+                transitive_files = all_files,
+            ),
         ),
     ]
 
@@ -459,10 +466,10 @@ verilog_dv_library = rule(
                   "If this attribute is empty (default), all srcs will put into the flist instead.",
         ),
         "dpi": attr.label_list(
-            doc = "cc_libraries to link in through the DPI. Currently, cc_import is not supported for precompiled shared libraries.\n" +
+            doc = "Shared libraries to load through the DPI. Build source-based DPI libraries with cc_binary(linkshared = True). Currently, cc_import is not supported for precompiled shared libraries.\n" +
                   "Prefer placing shared libraries here rather than globbing .so files into srcs.\n" +
                   "Example:\n" +
-                  "  cc_library(name = \"dpi\", srcs = glob([\"*.c\"]))\n" +
+                  "  cc_binary(name = \"dpi\", srcs = glob([\"*.c\"]), linkshared = True)\n" +
                   "  verilog_dv_library(name = \"pkg\", srcs = glob([\"*.sv\"]), dpi = [\":dpi\"])",
         ),
         "incdir": attr.bool(
@@ -873,6 +880,9 @@ verilog_dv_unit_test = rule(
 )
 
 def _verilog_dv_test_cfg_info_aspect_impl(target, ctx):
+    if target[DVTestInfo].tb == None:
+        return []
+
     # buildifier: disable=print
     print("verilog_dv_test_cfg_info({}, {}, {}, {})".format(
         target.label,

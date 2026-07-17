@@ -12,4 +12,5 @@ py_test(
     srcs = ["rules_verilog_external_setup_smoke_test.py"],
     data = [":rules_verilog_setup_library"],
     main = "rules_verilog_external_setup_smoke_test.py",
+    tags = ["manual"],
 )

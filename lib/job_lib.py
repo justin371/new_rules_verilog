@@ -59,7 +59,7 @@ class JobStatus(enum.Enum):
                 # placeholder command. Downstream logic
                 # may mark this as passed, but keep
                 # bypassed for final formatting.
-            if new_state != self.FAILED:
+            if new_state not in (self.FAILED, self.SKIPPED):
                 self._error(new_state)
         elif self == self.PASSED:
             if new_state != self.FAILED:
@@ -75,6 +75,10 @@ class JobStatus(enum.Enum):
         else:
             raise ValueError("Unknown current state")
         return new_state
+
+
+class JobCancelledError(RuntimeError):
+    """Raised when scheduler shutdown cancels a job before launch completes."""
 
 
 class Job():
@@ -94,6 +98,7 @@ class Job():
         self.job_stop_time = None
 
         self._jobstatus = JobStatus.NOT_STARTED
+        self._cancel_event = threading.Event()
 
         self.suppress_output = False
         # FIXME need to implement a way to actually override this
@@ -175,6 +180,22 @@ class Job():
     def cancel(self):
         """Release job-owned resources after an explicit scheduler shutdown."""
 
+    def request_cancel(self):
+        """Request cooperative cancellation of launch-time work."""
+        self._cancel_event.set()
+
+    def wait_for_cancel(self, timeout):
+        """Wait up to timeout seconds for cooperative cancellation."""
+        return self._cancel_event.wait(timeout)
+
+    @property
+    def cancel_requested(self):
+        return self._cancel_event.is_set()
+
+    def raise_if_cancelled(self):
+        if self.cancel_requested:
+            raise JobCancelledError("Scheduler shutdown cancelled {}".format(self))
+
     @property
     def duration_s(self):
         try:
@@ -213,7 +234,7 @@ class SubprocessJobRunner(JobRunner):
 
     def __init__(self, job, manager):
         super(SubprocessJobRunner, self).__init__(job, manager)
-        kwargs = {'shell': True, 'preexec_fn': os.setsid}
+        kwargs = {'shell': True, 'start_new_session': True}
         self._timed_out = False
         self._term_deadline = None
         self._kill_sent = False
@@ -367,6 +388,8 @@ class SubprocessJobRunner(JobRunner):
 class JobManager():
     """Manages multiple concurrent jobs"""
     POLL_SLEEP_SECONDS = 0.25
+    SHUTDOWN_JOIN_SECONDS = 2
+    ACTIVE_KILL_JOIN_SECONDS = SubprocessJobRunner.TERM_GRACE_SECONDS + SubprocessJobRunner.KILL_GRACE_SECONDS + 1
 
     def __init__(self, options, log):
         self.log = log
@@ -383,6 +406,7 @@ class JobManager():
         self._error_count = 0
         self._done_grace_exit = False
         self.exited_prematurely = False
+        self._interrupted_jobs = []
 
         # Jobs must transition from todo->ready->active->done
 
@@ -407,7 +431,7 @@ class JobManager():
         self._condition = threading.Condition(threading.RLock())
         self._launching = []
 
-        self._run_jobs_thread = threading.Thread(name="_run_jobs", target=self._run_jobs)
+        self._run_jobs_thread = threading.Thread(name="_run_jobs", target=self._run_jobs, daemon=True)
         self._run_jobs_thread.daemon = True
         self._run_jobs_thread_active = True
         self._run_jobs_thread.start()
@@ -530,9 +554,26 @@ class JobManager():
 
     def _launch_job(self, job):
         try:
+            job.raise_if_cancelled()
             job.pre_run()
+            job.raise_if_cancelled()
             self.log.debug("%s priority: %d", job, job.priority)
             runner = self.job_lib_type(job, self)
+        except JobCancelledError as exc:
+            self.log.info("%s", exc)
+            job.job_stop_time = datetime.datetime.now()
+            try:
+                if not job.jobstatus.completed:
+                    job.jobstatus = JobStatus.SKIPPED
+                job.cancel()
+            except (Exception, SystemExit) as cancel_exc:
+                self.log.error("Could not cancel launch resources for %s: %s", job, cancel_exc)
+            with self._condition:
+                if job in self._launching:
+                    self._launching.remove(job)
+                self._skipped.append(job)
+                self._condition.notify_all()
+            return
         except (Exception, SystemExit) as exc:
             self.log.error("%s launch_failed(): %s", job, exc)
             job.job_stop_time = datetime.datetime.now()
@@ -628,34 +669,68 @@ class JobManager():
         if threading.current_thread() is not self._run_jobs_thread:
             self._run_jobs_thread.join()
 
+    @property
+    def interrupted_jobs(self):
+        """Jobs that were launching or active when kill was requested."""
+        with self._condition:
+            return tuple(self._interrupted_jobs)
+
     def kill(self):
         with self._condition:
             self.exited_prematurely = True
             self._run_jobs_thread_active = False
+            queued_jobs = list(self._todo) + list(self._ready)
+            launching_jobs = list(self._launching)
+            active_jobs = list(self._active)
+            self._interrupted_jobs = launching_jobs + active_jobs
+            for job in queued_jobs + launching_jobs + active_jobs:
+                job.request_cancel()
+            for job in queued_jobs:
+                if not job.jobstatus.completed:
+                    job.jobstatus = JobStatus.SKIPPED
             self._skipped.extend(self._todo)
             self._todo = []
             self._skipped.extend(self._ready)
             self._ready = []
-            active_jobs = list(self._active)
             self._condition.notify_all()
 
-        first_error = None
-        for job in active_jobs:
+        errors = [None] * len(active_jobs)
+
+        def terminate(index, job):
             try:
                 job.job_lib.kill()
             except Exception as exc: # Keep terminating the remaining process groups.
-                if first_error is None:
-                    first_error = exc
+                errors[index] = exc
             finally:
                 try:
                     job.cancel()
                 except Exception as exc:
-                    if first_error is None:
-                        first_error = exc
+                    if errors[index] is None:
+                        errors[index] = exc
+
+        kill_threads = [
+            threading.Thread(name="kill_{}".format(index), target=terminate, args=(index, job), daemon=True)
+            for index, job in enumerate(active_jobs)
+        ]
+        for thread in kill_threads:
+            thread.start()
+        kill_deadline = time.monotonic() + self.ACTIVE_KILL_JOIN_SECONDS
+        for thread in kill_threads:
+            thread.join(timeout=max(0, kill_deadline - time.monotonic()))
+        unfinished_kills = [thread.name for thread in kill_threads if thread.is_alive()]
+        if unfinished_kills:
+            self.log.warning("Timed out waiting for active job shutdown: %s", ", ".join(unfinished_kills))
+
+        scheduler_finished = True
         if threading.current_thread() is not self._run_jobs_thread:
-            self._run_jobs_thread.join()
+            self._run_jobs_thread.join(timeout=self.SHUTDOWN_JOIN_SECONDS)
+            if self._run_jobs_thread.is_alive():
+                scheduler_finished = False
+                self.log.warning("Timed out waiting for scheduler launch hook to stop")
+        first_error = next((error for error in errors if error is not None), None)
         if first_error is not None:
             raise first_error
+        return not unfinished_kills and scheduler_finished
 
 
 class BazelTBJob(Job):

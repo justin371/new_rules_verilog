@@ -150,7 +150,7 @@ class VcsRuntimeContractTest(unittest.TestCase):
 
         command = simulator.get_wave_view_command("/tmp/waves.fsdb")
 
-        self.assertEqual(["runmod", "vcs", "--", "verdi", "-ssf", "/tmp/waves.fsdb"], shlex.split(command))
+        self.assertEqual(["runmod", "vcs", "--", "verdi", "-ssf", "/tmp/waves.fsdb"], command.splitlines())
         self.assertNotIn("-apex", command)
         self.assertNotIn("-lca", command)
 
@@ -158,9 +158,25 @@ class VcsRuntimeContractTest(unittest.TestCase):
             Path(job_dir, "stdout.log").touch()
             command = simulator.get_wave_view_command("/tmp/waves.fsdb", job_dir)
 
-        self.assertIn("-smlog", shlex.split(command))
+        self.assertIn("-smlog", command.splitlines())
         self.assertNotIn("-apex", command)
         self.assertNotIn("-lca", command)
+
+    def test_wave_viewer_commands_preserve_argv_boundaries(self):
+        wave_path = "/tmp/waves with spaces;$(not-executed).fsdb"
+        vcs = VcsSimulator(parse_args(["--simulator", "VCS", "--waves"]), DummyRegressionConfig(), None)
+        xcelium = XceliumSimulator(parse_args(["--simulator", "XRUN", "--waves"]), DummyRegressionConfig(), None)
+
+        self.assertEqual(
+            ["runmod", "vcs", "--", "verdi", "-ssf", wave_path],
+            vcs.get_wave_view_command(wave_path).splitlines(),
+        )
+        self.assertEqual(
+            ["runmod", "xrun", "--", "verisium", "-64bit", "-db", wave_path],
+            xcelium.get_wave_view_command(wave_path).splitlines(),
+        )
+        with self.assertRaisesRegex(ValueError, "cannot contain newlines"):
+            vcs.get_wave_view_command("/tmp/invalid\nwave.fsdb")
 
     def test_simulation_duration_is_read_from_stdout_log(self):
         with tempfile.NamedTemporaryFile(mode="w", encoding="utf-8", delete=False) as log_file:
@@ -277,6 +293,20 @@ class VcsRuntimeContractTest(unittest.TestCase):
 
         self.assertIn(str(xprop_config), simulator.generate_compile_options(vcomp)["xprop_cmd"])
         self.assertIn(str(xprop_config), simulator.get_compile_fingerprint_inputs(vcomp)["extra_input_paths"])
+
+    def test_vcs_xprop_config_path_is_one_shell_argument(self):
+        options = parse_args(["--simulator", "VCS", "--vcs-xprop", "F", "--vcs-xprop-flowctrl"])
+        simulator = VcsSimulator(options, DummyRegressionConfig(), None)
+        vcomp = DummyVcompJob()
+        bench_dir = Path(vcomp.bench_dir, "xprop config;$(not-executed)")
+        bench_dir.mkdir()
+        vcomp.bench_dir = str(bench_dir)
+        xprop_config = bench_dir / "vcs_fox_xprop.cfg"
+        xprop_config.write_text("merge = xmerge\n", encoding="utf-8")
+
+        xprop_cmd = simulator.generate_compile_options(vcomp)["xprop_cmd"]
+
+        self.assertEqual(["-xprop={}".format(xprop_config), "-xprop=flowctrl"], shlex.split(xprop_cmd))
 
     def test_explicit_xprop_disable_still_maps_to_none(self):
         vcs_options = parse_args(["-t", "unit:test", "--simulator", "VCS", "--vcs-xprop", "D"])
@@ -871,9 +901,26 @@ class VcsRuntimeContractTest(unittest.TestCase):
             with mock.patch("lib.simulators.xcelium.subprocess.run",
                             return_value=SimpleNamespace(returncode=0, stdout=stdout, stderr=stderr)) as run:
                 identities.append(probe.get_tool_identity())
-            self.assertEqual(["-64", "-version"], run.call_args.args[0][-2:])
+            self.assertEqual(["runmod", "-t", "xrun", "--", "-64", "-version"], run.call_args.args[0])
 
         self.assertEqual(["xrun release = 25.03-s001", "xrun release = 25.03-s001"], identities)
+
+    def test_xcelium_emulator_tool_identity_uses_direct_xrun_launcher(self):
+        result = SimpleNamespace(
+            returncode=0,
+            stdout="xrun(64): 25.03-s001\n",
+            stderr="",
+        )
+        for mode in ("pldm_sa", "pldm_sim", "sim"):
+            simulator = XceliumSimulator(
+                parse_args(["--simulator", "XRUN", "--emulator", mode]),
+                DummyRegressionConfig(),
+                None,
+            )
+            with self.subTest(mode=mode), mock.patch("lib.simulators.xcelium.subprocess.run",
+                                                     return_value=result) as run:
+                self.assertEqual("xrun release = 25.03-s001", simulator.get_tool_identity())
+                self.assertEqual(["xrun", "-64", "-version"], run.call_args.args[0])
 
     def test_vcs_partcomp_default_preserves_single_slot_lsf_job(self):
         lsf_environment = {
@@ -1404,6 +1451,50 @@ class VcsRuntimeContractTest(unittest.TestCase):
         wave_index = arguments.index("-input {}".format(wave_tcl.name))
         self.assertEqual(["-r", "-input {}".format(wave_tcl.name), "-r", "-access r"],
                          arguments[wave_index - 1:wave_index + 3])
+        self.assertEqual("user argument with spaces", arguments[-1])
+        self.assertEqual(["waves.shm"], viewer_args.read_text(encoding="utf-8").splitlines())
+
+    def test_rtl_unit_test_waves_and_launch_preserve_execution_argv(self):
+        root = Path(tempfile.mkdtemp(prefix="rtl unit argv contract "))
+        self.addCleanup(shutil.rmtree, root, ignore_errors=True)
+        simulator_stub = root / "simulator stub.sh"
+        viewer_stub = root / "wave viewer stub.sh"
+        simulator_args = root / "simulator args.txt"
+        viewer_args = root / "viewer args.txt"
+        wave_tcl = root / "wave commands with spaces.tcl"
+        wave_tcl.touch()
+        simulator_stub.write_text(
+            "#!/usr/bin/env bash\nprintf '%s\\n' \"$@\" > {}\n".format(shlex.quote(simulator_args.name)),
+            encoding="utf-8",
+            newline="\n",
+        )
+        viewer_stub.write_text(
+            "#!/usr/bin/env bash\nprintf '%s\\n' \"$@\" > {}\n".format(shlex.quote(viewer_args.name)),
+            encoding="utf-8",
+            newline="\n",
+        )
+        simulator_stub.chmod(0o755)
+        viewer_stub.chmod(0o755)
+
+        template = self._read_repo_file("vendors/cadence/verilog_rtl_unit_test.sh.template").replace("\r\n", "\n")
+        script_text = template.replace("{SIMULATOR_COMMAND}", shlex.quote("./" + simulator_stub.name))
+        script_text = script_text.replace("{WAVES_RENDER_CMD_PATH}", wave_tcl.name)
+        script_text = script_text.replace("{WAVE_VIEWER_COMMAND}", shlex.quote("./" + viewer_stub.name))
+        script_text = script_text.replace("{PRE_FLIST_ARGS}", "    \\")
+        for placeholder in ("{FLISTS}", "{TOP}", "{POST_FLIST_ARGS}"):
+            script_text = script_text.replace(placeholder, "")
+        script = root / "run rtl unit.sh"
+        script.write_text(script_text, encoding="utf-8", newline="\n")
+
+        subprocess.run(
+            ["bash", script.name, "--waves", "--launch", "user argument with spaces"],
+            cwd=root,
+            check=True,
+        )
+
+        arguments = simulator_args.read_text(encoding="utf-8").splitlines()
+        wave_index = arguments.index(str(wave_tcl.name))
+        self.assertEqual(["-input", wave_tcl.name, "-access", "r"], arguments[wave_index - 1:wave_index + 3])
         self.assertEqual("user argument with spaces", arguments[-1])
         self.assertEqual(["waves.shm"], viewer_args.read_text(encoding="utf-8").splitlines())
 
@@ -2086,7 +2177,80 @@ class VcsRuntimeContractTest(unittest.TestCase):
         self.assertIn('"$log_check_python" "$log_check_script"', sim_template)
         self.assertNotIn("bazel-bin/external/rules_verilog", sim_template)
         self.assertIn("SIMMER_WAVE_LAUNCHER", waves_template)
+        self.assertIn("whitespace-delimited argv prefix", waves_template)
+        self.assertIn("mapfile -t WAVE_VIEW_ARGV", waves_template)
+        self.assertIn("{{ job_dir|shell_quote }}", waves_template)
+        self.assertNotIn("eval ", waves_template)
         self.assertNotIn("/global/tools/lsf", waves_template)
+
+    @unittest.skipIf(os.name == "nt", "requires a POSIX executable-path contract")
+    def test_wave_launcher_prefix_and_viewer_command_are_executed_as_literal_argv(self):
+        with tempfile.TemporaryDirectory() as root_dir:
+            root = Path(root_dir)
+            job_dir = root / "job dir;$(not-executed)"
+            runfiles_dir = job_dir / "bazel runfiles;literal"
+            runfiles_dir.mkdir(parents=True)
+            wave_path = job_dir / "waves ;$(not-executed).fsdb"
+            prefix_capture = root / "prefix-argv.txt"
+            viewer_capture = root / "viewer-argv.txt"
+            injection_sentinel = root / "injection-ran"
+
+            launcher = root / "launcher.sh"
+            launcher.write_text(
+                "#!/usr/bin/env bash\n"
+                ": > \"${WAVE_PREFIX_CAPTURE:?}\"\n"
+                "while [[ $# -gt 0 && \"$1\" != --launcher-end ]]; do\n"
+                "  printf '%s\\n' \"$1\" >> \"${WAVE_PREFIX_CAPTURE}\"\n"
+                "  shift\n"
+                "done\n"
+                "[[ $# -gt 0 ]]\n"
+                "shift\n"
+                "exec \"$@\"\n",
+                encoding="utf-8",
+                newline="\n",
+            )
+            viewer = root / "viewer.sh"
+            viewer.write_text(
+                "#!/usr/bin/env bash\n"
+                "printf '%s\\n' \"$@\" > \"${WAVE_VIEW_CAPTURE:?}\"\n",
+                encoding="utf-8",
+                newline="\n",
+            )
+            injector = root / "injector.sh"
+            injector.write_text(
+                "#!/usr/bin/env bash\n"
+                "touch \"${WAVE_INJECTION_SENTINEL:?}\"\n",
+                encoding="utf-8",
+                newline="\n",
+            )
+            for executable in (launcher, viewer, injector):
+                executable.chmod(0o755)
+
+            viewer_argv = [str(viewer), "--wave", str(wave_path), ";", "$(still-literal)"]
+            jinja_environment = jinja2.Environment(undefined=jinja2.StrictUndefined)
+            jinja_environment.filters["shell_quote"] = shlex.quote
+            template = jinja_environment.from_string(self._read_repo_file("bin/templates/run_waves_template.sh.j2"))
+            rendered = template.render(
+                job_dir=str(job_dir),
+                wave_file_path=str(wave_path),
+                bazel_runfiles_dir=str(runfiles_dir),
+                wave_view_command=shlex.quote("\n".join(viewer_argv)),
+            )
+            script = root / "run_waves.sh"
+            script.write_text(rendered, encoding="utf-8", newline="\n")
+
+            env = os.environ.copy()
+            env.update({
+                "SIMMER_WAVE_LAUNCHER": "bash {} ; $({}) --launcher-end".format(launcher, injector),
+                "WAVE_PREFIX_CAPTURE": str(prefix_capture),
+                "WAVE_VIEW_CAPTURE": str(viewer_capture),
+                "WAVE_INJECTION_SENTINEL": str(injection_sentinel),
+            })
+            subprocess.run(["bash", str(script)], check=True, env=env, capture_output=True, text=True)
+
+            self.assertEqual([";", "$({})".format(injector)], prefix_capture.read_text(encoding="utf-8").splitlines())
+            self.assertEqual(viewer_argv[1:], viewer_capture.read_text(encoding="utf-8").splitlines())
+            self.assertFalse(injection_sentinel.exists())
 
     def test_simmer_log_and_profile_performance_contracts(self):
         source = self._read_repo_file("bin/simmer.py")

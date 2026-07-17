@@ -91,7 +91,8 @@ def add_debug_arguments(parser):
     debug_group.add_argument('--uvm-max-quit-count',
                              type=int,
                              default=10,
-                             help='Pass +UVM_MAX_QUIT_COUNT=N (default: 10) to stop after N counted UVM errors.')
+                             help=('Pass +UVM_MAX_QUIT_COUNT=N (default: 10) to stop after N counted UVM errors; '
+                                   'use 0 to omit the limit.'))
     debug_group.add_argument(
         '--skip-parse-sim-log',
         default=False,

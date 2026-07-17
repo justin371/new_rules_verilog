@@ -123,7 +123,10 @@ def _verilog_rtl_library_impl(ctx):
                 fail("Shell files should not be declared in an verilog_rtl_library. Use a verilog_rtl_shell instead. {} is declared in {}".format(src, ctx.label))
 
     gumi_path = ""
-    if ctx.attr.enable_gumi:
+    if ctx.file.gumi_file_override:
+        srcs = [ctx.file.gumi_file_override] + srcs
+        gumi_path = runfiles_relative_short_path(ctx.file.gumi_file_override)
+    elif ctx.attr.enable_gumi:
         gumi = ctx.actions.declare_file("gumi_{name}.vh".format(name = ctx.attr.name))
         gumi_content = []
 
@@ -156,8 +159,6 @@ def _verilog_rtl_library_impl(ctx):
 
         srcs = [gumi] + srcs
         gumi_path = runfiles_relative_short_path(gumi)
-    elif not (ctx.attr.gumi_file_override == None):
-        gumi_path = runfiles_relative_short_path(ctx.file.gumi_file_override)
 
     flist_content = create_flist_content(ctx, gumi_path = gumi_path, allow_library_discovery = False, makelib = ctx.attr.makelib)
     vcs_flist = ctx.outputs.flist
@@ -265,13 +266,13 @@ verilog_rtl_library = rule(
         ),
         "enable_gumi": attr.bool(
             default = True,
-            doc = "When set, create an additional file creating default preprocessor values for the gumi system.",
+            doc = "When set and gumi_file_override is absent, create an additional file containing default preprocessor values for the gumi system.",
         ),
         "gumi_file_override": attr.label(
             default = None,
             allow_single_file = True,
-            doc = "Allow a more elaborate default set of gumi defines by pointing to another Label or file.\n" +
-                  "Useful for creating a per-instance instead of per-type modules which require additional information.",
+            doc = "Use a Label or file as the gumi definitions file instead of generating one.\n" +
+                  "The override is retained in this library's transitive sources and runfiles.",
         ),
         "gumi_override": attr.string_list(
             doc = "A list of strings of module names to create gumi defines.\n" +
@@ -330,7 +331,8 @@ def verilog_rtl_shell(
         name,
         module_to_shell_name,
         shell_module_label,
-        deps = []):
+        deps = [],
+        visibility = None):
     """An RTL shell has the same ports as another module.
 
     This rule is a specialized case of verilog_rtl_library.
@@ -359,6 +361,7 @@ def verilog_rtl_shell(
         behavior.
 
         See verilog_rtl_library::deps.
+      visibility: Bazel target visibility.
     """
     if not name.startswith(module_to_shell_name) and module_to_shell_name != CUSTOM_SHELL:
         fail("Shell name should start with the original module name: shell name='{}' original module='{}'".format(name, module_to_shell_name))
@@ -369,6 +372,7 @@ def verilog_rtl_shell(
         is_shell_of = module_to_shell_name,
         enable_gumi = False,
         deps = deps,
+        visibility = visibility,
     )
 
 def _verilog_rtl_unit_test_impl(ctx):

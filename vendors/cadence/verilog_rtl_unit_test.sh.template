@@ -36,17 +36,17 @@ do
     shift
 done
 
-waves_render_cmd=""
+waves_render_args=()
 if [ $generate_waves -eq 1 ]
 then
-    waves_render_cmd="-input {WAVES_RENDER_CMD_PATH} -access r"
+    waves_render_args=(-input "{WAVES_RENDER_CMD_PATH}" -access r)
 fi
 
-waves_launch_cmd=""
+wave_viewer_args=()
 if [ $launch_wave_viewer -eq 1 ]
 then
-    waves_render_cmd="-input {WAVES_RENDER_CMD_PATH} -access r"
-    waves_launch_cmd="{WAVE_VIEWER_COMMAND} waves.shm"
+    waves_render_args=(-input "{WAVES_RENDER_CMD_PATH}" -access r)
+    wave_viewer_args=({WAVE_VIEWER_COMMAND} waves.shm)
 fi
 
 {SIMULATOR_COMMAND} \
@@ -66,7 +66,9 @@ fi
     {PRE_FLIST_ARGS}
     {FLISTS} \
         {TOP} \
-    ${waves_render_cmd:+$waves_render_cmd} \
+    "${waves_render_args[@]}" \
     {POST_FLIST_ARGS} \
     "${remaining_args[@]}"
-${waves_launch_cmd:+$waves_launch_cmd}
+if (( launch_wave_viewer )); then
+    "${wave_viewer_args[@]}"
+fi

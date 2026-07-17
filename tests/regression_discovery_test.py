@@ -1,6 +1,7 @@
 import os
 import json
 import multiprocessing
+import subprocess
 import tempfile
 import time
 import unittest
@@ -168,6 +169,26 @@ class RegressionDiscoveryTest(unittest.TestCase):
             ],
             list(config._iter_discovery_dependency_paths()),
         )
+        self.assertEqual(2, run.call_count)
+
+    def test_cache_manifest_tracks_ignored_bazel_metadata(self):
+        proj_dir = Path(tempfile.mkdtemp())
+        subprocess.run(["git", "init", "-q"], cwd=proj_dir, check=True)
+        (proj_dir / ".gitignore").write_text("generated/\n", encoding="utf-8")
+        ignored_build = proj_dir / "generated" / "BUILD"
+        ignored_build.parent.mkdir()
+        ignored_build.write_text("filegroup(name='first')\n", encoding="utf-8")
+        config = self._config(proj_dir)
+        cache_dir = proj_dir / ".simmer" / "cache"
+        cache_dir.mkdir(parents=True)
+        for filename in ("all_vcomp.json", "tests_to_tags.json", "tests_to_simulator.json"):
+            (cache_dir / filename).write_text("{}", encoding="utf-8")
+
+        config._write_discovery_manifest()
+        self.assertTrue(config._discovery_cache_is_fresh())
+        ignored_build.write_text("filegroup(name='second')\n", encoding="utf-8")
+
+        self.assertFalse(config._discovery_cache_is_fresh())
 
     def test_no_bazel_rejects_stale_cache(self):
         config = self._config(Path(tempfile.mkdtemp()))

@@ -22,3 +22,4 @@ bazel test \
   //:buildifier_diff //tests/... //examples/dpi:dpi_c_test
 bazel run //:buildifier_lint
 ./tests/doc_test.sh
+bash ./tests/external_setup_smoke_test.sh

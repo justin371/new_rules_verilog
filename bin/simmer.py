@@ -13,6 +13,8 @@ import re
 import shlex
 import shutil
 import subprocess
+import time
+import uuid
 
 ################################################################################
 # Bigger libraries (better to place these later for dependency ordering
@@ -127,10 +129,58 @@ def load_warning_waivers(path):
     return [p if isinstance(p, re.Pattern) else re.compile(p) for p in waiver_patterns]
 
 
-def replace_symlink(link_path, target_path):
-    if os.path.lexists(link_path):
-        os.remove(link_path)
-    os.symlink(target_path, link_path)
+def _symlink_lock_path(link_path):
+    """Return a hidden, stable lock path for a user-visible symlink."""
+    absolute_link_path = os.path.abspath(link_path)
+    identity = os.path.normcase(absolute_link_path).encode("utf-8")
+    digest = sha1(identity).hexdigest()[:16]
+    basename = os.path.basename(absolute_link_path).lstrip(".") or "link"
+    return os.path.join(os.path.dirname(absolute_link_path), ".simmer", "locks", "{}-{}.lock".format(basename, digest))
+
+
+def replace_symlink(link_path, target_path, cancel_check=None):
+    """Atomically replace a convenience symlink shared by simmer processes."""
+    absolute_link_path = os.path.abspath(link_path)
+    directory = os.path.dirname(absolute_link_path)
+    temporary_path = os.path.join(
+        directory,
+        ".{}.{}.{}.tmp".format(os.path.basename(link_path), os.getpid(),
+                               uuid.uuid4().hex),
+    )
+    link_lock = compile_cache.CompileDirectoryLock(_symlink_lock_path(absolute_link_path))
+    if cancel_check is None:
+        link_lock.acquire()
+    else:
+        while not link_lock.acquire(blocking=False):
+            cancel_check()
+            time.sleep(0.05)
+    try:
+        if cancel_check is not None:
+            cancel_check()
+        os.symlink(target_path, temporary_path)
+        os.replace(temporary_path, absolute_link_path)
+    finally:
+        if os.path.lexists(temporary_path):
+            os.remove(temporary_path)
+        link_lock.release()
+
+
+def remove_symlink_if_target(link_path, target_path):
+    """Remove a shared convenience symlink only when this run still owns it."""
+    absolute_link_path = os.path.abspath(link_path)
+    link_lock = compile_cache.CompileDirectoryLock(_symlink_lock_path(absolute_link_path))
+    link_lock.acquire()
+    try:
+        try:
+            current_target = os.readlink(absolute_link_path)
+        except (FileNotFoundError, OSError):
+            return False
+        if current_target != target_path:
+            return False
+        os.remove(absolute_link_path)
+        return True
+    finally:
+        link_lock.release()
 
 
 SIMULATOR_CLASSES = {
@@ -243,7 +293,10 @@ class VCompJob(Job):
         self._compile_lock = compile_cache.CompileDirectoryLock(lock_path)
         if not self._compile_lock.acquire(blocking=False):
             log.info("Waiting for compile directory lock %s", lock_path)
-            self._compile_lock.acquire()
+            while not self._compile_lock.acquire(blocking=False):
+                self.raise_if_cancelled()
+                self.wait_for_cancel(0.1)
+        self.raise_if_cancelled()
         log.debug("Acquired compile directory lock %s", lock_path)
 
     def _release_compile_lock(self):
@@ -827,12 +880,16 @@ class TestJob(Job):
         log.debug('Created %s', rerun_script_path)
 
         # Create a symlink back the vcomp directory for easy reference
-        replace_symlink(os.path.join(self.job_dir, '.vcomp'), self.vcomper.job_dir)
+        replace_symlink(
+            os.path.join(self.job_dir, '.vcomp'),
+            self.vcomper.job_dir,
+            cancel_check=self.raise_if_cancelled,
+        )
 
         if not self.rcfg.tidy:
             # Use relative path for symlink for portability
             last_sim_link_target = os.path.relpath(self.job_dir, start=os.getcwd())
-            replace_symlink(".last_sim", last_sim_link_target)
+            replace_symlink(".last_sim", last_sim_link_target, cancel_check=self.raise_if_cancelled)
             log.debug("Created link to sim dir as '.last_sim'")
 
         self.main_cmdline = shlex.join(['/usr/bin/env', 'bash', testscript_path])
@@ -937,8 +994,8 @@ class TestJob(Job):
         if self.rcfg.tidy and self.jobstatus.successful:
             log.debug("tidy=%s removing %s", self.rcfg.tidy, self.job_dir)
             shutil.rmtree(self.job_dir, ignore_errors=True)
-            if os.path.exists(".last_sim"):
-                os.remove(".last_sim")
+            last_sim_link_target = os.path.relpath(self.job_dir, start=os.getcwd())
+            remove_symlink_if_target(".last_sim", last_sim_link_target)
 
         if self.simulator.should_spawn_test_job(self):
             self.job_lib.manager.add_job(self.clone())
@@ -1175,9 +1232,22 @@ def main(rcfg, options):
 
     except KeyboardInterrupt:
         log.info("Saw keyboard interrupt, attempting to shutdown jobs.")
+        shutdown_complete = True
         if jm is not None:
-            jm.kill()
-        log.critical("Exiting due to keyboard interrupt")
+            try:
+                shutdown_complete = jm.kill()
+            except Exception as exc:
+                shutdown_complete = False
+                log.error("Job shutdown reported an error: %s", exc)
+        finalize_interrupted_run(
+            rcfg,
+            simulator,
+            vcomp_jobs,
+            jm=jm,
+            cleanup_shared_runtime=shutdown_complete,
+        )
+        log.error("Exiting due to keyboard interrupt")
+        raise SystemExit(130)
 
     workflow_finalize_failed = False
     regression_log_path = None
@@ -1213,11 +1283,11 @@ def main(rcfg, options):
                 import fcntl
                 fcntl.flock(report_lock, fcntl.LOCK_EX)
                 rrt.render_regression_page()
-                rrt.write_run_launcher(os.environ.get("SIMMER_REPORT_URL"))
             with open(index_lock_path, "w") as report_lock:
                 fcntl.flock(report_lock, fcntl.LOCK_EX)
                 rrt.render_bench_page()
                 rrt.render_home_page()
+                rrt.write_run_launcher(os.environ.get("SIMMER_REPORT_URL"))
 
         rv_utils.print_simmer_profile(rcfg, jm)
 
@@ -1263,12 +1333,38 @@ def main(rcfg, options):
         sys.exit(0)
 
 
-def persist_simmer_results(rcfg):
+def persist_simmer_results(rcfg, fatal=True):
     """Persist local history; inability to do so is a command failure."""
     try:
         simmer_results.save_run(rcfg.proj_dir, rcfg.simmer_results_run)
-    except OSError as exc:
-        rcfg.log.critical("Failed to write simmer results: %s", exc)
+    except Exception as exc:
+        if fatal:
+            rcfg.log.critical("Failed to write simmer results: %s", exc)
+        else:
+            rcfg.log.error("Failed to write interrupted simmer results: %s", exc)
+        return False
+    return True
+
+
+def finalize_interrupted_run(rcfg, simulator, vcomp_jobs, jm=None, cleanup_shared_runtime=True):
+    """Clean backend state and persist a failed result record after Ctrl-C."""
+    if cleanup_shared_runtime:
+        try:
+            simulator.cleanup_shared_runtime_artifacts(vcomp_jobs)
+        except Exception as exc:
+            rcfg.log.error("Failed to clean shared runtime artifacts after interrupt: %s", exc)
+    else:
+        rcfg.log.warning("Skipping shared runtime cleanup because some jobs have not stopped")
+
+    run = getattr(rcfg, "simmer_results_run", None)
+    if run is None:
+        return
+    if jm is not None:
+        for job in jm.interrupted_jobs:
+            if isinstance(job, TestJob):
+                simmer_results.record_test_job(run, job, status="INTERRUPTED")
+    simmer_results.finalize_run(run, backend_finalize_failed=True)
+    persist_simmer_results(rcfg, fatal=False)
 
 
 if __name__ == '__main__':
