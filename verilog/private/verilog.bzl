@@ -99,7 +99,11 @@ def merge_default_runfiles(ctx, files, targets, transitive_files = None):
     ).merge_all([target[DefaultInfo].default_runfiles for target in targets])
 
 def verilog_input_inventory_records(deps, extra_files, flist_field = "transitive_flists", fallback_field = None):
-    """Return stable inventory entries paired with their source files."""
+    """Return stable inventory entries paired with their source files.
+
+    Returns:
+      A sorted list of (inventory entry, File) tuples.
+    """
     records = {}
     sources = get_transitive_srcs([], deps, VerilogInfo, "transitive_sources", allow_other_outputs = True)
     flists = get_transitive_srcs(
