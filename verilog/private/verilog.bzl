@@ -240,7 +240,7 @@ verilog_test = rule(
             doc = "Non-verilog dependencies",
         ),
         "tool": attr.label(
-            cfg = "exec",
+            cfg = "target",
             executable = True,
             doc = "Label to a single executable tool to run. Inserted before pre_flist_args if set. Do not duplicate in pre_flist_args",
         ),

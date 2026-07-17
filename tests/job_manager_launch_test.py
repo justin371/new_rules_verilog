@@ -262,6 +262,19 @@ class JobManagerLaunchTest(unittest.TestCase):
 
         self.assertFalse(manager.exited_prematurely)
 
+    def test_subprocess_runner_uses_thread_safe_new_session_launch(self):
+        log = _Logger()
+        job = Job(SimpleNamespace(options=SimpleNamespace(timeout=1, no_stdout=False), log=log), "test")
+        job.job_dir = tempfile.mkdtemp()
+        job.main_cmdline = "echo test"
+        process = _ExitedProcess()
+
+        with mock.patch("lib.job_lib.subprocess.Popen", return_value=process) as popen:
+            SubprocessJobRunner(job, SimpleNamespace())
+
+        self.assertTrue(popen.call_args.kwargs["start_new_session"])
+        self.assertNotIn("preexec_fn", popen.call_args.kwargs)
+
     def test_wait_and_add_are_race_safe_while_pre_run_is_unlocked(self):
         log = _Logger()
         rcfg = SimpleNamespace(options=SimpleNamespace(timeout=1), log=log)
@@ -320,6 +333,83 @@ class JobManagerLaunchTest(unittest.TestCase):
         self.assertFalse(killer.is_alive())
         self.assertTrue(_BlockingLaunchRunner.killed.is_set())
         self.assertTrue(job.cancelled.is_set())
+        self.assertFalse(manager._run_jobs_thread.is_alive())
+
+    def test_kill_signals_active_jobs_concurrently(self):
+        log = _Logger()
+        rcfg = SimpleNamespace(options=SimpleNamespace(timeout=1), log=log)
+        manager = JobManager({"idle_print_seconds": 60, "quit_count": 1}, log)
+        manager.stop()
+        first = Job(rcfg, "first")
+        second = Job(rcfg, "second")
+        first_started = threading.Event()
+        release_first = threading.Event()
+        second_signalled = threading.Event()
+
+        def block_first():
+            first_started.set()
+            release_first.wait()
+
+        first.job_lib = SimpleNamespace(kill=block_first)
+        second.job_lib = SimpleNamespace(kill=second_signalled.set)
+        with manager._condition:
+            manager._active = [first, second]
+
+        killer = threading.Thread(target=manager.kill)
+        killer.start()
+        self.assertTrue(first_started.wait(1.0))
+        self.assertTrue(second_signalled.wait(1.0), "second kill waited behind the blocked first kill")
+        release_first.set()
+        killer.join(2.0)
+        self.assertFalse(killer.is_alive())
+
+    def test_kill_reports_incomplete_active_shutdown(self):
+        log = _Logger()
+        rcfg = SimpleNamespace(options=SimpleNamespace(timeout=1), log=log)
+        manager = JobManager({"idle_print_seconds": 60, "quit_count": 1}, log)
+        manager.stop()
+        manager.ACTIVE_KILL_JOIN_SECONDS = 0.05
+        job = Job(rcfg, "blocked")
+        release = threading.Event()
+        finished = threading.Event()
+
+        def block_kill():
+            release.wait()
+            finished.set()
+
+        job.job_lib = SimpleNamespace(kill=block_kill)
+        with manager._condition:
+            manager._active = [job]
+
+        self.assertFalse(manager.kill())
+        self.assertEqual((job, ), manager.interrupted_jobs)
+        release.set()
+        self.assertTrue(finished.wait(1.0))
+
+    def test_kill_returns_bounded_when_pre_run_does_not_cooperate(self):
+        log = _Logger()
+        rcfg = SimpleNamespace(options=SimpleNamespace(timeout=1), log=log)
+        job = _BlockingPreRunJob(rcfg, "blocked")
+        job.job_dir = str(Path(tempfile.mkdtemp()) / "blocked")
+        manager = JobManager({"idle_print_seconds": 60, "quit_count": 1}, log)
+        manager.job_lib_type = _RecordingRunner
+        manager.SHUTDOWN_JOIN_SECONDS = 0.05
+        self.assertTrue(manager._run_jobs_thread.daemon)
+
+        try:
+            manager.add_job(job)
+            self.assertTrue(job.pre_run_started.wait(1.0))
+            start = datetime.datetime.now()
+            shutdown_complete = manager.kill()
+            elapsed = (datetime.datetime.now() - start).total_seconds()
+            self.assertLess(elapsed, 0.5)
+            self.assertFalse(shutdown_complete)
+            self.assertTrue(job.cancel_requested)
+            self.assertEqual((job, ), manager.interrupted_jobs)
+        finally:
+            job.release_pre_run.set()
+            manager._run_jobs_thread.join(2.0)
+
         self.assertFalse(manager._run_jobs_thread.is_alive())
 
     def test_pre_run_failure_fails_job_without_killing_scheduler(self):

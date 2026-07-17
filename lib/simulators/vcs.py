@@ -296,12 +296,14 @@ class VcsSimulator(SimulatorInterface):
         return self.options.smartlog or self.options.waves is not None or self.options.gui
 
     def get_wave_view_command(self, wave_file_path, job_dir=None):
-        cmd = '{} -ssf "{}"'.format(self.get_tool_command("verdi"), wave_file_path)
+        argv = shlex.split(self.get_tool_runner()) + ["verdi", "-ssf", wave_file_path]
         if job_dir is not None:
             smartlog_path = os.path.join(job_dir, "stdout.log")
             if os.path.exists(smartlog_path):
-                cmd += ' -smlog "{}"'.format(smartlog_path)
-        return cmd
+                argv.extend(["-smlog", smartlog_path])
+        if any("\n" in arg or "\r" in arg for arg in argv):
+            raise ValueError("Wave viewer arguments cannot contain newlines")
+        return "\n".join(argv)
 
     def get_bazel_compile_args_file(self, bazel_runfiles_main, relpath, bazel_target):
         return os.path.join(bazel_runfiles_main, relpath, "{}_compile_args.f".format(bazel_target))
@@ -389,7 +391,7 @@ class VcsSimulator(SimulatorInterface):
                     xprop_cmds.append("-xprop=flowctrl")
                 if self.options.vcs_xprop_mmsopt:
                     xprop_cmds.append("-xprop=mmsopt")
-                opts['xprop_cmd'] = " ".join(xprop_cmds)
+                opts['xprop_cmd'] = shlex.join(xprop_cmds)
 
         # Defines
         opts['additional_defines'].extend(additional_vcs_defines)

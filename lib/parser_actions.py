@@ -26,9 +26,7 @@ class TagAction(argparse.Action):
         try:
             last_test = namespace.tests[-1]
         except IndexError:
-            return # The return is actually more graceful than the explicit value error
-            # It relies upon argparse to catch the missing option and throw a better formatted error
-            # raise ValueError("Attempted to use a test tag filter without any tests specified. Did you forget the '-t' flag?")
+            parser.error("{} requires a preceding -t/--tests selector".format(option_string))
         l = getattr(last_test, self.dest)
         l.add(values)
 

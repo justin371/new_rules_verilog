@@ -33,6 +33,16 @@ class DocsTest(unittest.TestCase):
                 with self.subTest(markdown=markdown.name, target=target):
                     self.assertTrue((markdown.parent / target).resolve().exists())
 
+    def test_dv_test_cfg_macro_parameters_are_documented(self):
+        dv_rules = (REPO_ROOT / "verilog" / "private" / "dv.bzl").read_text(encoding="utf-8")
+        api_docs = (REPO_ROOT / "docs" / "defs.md").read_text(encoding="utf-8")
+        signature = re.search(r"def verilog_dv_test_cfg\(([^)]*)\):", dv_rules)
+
+        self.assertIsNotNone(signature)
+        parameters = [entry.split("=", 1)[0].strip() for entry in signature.group(1).split(",")]
+        for parameter in parameters:
+            self.assertIn('<a id="verilog_dv_test_cfg-{}"></a>'.format(parameter), api_docs)
+
     def test_setup_docs_do_not_reference_retired_repository(self):
         readme = (REPO_ROOT / "README.md").read_text(encoding="utf-8")
 

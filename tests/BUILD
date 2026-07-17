@@ -19,6 +19,12 @@ buildifier(
 )
 
 py_test(
+    name = "args_parser_validation_test",
+    srcs = ["args_parser_validation_test.py"],
+    deps = ["//bin:args_parser_lib"],
+)
+
+py_test(
     name = "bazel_profile_test",
     srcs = ["bazel_profile_test.py"],
     deps = ["//lib:bazel_profile"],
@@ -59,6 +65,7 @@ py_test(
         "//docs:simmer_vcs_xcelium.md",
         "//docs:simulator_migration_checklist.md",
         "//verilog:defs.bzl",
+        "//verilog/private:dv.bzl",
     ],
 )
 

@@ -56,6 +56,18 @@ class RuntimeOptionsTest(unittest.TestCase):
             "PROJECT FAIL; rm -rf /",
         ], shlex.split(format_log_check_args(runtime_options)))
 
+    def test_cli_verbosity_overrides_first_runtime_option(self):
+        options = _options(verbosity="UVM_DEBUG")
+
+        result = shlex.split(append_uvm_control_options("+UVM_VERBOSITY=UVM_LOW +TRACE", options))
+
+        self.assertEqual(["+UVM_VERBOSITY=UVM_DEBUG", "+TRACE"], result)
+
+    def test_unrelated_verbosity_text_does_not_suppress_default(self):
+        result = shlex.split(append_uvm_control_options("+MY_UVM_VERBOSITY_TRACE", _options()))
+
+        self.assertEqual(["+MY_UVM_VERBOSITY_TRACE", "+UVM_VERBOSITY=UVM_MEDIUM"], result)
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -11,29 +11,41 @@ trap 'rc=$?; printf "ERROR: wave viewer script failed at line %s (exit %s): %s\n
 # wave_view_command
 
 echo "Preparing to open wave file..."
-echo "Job directory: {{ job_dir }}"
-echo "Wave file: {{ wave_file_path }}"
-echo "Runfiles directory: {{ bazel_runfiles_dir }}"
-echo "Target run directory: {{ job_dir }}"
+printf 'Job directory: %s\n' {{ job_dir|shell_quote }}
+printf 'Wave file: %s\n' {{ wave_file_path|shell_quote }}
+printf 'Runfiles directory: %s\n' {{ bazel_runfiles_dir|shell_quote }}
+printf 'Target run directory: %s\n' {{ job_dir|shell_quote }}
 
 # Check if bazel_runfiles_main directory exists
-if [ ! -d "{{ bazel_runfiles_dir }}" ]; then
-    echo "Error: Directory {{ bazel_runfiles_dir }} does not exist."
+if [ ! -d {{ bazel_runfiles_dir|shell_quote }} ]; then
+    printf 'Error: Directory %s does not exist.\n' {{ bazel_runfiles_dir|shell_quote }}
     echo "Please ensure your bazel runfiles are correctly set up in the job directory."
     exit 1
 fi
 
-echo "Changing directory to {{ job_dir }}"
-cd "{{ job_dir }}"
+printf 'Changing directory to %s\n' {{ job_dir|shell_quote }}
+cd {{ job_dir|shell_quote }}
 
 WAVE_VIEW_COMMAND={{ wave_view_command }}
+mapfile -t WAVE_VIEW_ARGV <<< "${WAVE_VIEW_COMMAND}"
+if [[ -z "${WAVE_VIEW_ARGV[0]:-}" ]]; then
+    echo "Error: Wave viewer command is empty." >&2
+    exit 1
+fi
 
 if [ -n "${SIMMER_WAVE_LAUNCHER:-}" ]; then
-    echo "Executing: ${SIMMER_WAVE_LAUNCHER} ${WAVE_VIEW_COMMAND}"
-    eval "${SIMMER_WAVE_LAUNCHER} ${WAVE_VIEW_COMMAND}"
+    # SIMMER_WAVE_LAUNCHER is a whitespace-delimited argv prefix. Shell syntax
+    # and quoting are not evaluated; each resulting token is prepended literally.
+    read -r -a WAVE_LAUNCHER_ARGV <<< "${SIMMER_WAVE_LAUNCHER}"
+    printf 'Executing:'
+    printf ' %q' "${WAVE_LAUNCHER_ARGV[@]}" "${WAVE_VIEW_ARGV[@]}"
+    printf '\n'
+    "${WAVE_LAUNCHER_ARGV[@]}" "${WAVE_VIEW_ARGV[@]}"
 else
-    echo "Executing: ${WAVE_VIEW_COMMAND}"
-    eval "${WAVE_VIEW_COMMAND}"
+    printf 'Executing:'
+    printf ' %q' "${WAVE_VIEW_ARGV[@]}"
+    printf '\n'
+    "${WAVE_VIEW_ARGV[@]}"
 fi
 
 echo "Returning to previous directory."

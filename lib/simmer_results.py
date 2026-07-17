@@ -10,7 +10,7 @@ import uuid
 from contextlib import contextmanager
 
 RESULTS_FILENAME = ".simmer_results.json"
-SCHEMA_VERSION = 2
+SCHEMA_VERSION = 3
 MAX_RUNS = 100
 COLOR_GREEN = "\033[0;32m"
 COLOR_RED = "\033[0;31m"
@@ -77,6 +77,7 @@ def create_run(argv, rcfg, planned_tests):
         "summary": {
             "passed": 0,
             "failed": 0,
+            "interrupted": 0,
             "skipped": 0,
             "total": planned_tests,
         },
@@ -110,7 +111,7 @@ def record_compile_job(run, vcomp_job):
     _upsert_by_key(run["compile"], "vcomp_target", compile_record)
 
 
-def record_test_job(run, test_job, waves_script=None, waves_path=None):
+def record_test_job(run, test_job, waves_script=None, waves_path=None, status=None):
     if run is None:
         return
     waves_enabled = test_job.rcfg.options.waves is not None
@@ -131,7 +132,7 @@ def record_test_job(run, test_job, waves_script=None, waves_path=None):
         "vcomp_target": test_job.vcomper.bazel_vcomp_target,
         "iteration": test_job.iteration,
         "seed": getattr(test_job, "seed", None),
-        "status": test_job.jobstatus.name,
+        "status": status or test_job.jobstatus.name,
         "duration_s": int(simulation_duration_s) if simulation_duration_s is not None else None,
         "wall_duration_s": wall_duration_s,
         "compile_dir": test_job.vcomper.job_dir,
@@ -158,11 +159,13 @@ def finalize_run(run, regression_log_path=None, backend_finalize_failed=False):
     planned_tests = int(run.get("planned_tests") or len(tests))
     passed = sum(1 for test in tests if test.get("status") == "PASSED")
     failed = sum(1 for test in tests if test.get("status") == "FAILED")
+    interrupted = sum(1 for test in tests if test.get("status") == "INTERRUPTED")
     skipped = max(0, planned_tests - len(tests))
 
     run["summary"] = {
         "passed": passed,
         "failed": failed,
+        "interrupted": interrupted,
         "skipped": skipped,
         "total": planned_tests,
     }
@@ -283,12 +286,16 @@ def _format_pass_summary(run, use_color=False):
     summary = run.get("summary", {})
     passed = summary.get("passed", 0)
     failed = summary.get("failed", 0)
+    interrupted = summary.get("interrupted", 0)
     total = summary.get("total", 0)
     pass_text = _color_word("pass", COLOR_GREEN, use_color)
+    details = []
     if failed:
         fail_text = _color_word("fail", COLOR_RED, use_color)
-        return "{}/{} {}, {} {}".format(passed, total, pass_text, failed, fail_text)
-    return "{}/{} {}".format(passed, total, pass_text)
+        details.append("{} {}".format(failed, fail_text))
+    if interrupted:
+        details.append("{} interrupted".format(interrupted))
+    return ", ".join(["{}/{} {}".format(passed, total, pass_text)] + details)
 
 
 def _resolve_use_color(use_color):

@@ -168,6 +168,7 @@ py_test(
         "//lib/simulators:vcs_jobs",
         "//vendors/cadence:verilog_rtl_cdc_test.sh.template",
         "//vendors/cadence:verilog_rtl_lint_test.sh.template",
+        "//vendors/cadence:verilog_rtl_unit_test.sh.template",
         "//vendors/cadence:verilog_rtl_unit_test_svunit.sh.template",
         "//vendors/real_intent:verilog_rtl_lint_test.sh.template",
         "//vendors/synopsys:verilog_dv_tb_compile_args.f.template",

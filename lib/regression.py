@@ -279,15 +279,39 @@ class RegressionConfig():
             self.dict_to_json(self._discovery_dependency_manifest(), "discovery_manifest.json")
 
     def _iter_discovery_dependency_paths(self):
-        result = subprocess.run(
+        indexed_result = subprocess.run(
             ["git", "ls-files", "--cached", "--others", "--exclude-standard"],
             cwd=self.proj_dir,
             check=False,
             capture_output=True,
             text=True,
         )
-        if result.returncode == 0:
-            for relative_path in result.stdout.splitlines():
+        ignored_result = subprocess.run(
+            [
+                "git",
+                "ls-files",
+                "--others",
+                "--ignored",
+                "--exclude-standard",
+                "--",
+                ":(glob)**/BUILD",
+                ":(glob)**/BUILD.bazel",
+                ":(glob)**/*.bzl",
+                *sorted(DISCOVERY_ROOT_FILES),
+            ],
+            cwd=self.proj_dir,
+            check=False,
+            capture_output=True,
+            text=True,
+        )
+        if indexed_result.returncode == 0 and ignored_result.returncode == 0:
+            discovery_paths = []
+            seen_paths = set()
+            for relative_path in indexed_result.stdout.splitlines() + ignored_result.stdout.splitlines():
+                if relative_path and relative_path not in seen_paths:
+                    discovery_paths.append(relative_path)
+                    seen_paths.add(relative_path)
+            for relative_path in discovery_paths:
                 filename = os.path.basename(relative_path)
                 if filename in ("BUILD",
                                 "BUILD.bazel") or filename.endswith(".bzl") or relative_path in DISCOVERY_ROOT_FILES:

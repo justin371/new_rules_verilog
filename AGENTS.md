@@ -1,7 +1,7 @@
 # PROJECT KNOWLEDGE BASE
 
-**Reviewed:** 2026-07-13
-**Baseline:** `main@fd3a6a5`
+**Reviewed:** 2026-07-17
+**Baseline:** `main@2cfca6b`
 
 ## OVERVIEW
 

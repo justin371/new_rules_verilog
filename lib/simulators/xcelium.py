@@ -100,7 +100,10 @@ class XceliumSimulator(SimulatorInterface):
         return self.env.get_template('xrun_wave_cmd_template.tcl.j2')
 
     def get_wave_view_command(self, wave_file_path, job_dir=None):
-        return 'runmod xrun -- verisium -64bit -db "{}"'.format(wave_file_path)
+        argv = ["runmod", "xrun", "--", "verisium", "-64bit", "-db", wave_file_path]
+        if any("\n" in arg or "\r" in arg for arg in argv):
+            raise ValueError("Wave viewer arguments cannot contain newlines")
+        return "\n".join(argv)
 
     def validate_resolved_options(self):
         parser = ValidationErrorParser()
@@ -123,10 +126,14 @@ class XceliumSimulator(SimulatorInterface):
             self._xcelium_tool_identity = configured_identity
             return self._xcelium_tool_identity
 
-        # `xrun -64 -version` is a supported, license-free release query. The
-        # runmod wrapper selects the site installation, so it receives only the
-        # xrun arguments here, matching normal compile/run invocation.
-        command = shlex.split("runmod -t xrun --") + ["-64", "-version"]
+        # `xrun -64 -version` is a supported, license-free release query. Normal
+        # runs select Xcelium through runmod; emulator runs launch xrun directly.
+        # Probe through the same launcher so the fingerprint identifies the tool
+        # that will actually consume the compile/runtime artifacts.
+        if self.options.emulator:
+            command = ["xrun", "-64", "-version"]
+        else:
+            command = shlex.split("runmod -t xrun --") + ["-64", "-version"]
         try:
             result = subprocess.run(command, capture_output=True, text=True, timeout=30, check=False)
         except (OSError, subprocess.TimeoutExpired) as exc:

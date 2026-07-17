@@ -119,6 +119,8 @@ def parse_args(argv):
         parser.error("--jobs must be a positive integer.")
     if options.quit_count < 1:
         parser.error("--quit-count must be a positive integer.")
+    if options.uvm_max_quit_count < 0:
+        parser.error("--uvm-max-quit-count must be non-negative (0 disables the limit).")
     if options.idle_print_seconds < 1:
         parser.error("--idle-print-seconds must be a positive integer.")
     if options.history is not None and options.history < 1:
@@ -225,7 +227,7 @@ def parse_args(argv):
         parser.error("{} require --waves.".format(", ".join(requested_wave_details)))
     if options.wave_start < 0:
         parser.error("--wave-start must be non-negative.")
-    if options.wave_end != 99999999 and options.wave_end <= options.wave_start:
+    if options.wave_end <= options.wave_start:
         parser.error("--wave-end must be greater than --wave-start.")
     if options.wave_depth <= 0:
         parser.error("--wave-depth must be positive.")

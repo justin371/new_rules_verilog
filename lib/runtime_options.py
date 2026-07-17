@@ -4,6 +4,7 @@ import re
 import shlex
 
 RUNTIME_OPTIONS_SCHEMA_VERSION = 1
+_UVM_VERBOSITY_RE = re.compile(r"(?<!\S)\+UVM_VERBOSITY=[A-Z_]+")
 
 
 def normalize_test_runtime_options(runtime_options):
@@ -98,13 +99,13 @@ def append_uvm_control_options(sim_opts, options):
                 sim_opts += " " + shlex.join(shlex.split(line, comments=True))
 
     if options.verbosity:
-        if "UVM_VERBOSITY" in sim_opts:
-            sim_opts = re.sub(r" \+UVM_VERBOSITY=[A-Z_]+", " +UVM_VERBOSITY=" + options.verbosity, sim_opts)
+        if _UVM_VERBOSITY_RE.search(sim_opts):
+            sim_opts = _UVM_VERBOSITY_RE.sub("+UVM_VERBOSITY=" + options.verbosity, sim_opts)
         else:
             sim_opts += " +UVM_VERBOSITY=" + options.verbosity
             if options.verbosity == "UVM_DEBUG":
                 sim_opts += " +UVM_TR_RECORD +UVM_LOG_RECORD "
-    elif "UVM_VERBOSITY" not in sim_opts:
+    elif not _UVM_VERBOSITY_RE.search(sim_opts):
         sim_opts += " +UVM_VERBOSITY=UVM_MEDIUM"
 
     if options.uvm_config_db_trace:
