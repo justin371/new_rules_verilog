@@ -10,6 +10,7 @@ import os
 import sys
 import random
 import re
+import signal
 import shlex
 import shutil
 import subprocess
@@ -286,6 +287,7 @@ class VCompJob(Job):
         self.cov_work_dir = None
         self.compile_cache_hit = False
         self._compile_lock = None
+        self._shared_runtime_locks = {}
 
     def _acquire_compile_lock(self):
         # Keep the lock outside the mutable compile directory so recompile cleanup cannot replace it.
@@ -307,6 +309,28 @@ class VCompJob(Job):
         compile_lock.release()
         self._compile_lock = None
         log.debug("Released compile directory lock %s", lock_path)
+
+    def acquire_shared_runtime_lock(self, runtime_path):
+        """Hold exclusive ownership of a shared backend directory for this run."""
+        runtime_path = os.path.abspath(runtime_path)
+        if runtime_path in self._shared_runtime_locks:
+            return
+        lock_path = runtime_path + ".simmer.lock"
+        runtime_lock = compile_cache.CompileDirectoryLock(lock_path)
+        if not runtime_lock.acquire(blocking=False):
+            log.info("Waiting for shared runtime directory lock %s", lock_path)
+            while not runtime_lock.acquire(blocking=False):
+                self.raise_if_cancelled()
+                self.wait_for_cancel(0.1)
+        self._shared_runtime_locks[runtime_path] = runtime_lock
+        self.raise_if_cancelled()
+        log.debug("Acquired shared runtime directory lock %s", lock_path)
+
+    def release_shared_runtime_locks(self):
+        for runtime_path, runtime_lock in list(self._shared_runtime_locks.items()):
+            runtime_lock.release()
+            log.debug("Released shared runtime directory lock %s", runtime_lock.path)
+            del self._shared_runtime_locks[runtime_path]
 
     def pre_run(self):
         self._acquire_compile_lock()
@@ -1076,6 +1100,17 @@ def resolve_report_root(rcfg, options):
     return os.path.join(rcfg.regression_dir, "regression_results")
 
 
+class _IgnoreAdditionalInterrupts:
+    """Ignore repeated Ctrl-C while the first interrupt performs bounded cleanup."""
+
+    def __enter__(self):
+        self._previous_handler = signal.signal(signal.SIGINT, signal.SIG_IGN)
+        return self
+
+    def __exit__(self, _exc_type, _exc_value, _traceback):
+        signal.signal(signal.SIGINT, self._previous_handler)
+
+
 def main(rcfg, options):
     """
     Parameters
@@ -1231,21 +1266,22 @@ def main(rcfg, options):
             rcfg.log.info("run_test:main(): --no_run option selected, exiting")
 
     except KeyboardInterrupt:
-        log.info("Saw keyboard interrupt, attempting to shutdown jobs.")
-        shutdown_complete = True
-        if jm is not None:
-            try:
-                shutdown_complete = jm.kill()
-            except Exception as exc:
-                shutdown_complete = False
-                log.error("Job shutdown reported an error: %s", exc)
-        finalize_interrupted_run(
-            rcfg,
-            simulator,
-            vcomp_jobs,
-            jm=jm,
-            cleanup_shared_runtime=shutdown_complete,
-        )
+        with _IgnoreAdditionalInterrupts():
+            log.info("Saw keyboard interrupt, attempting to shutdown jobs.")
+            shutdown_complete = True
+            if jm is not None:
+                try:
+                    shutdown_complete = jm.kill()
+                except Exception as exc:
+                    shutdown_complete = False
+                    log.error("Job shutdown reported an error: %s", exc)
+            finalize_interrupted_run(
+                rcfg,
+                simulator,
+                vcomp_jobs,
+                jm=jm,
+                cleanup_shared_runtime=shutdown_complete,
+            )
         log.error("Exiting due to keyboard interrupt")
         raise SystemExit(130)
 
@@ -1363,6 +1399,8 @@ def finalize_interrupted_run(rcfg, simulator, vcomp_jobs, jm=None, cleanup_share
         for job in jm.interrupted_jobs:
             if isinstance(job, TestJob):
                 simmer_results.record_test_job(run, job, status="INTERRUPTED")
+            elif isinstance(job, VCompJob):
+                simmer_results.record_compile_job(run, job, status="INTERRUPTED")
     simmer_results.finalize_run(run, backend_finalize_failed=True)
     persist_simmer_results(rcfg, fatal=False)
 

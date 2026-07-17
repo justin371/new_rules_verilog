@@ -43,6 +43,7 @@ class SimmerResultsTest(unittest.TestCase):
         simmer_results.finalize_run(run)
         simmer_results.save_run(self.project_dir, run)
 
+        self.assertEqual("INTERRUPTED", run["status"])
         store = simmer_results.load_store(self.project_dir)
         self.assertEqual(3, store["schema_version"])
         self.assertEqual(1, store["last_run"]["summary"]["interrupted"])
@@ -185,6 +186,9 @@ class SimmerResultsTest(unittest.TestCase):
 
         self.assertEqual(12, run["compile"][0]["duration_s"])
         self.assertEqual(4, run["compile"][0]["metrics"]["partcomp_jobs"])
+
+        simmer_results.record_compile_job(run, vcomp, status="INTERRUPTED")
+        self.assertEqual("INTERRUPTED", run["compile"][0]["status"])
 
     def test_multi_test_history_keeps_summary_and_one_representative_test(self):
         run = self._completed_run()

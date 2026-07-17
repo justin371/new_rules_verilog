@@ -8,7 +8,8 @@ if [[ ! -r /etc/os-release ]] || ! grep -Eqi '^(ID|ID_LIKE)=.*(rhel|fedora|cento
   exit 1
 fi
 
-python3.12 -c 'import sys; assert sys.version_info[:2] == (3, 12), sys.version'
+python_path="$(command -v python3.12)"
+"${python_path}" -c 'import sys; assert sys.version_info[:2] == (3, 12), sys.version'
 
 if [[ "$(bazel --version)" != "bazel 7.7.1" ]]; then
   echo "ERROR: bazel 7.7.1 is required; found $(bazel --version)." >&2
@@ -17,7 +18,7 @@ fi
 
 bazel test \
   --incompatible_use_python_toolchains=false \
-  --python_path=/usr/bin/python3.12 \
+  --python_path="${python_path}" \
   --test_output=errors \
   //:buildifier_diff //tests/... //examples/dpi:dpi_c_test
 bazel run //:buildifier_lint

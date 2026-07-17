@@ -171,6 +171,79 @@ class SimmerRuntimeHardeningTest(unittest.TestCase):
         self.assertEqual(1, run["summary"]["interrupted"])
         self.assertEqual(1, run["summary"]["skipped"])
 
+    def test_interrupted_compile_is_recorded_in_history(self):
+        run = {
+            "planned_tests": 1,
+            "tests": [],
+            "compile": [],
+            "launch_failures": [],
+        }
+        rcfg = SimpleNamespace(
+            proj_dir="/repo",
+            simmer_results_run=run,
+            log=mock.Mock(),
+        )
+        vcomp = simmer.VCompJob.__new__(simmer.VCompJob)
+        vcomp.name = "tb"
+        vcomp.bazel_vcomp_target = "//tb:tb"
+        vcomp.job_dir = "/compile"
+        vcomp.log_path = "/compile/cmp.log"
+        vcomp.job_start_time = None
+        vcomp.job_stop_time = None
+        vcomp._jobstatus = simmer.JobStatus.NOT_STARTED
+        manager = SimpleNamespace(interrupted_jobs=(vcomp, ))
+
+        with mock.patch("simmer.simmer_results.save_run"):
+            simmer.finalize_interrupted_run(rcfg, mock.Mock(), {"//tb:tb": vcomp}, jm=manager)
+
+        self.assertEqual("INTERRUPTED", run["compile"][0]["status"])
+
+    def test_interrupt_cleanup_temporarily_ignores_additional_sigint(self):
+        previous_handler = object()
+        with mock.patch("simmer.signal.signal", side_effect=[previous_handler, None]) as set_handler:
+            with simmer._IgnoreAdditionalInterrupts():
+                pass
+
+        self.assertEqual(
+            [
+                mock.call(simmer.signal.SIGINT, simmer.signal.SIG_IGN),
+                mock.call(simmer.signal.SIGINT, previous_handler),
+            ],
+            set_handler.call_args_list,
+        )
+
+    @unittest.skipUnless(os.name == "posix", "POSIX advisory-lock behavior")
+    def test_shared_runtime_lock_serializes_identical_regressions(self):
+        first = simmer.VCompJob.__new__(simmer.VCompJob)
+        first._shared_runtime_locks = {}
+        first._cancel_event = threading.Event()
+        second = simmer.VCompJob.__new__(simmer.VCompJob)
+        second._shared_runtime_locks = {}
+        second._cancel_event = threading.Event()
+        acquired = threading.Event()
+        errors = []
+
+        with tempfile.TemporaryDirectory() as root_dir, mock.patch("simmer.log", mock.Mock()):
+            coverage_dir = os.path.join(root_dir, "tb__COV_WORK")
+            first.acquire_shared_runtime_lock(coverage_dir)
+
+            def acquire_second():
+                try:
+                    second.acquire_shared_runtime_lock(coverage_dir)
+                    acquired.set()
+                except Exception as exc:
+                    errors.append(exc)
+
+            waiter = threading.Thread(target=acquire_second)
+            waiter.start()
+            self.assertFalse(acquired.wait(0.1))
+            first.release_shared_runtime_locks()
+            self.assertTrue(acquired.wait(1.0))
+            waiter.join(1.0)
+            second.release_shared_runtime_locks()
+
+        self.assertFalse(errors)
+
     @unittest.skipUnless(os.name == "posix", "POSIX advisory-lock behavior")
     def test_symlink_lock_wait_stops_after_cancellation(self):
         with tempfile.TemporaryDirectory() as result_dir:

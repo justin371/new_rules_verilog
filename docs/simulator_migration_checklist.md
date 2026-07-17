@@ -74,5 +74,7 @@ If you want quick confidence before broader regression:
 
 ## Notes
 
-- On Windows, this repository may still fail Bazel fetches if `WORKSPACE` uses Linux-only `file:///nfs/...` paths.
-- The intended final validation environment for this migration is Linux.
+- The active `WORKSPACE` uses public archives. The optional
+  `//deps:repositories_linux_local.bzl` configuration intentionally uses
+  site-local `file:///nfs/...` mirrors and should be enabled only on that site.
+- The supported validation and simulator environment is Red Hat-compatible Linux.

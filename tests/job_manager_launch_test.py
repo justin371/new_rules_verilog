@@ -95,6 +95,23 @@ class _BlockingPreRunJob(Job):
         super().pre_run()
 
 
+class _BlockingPostRunJob(Job):
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.post_run_started = threading.Event()
+        self.release_post_run = threading.Event()
+        self.cancelled = threading.Event()
+
+    def post_run(self):
+        self.post_run_started.set()
+        self.release_post_run.wait()
+        super().post_run()
+
+    def cancel(self):
+        self.cancelled.set()
+
+
 class _TermIgnoringProcess:
 
     def __init__(self):
@@ -128,6 +145,13 @@ class _BlockingLaunchRunner:
 
     def kill(self):
         self.killed.set()
+
+
+class _IncompleteLaunchRunner(_BlockingLaunchRunner):
+
+    def kill(self):
+        super().kill()
+        return False
 
 
 class _CancelableJob(Job):
@@ -335,6 +359,65 @@ class JobManagerLaunchTest(unittest.TestCase):
         self.assertTrue(job.cancelled.is_set())
         self.assertFalse(manager._run_jobs_thread.is_alive())
 
+    def test_incomplete_launch_shutdown_keeps_job_resources_locked(self):
+        log = _Logger()
+        rcfg = SimpleNamespace(options=SimpleNamespace(timeout=1), log=log)
+        job = _CancelableJob(rcfg, "launching")
+        job.job_dir = str(Path(tempfile.mkdtemp()) / "launching")
+        manager = JobManager({"idle_print_seconds": 60, "quit_count": 1}, log)
+        manager.job_lib_type = _IncompleteLaunchRunner
+        _IncompleteLaunchRunner.started.clear()
+        _IncompleteLaunchRunner.release.clear()
+        _IncompleteLaunchRunner.killed.clear()
+        shutdown_result = []
+
+        manager.add_job(job)
+        self.assertTrue(_IncompleteLaunchRunner.started.wait(1.0))
+        killer = threading.Thread(target=lambda: shutdown_result.append(manager.kill()))
+        killer.start()
+        _IncompleteLaunchRunner.release.set()
+        killer.join(2.0)
+
+        self.assertEqual([False], shutdown_result)
+        self.assertTrue(_IncompleteLaunchRunner.killed.is_set())
+        self.assertFalse(job.cancelled.is_set())
+
+    def test_kill_waits_for_post_run_without_cancelling_finalizing_job(self):
+        log = _Logger()
+        rcfg = SimpleNamespace(options=SimpleNamespace(timeout=1), log=log)
+        job = _BlockingPostRunJob(rcfg, "finalizing")
+        job.job_dir = str(Path(tempfile.mkdtemp()) / "finalizing")
+        manager = JobManager({"idle_print_seconds": 60, "quit_count": 1}, log)
+        manager.job_lib_type = _RecordingRunner
+        shutdown_result = []
+
+        try:
+            manager.add_job(job)
+            self.assertTrue(job.post_run_started.wait(1.0))
+            with manager._condition:
+                self.assertIn(job, manager._finalizing)
+
+            killer = threading.Thread(target=lambda: shutdown_result.append(manager.kill()))
+            killer.start()
+            self.assertTrue(killer.is_alive(), "kill did not wait for post_run")
+            self.assertFalse(job.cancel_requested)
+            self.assertFalse(job.cancelled.is_set())
+
+            job.release_post_run.set()
+            killer.join(2.0)
+            self.assertFalse(killer.is_alive())
+            self.assertEqual([True], shutdown_result)
+            self.assertIn(job, manager._done)
+        finally:
+            job.release_post_run.set()
+            manager._run_jobs_thread.join(2.0)
+
+    def test_default_shutdown_wait_covers_process_group_escalation_budget(self):
+        self.assertGreaterEqual(
+            JobManager.SHUTDOWN_JOIN_SECONDS,
+            SubprocessJobRunner.TERM_GRACE_SECONDS + SubprocessJobRunner.KILL_GRACE_SECONDS,
+        )
+
     def test_kill_signals_active_jobs_concurrently(self):
         log = _Logger()
         rcfg = SimpleNamespace(options=SimpleNamespace(timeout=1), log=log)
@@ -369,7 +452,7 @@ class JobManagerLaunchTest(unittest.TestCase):
         manager = JobManager({"idle_print_seconds": 60, "quit_count": 1}, log)
         manager.stop()
         manager.ACTIVE_KILL_JOIN_SECONDS = 0.05
-        job = Job(rcfg, "blocked")
+        job = _CancelableJob(rcfg, "blocked")
         release = threading.Event()
         finished = threading.Event()
 
@@ -383,6 +466,7 @@ class JobManagerLaunchTest(unittest.TestCase):
 
         self.assertFalse(manager.kill())
         self.assertEqual((job, ), manager.interrupted_jobs)
+        self.assertFalse(job.cancelled.is_set())
         release.set()
         self.assertTrue(finished.wait(1.0))
 
@@ -483,7 +567,9 @@ class JobManagerLaunchTest(unittest.TestCase):
         runner._process_group_id = 456
         runner._start_time = datetime.datetime.now() - datetime.timedelta(hours=1)
         runner._timed_out = False
+        runner._orphaned_process_group = False
         runner._term_deadline = None
+        runner._kill_deadline = None
         runner._kill_sent = False
 
         with mock.patch("lib.job_lib.os.killpg", create=True) as killpg, mock.patch("lib.job_lib.signal.SIGKILL",
@@ -507,13 +593,56 @@ class JobManagerLaunchTest(unittest.TestCase):
         runner._p = _ExitedProcess()
         runner._process_group_id = 456
         runner._timed_out = True
+        runner._orphaned_process_group = False
         runner._term_deadline = datetime.datetime.now() - datetime.timedelta(seconds=1)
+        runner._kill_deadline = None
         runner._kill_sent = False
 
-        with mock.patch("lib.job_lib.os.killpg") as killpg:
+        with mock.patch.object(runner, "_process_group_exists", side_effect=[True, False]), \
+             mock.patch.object(runner, "_signal_process_group") as signal_group:
+            self.assertFalse(runner._check_for_done())
             self.assertTrue(runner._check_for_done())
 
-        killpg.assert_called_once_with(456, signal.SIGKILL)
+        signal_group.assert_called_once_with(signal.SIGKILL)
+
+    def test_timed_out_runner_finishes_after_sigkill_grace_period(self):
+        runner = SubprocessJobRunner.__new__(SubprocessJobRunner)
+        runner.job = SimpleNamespace(suppress_output=False,
+                                     rcfg=SimpleNamespace(options=SimpleNamespace(no_stdout=False)))
+        runner.log = _Logger()
+        runner._p = _RunningProcess()
+        runner._process_group_id = 456
+        runner._timed_out = True
+        runner._orphaned_process_group = False
+        runner._term_deadline = datetime.datetime.now() - datetime.timedelta(seconds=2)
+        runner._kill_deadline = datetime.datetime.now() - datetime.timedelta(seconds=1)
+        runner._kill_sent = True
+
+        self.assertTrue(runner._check_for_done())
+        self.assertEqual(-signal.SIGTERM, runner.returncode)
+
+    def test_successful_shell_with_background_processes_is_failed_and_reaped(self):
+        runner = SubprocessJobRunner.__new__(SubprocessJobRunner)
+        runner.job = SimpleNamespace(suppress_output=False,
+                                     rcfg=SimpleNamespace(options=SimpleNamespace(no_stdout=False)))
+        runner.log = _Logger()
+        runner._p = _ExitedProcess()
+        runner._process_group_id = 456
+        runner._timed_out = False
+        runner._orphaned_process_group = False
+        runner._term_deadline = None
+        runner._kill_deadline = None
+        runner._kill_sent = False
+
+        with mock.patch.object(runner, "_process_group_exists", side_effect=[True, True, False]), \
+             mock.patch.object(runner, "_signal_process_group") as signal_group:
+            self.assertFalse(runner._check_for_done())
+            runner._term_deadline = datetime.datetime.now() - datetime.timedelta(seconds=1)
+            self.assertFalse(runner._check_for_done())
+            self.assertTrue(runner._check_for_done())
+
+        self.assertEqual([mock.call(signal.SIGTERM), mock.call(signal.SIGKILL)], signal_group.call_args_list)
+        self.assertEqual(-signal.SIGTERM, runner.returncode)
 
     def test_runner_exception_kills_and_reaps_process_group(self):
         runner = SubprocessJobRunner.__new__(SubprocessJobRunner)
@@ -548,7 +677,9 @@ class JobManagerLaunchTest(unittest.TestCase):
         runner._p = _RunningProcess()
         runner._start_time = datetime.datetime.now() - datetime.timedelta(hours=1)
         runner._timed_out = False
+        runner._orphaned_process_group = False
         runner._term_deadline = None
+        runner._kill_deadline = None
         runner._kill_sent = False
         runner._timeout_start = None
         runner._process_group_id = 456
@@ -573,13 +704,14 @@ class JobManagerLaunchTest(unittest.TestCase):
         runner._p = _TermIgnoringProcess()
         runner._process_group_id = 456
         runner._kill_sent = False
+        runner._kill_lock = threading.Lock()
         runner.done = False
         runner.TERM_GRACE_SECONDS = 0.01
         runner.KILL_GRACE_SECONDS = 0.01
 
         with mock.patch.object(runner, "_signal_process_group") as signal_group, \
              mock.patch.object(runner, "_wait_for_process_group_exit", side_effect=[False, True]):
-            runner.kill()
+            self.assertTrue(runner.kill())
 
         self.assertEqual([mock.call(signal.SIGTERM), mock.call(signal.SIGKILL)], signal_group.call_args_list)
         self.assertEqual([0.01, 0.01], runner._p.wait_calls)

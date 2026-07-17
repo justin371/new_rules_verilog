@@ -353,6 +353,7 @@ class XceliumSimulator(SimulatorInterface):
         # Coverage
         if self.options.coverage:
             vcomp_job.cov_work_dir = os.path.join(self.rcfg.regression_dir, vcomp_job.name + "__COV_WORK")
+            vcomp_job.acquire_shared_runtime_lock(vcomp_job.cov_work_dir)
             for stale_path in [
                     os.path.join(vcomp_job.cov_work_dir, "scope"),
                     os.path.join(vcomp_job.cov_work_dir, "merged_db"),
@@ -658,7 +659,7 @@ class XceliumSimulator(SimulatorInterface):
             "Xcelium --no-compile requires an existing elaboration database with a run.*.d directory under '{}'".format(
                 job_dir))
 
-    def cleanup_shared_runtime_artifacts(self, vcomp_jobs):
+    def _cleanup_shared_runtime_files(self, vcomp_jobs):
         # Only remove simulator scratch files created at the top level of the
         # shared runfiles tree. Never recurse into mirrored source areas such as
         # hw/, external/, odie/, testbench/, tests/, etc., because those
@@ -707,3 +708,9 @@ class XceliumSimulator(SimulatorInterface):
                     runfiles_dir,
                 )
             cleaned_dirs.add(runfiles_dir)
+
+    def cleanup_shared_runtime_artifacts(self, vcomp_jobs):
+        try:
+            self._cleanup_shared_runtime_files(vcomp_jobs)
+        finally:
+            super().cleanup_shared_runtime_artifacts(vcomp_jobs)

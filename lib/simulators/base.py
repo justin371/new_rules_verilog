@@ -158,9 +158,18 @@ class SimulatorInterface(abc.ABC):
         """Clean simulator scratch files created under shared runfiles dirs.
 
         Called once after the regression finishes so cleanup does not race with
-        active simulations. The default implementation does nothing.
+        active simulations. The default implementation releases any locks held
+        for shared backend directories.
         """
-        return
+        released_jobs = set()
+        for vcomp_job in vcomp_jobs.values():
+            job_identity = id(vcomp_job)
+            if job_identity in released_jobs:
+                continue
+            released_jobs.add(job_identity)
+            release_locks = getattr(vcomp_job, "release_shared_runtime_locks", None)
+            if release_locks is not None:
+                release_locks()
 
     def cleanup_test_coverage(self, test_job):
         """Remove one failed test's simulator-specific coverage database."""

@@ -48,12 +48,16 @@ class DummyVcompJob:
         self.bench_dir = tempfile.mkdtemp(prefix="vcs_bench_")
         self.job_dir = tempfile.mkdtemp(prefix="vcs_vcomp_")
         self.name = "unit_vcomp"
+        self.shared_runtime_lock_paths = []
         self.tb_options = {
             "dut_instance": "hdl_top.dut",
             "dut_top": "unit_test_top",
             "vcs_cm_hier": "tests/coverage_hier.cfg",
             "xcelium_covfile": "tests/coverage.ccf",
         }
+
+    def acquire_shared_runtime_lock(self, runtime_path):
+        self.shared_runtime_lock_paths.append(runtime_path)
 
 
 class VcsRuntimeContractTest(unittest.TestCase):
@@ -1827,6 +1831,7 @@ class VcsRuntimeContractTest(unittest.TestCase):
             vcs_vcomp = DummyVcompJob()
             vcs_arguments = shlex.split(vcs.generate_compile_options(vcs_vcomp)["cov_opts"])
         self.assertEqual(vcs_vcomp.cov_work_dir, vcs_arguments[vcs_arguments.index("-cm_dir") + 1])
+        self.assertEqual([vcs_vcomp.cov_work_dir], vcs_vcomp.shared_runtime_lock_paths)
         self.assertEqual(str(hierarchy), vcs_arguments[vcs_arguments.index("-cm_hier") + 1])
 
         xcelium_options = parse_args(["--simulator", "XRUN", "--coverage", "A"])
@@ -1837,6 +1842,7 @@ class VcsRuntimeContractTest(unittest.TestCase):
         xcelium_vcomp.bazel_runfiles_main = str(root)
         xcelium.generate_compile_options(xcelium_vcomp)
         coverage_root = Path(xcelium_vcomp.cov_work_dir)
+        self.assertEqual([xcelium_vcomp.cov_work_dir], xcelium_vcomp.shared_runtime_lock_paths)
         merge_tcl = (coverage_root / "merge_exec.tcl").read_text(encoding="utf-8")
         report_tcl = (coverage_root / "imc_report.tcl").read_text(encoding="utf-8")
         merge_script = (coverage_root / "merge.sh").read_text(encoding="utf-8")
@@ -1859,14 +1865,20 @@ class VcsRuntimeContractTest(unittest.TestCase):
 
         options = parse_args(["--simulator", "XRUN"])
         simulator = XceliumSimulator(options, DummyRegressionConfig(), None)
+        release_locks = mock.Mock()
         simulator.cleanup_shared_runtime_artifacts({
-            "//unit:tb": SimpleNamespace(bazel_runfiles_main=str(runfiles)),
+            "//unit:tb":
+            SimpleNamespace(
+                bazel_runfiles_main=str(runfiles),
+                release_shared_runtime_locks=release_locks,
+            ),
         })
 
         for name in ("environment.sv", "xmsim_source.err", "xp_elab.log.backup", "waves.shm"):
             self.assertTrue((runfiles / name).exists(), name)
         self.assertFalse((runfiles / "xp_elab.log").exists())
         self.assertFalse((runfiles / "verisium_debug_logs").exists())
+        release_locks.assert_called_once_with()
 
     def test_xcelium_coverage_report_command_preserves_paths_with_spaces(self):
         options = parse_args(["--simulator", "XRUN", "--coverage", "A"])
@@ -2177,7 +2189,8 @@ class VcsRuntimeContractTest(unittest.TestCase):
         self.assertIn('"$log_check_python" "$log_check_script"', sim_template)
         self.assertNotIn("bazel-bin/external/rules_verilog", sim_template)
         self.assertIn("SIMMER_WAVE_LAUNCHER", waves_template)
-        self.assertIn("whitespace-delimited argv prefix", waves_template)
+        self.assertIn("Parse shell-style quoting without evaluating", waves_template)
+        self.assertIn("shlex.split", waves_template)
         self.assertIn("mapfile -t WAVE_VIEW_ARGV", waves_template)
         self.assertIn("{{ job_dir|shell_quote }}", waves_template)
         self.assertNotIn("eval ", waves_template)
@@ -2241,14 +2254,21 @@ class VcsRuntimeContractTest(unittest.TestCase):
 
             env = os.environ.copy()
             env.update({
-                "SIMMER_WAVE_LAUNCHER": "bash {} ; $({}) --launcher-end".format(launcher, injector),
-                "WAVE_PREFIX_CAPTURE": str(prefix_capture),
-                "WAVE_VIEW_CAPTURE": str(viewer_capture),
-                "WAVE_INJECTION_SENTINEL": str(injection_sentinel),
+                "SIMMER_WAVE_LAUNCHER":
+                "bash {} -R 'select[osver == ws7]' ; $({}) --launcher-end".format(launcher, injector),
+                "WAVE_PREFIX_CAPTURE":
+                str(prefix_capture),
+                "WAVE_VIEW_CAPTURE":
+                str(viewer_capture),
+                "WAVE_INJECTION_SENTINEL":
+                str(injection_sentinel),
             })
             subprocess.run(["bash", str(script)], check=True, env=env, capture_output=True, text=True)
 
-            self.assertEqual([";", "$({})".format(injector)], prefix_capture.read_text(encoding="utf-8").splitlines())
+            self.assertEqual(
+                ["-R", "select[osver == ws7]", ";", "$({})".format(injector)],
+                prefix_capture.read_text(encoding="utf-8").splitlines(),
+            )
             self.assertEqual(viewer_argv[1:], viewer_capture.read_text(encoding="utf-8").splitlines())
             self.assertFalse(injection_sentinel.exists())
 

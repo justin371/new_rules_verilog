@@ -650,7 +650,7 @@ seed and original simulator options. Run it directly from any directory. Set
 
 - Discovery metadata is cached under `.simmer/cache/` and can be deleted at any
   time. `--no-bazel` accepts it only while BUILD, `.bzl`, MODULE/WORKSPACE and
-  Bazel configuration files remain older than the cache.
+  Bazel configuration files (including `.bazelignore`) remain unchanged.
 - Passing tests are removed by default. `--nt` intentionally retains them.
 - Do not enable waves, coverage, SmartLog, ICO artifacts or `--nt` in routine
   throughput regressions.

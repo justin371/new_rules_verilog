@@ -102,6 +102,8 @@ class RegressionDiscoveryTest(unittest.TestCase):
         build_file.write_text("filegroup(name='x')\n", encoding="utf-8")
         bazel_version = proj_dir / ".bazelversion"
         bazel_version.write_text("7.7.1\n", encoding="utf-8")
+        bazel_ignore = proj_dir / ".bazelignore"
+        bazel_ignore.write_text("bazel-out\n", encoding="utf-8")
 
         config = self._config(proj_dir)
         cache_dir = proj_dir / ".simmer" / "cache"
@@ -120,6 +122,12 @@ class RegressionDiscoveryTest(unittest.TestCase):
 
         config._write_discovery_manifest()
         build_file.unlink()
+        self.assertFalse(config._discovery_cache_is_fresh())
+
+        config._write_discovery_manifest()
+        original_mtime = bazel_ignore.stat().st_mtime
+        bazel_ignore.write_text("bazel-out\nbazel-testlogs\n", encoding="utf-8")
+        os.utime(bazel_ignore, (original_mtime, original_mtime))
         self.assertFalse(config._discovery_cache_is_fresh())
 
     @unittest.skipUnless(os.name == "posix", "POSIX advisory-lock behavior")

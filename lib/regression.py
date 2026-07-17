@@ -29,6 +29,7 @@ DISCOVERY_CACHE_FILES = (
     "discovery_manifest.json",
 )
 DISCOVERY_ROOT_FILES = {
+    ".bazelignore",
     ".bazelrc",
     ".bazelversion",
     "MODULE.bazel",
