@@ -7,6 +7,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import threading
 import time
 import unittest
 from types import SimpleNamespace
@@ -30,7 +31,7 @@ from lib.job_lib import Job, JobManager, JobStatus
 from lib.regression import resolve_report_generation
 from lib.runtime_options import format_sim_opts_dict, resolve_test_timeout_hours
 from lib.simulators.vcs import PARTCOMP_MANIFEST_FILENAME, VcsSimulator, detect_allocated_cpus
-from lib.simulators.xcelium import XceliumSimulator
+from lib.simulators.xcelium import XceliumSimulator, _tcl_quote
 
 
 class DummyRegressionConfig:
@@ -72,7 +73,7 @@ class VcsRuntimeContractTest(unittest.TestCase):
              mock.patch("simmer.subprocess.run", return_value=completed) as run:
             self.assertEqual("/output/bazel-bin", simmer.get_bazel_bin("/repo"))
 
-        run.assert_called_once_with(["bazel", "info", "bazel-bin"], capture_output=True, text=True)
+        run.assert_called_once_with(["bazel", "info", "bazel-bin"], cwd="/repo", capture_output=True, text=True)
 
     def test_html_reports_default_to_each_users_regression_directory(self):
         options = parse_args(["--simulator", "VCS"])
@@ -480,6 +481,24 @@ class VcsRuntimeContractTest(unittest.TestCase):
 
             self.assertEqual(os.path.abspath(relative_path), capture["wave_tcl_path"])
 
+    def test_xcelium_custom_wave_tcl_path_is_resolved_before_the_run_directory_changes(self):
+        with tempfile.NamedTemporaryFile(suffix=".tcl") as wave_tcl:
+            relative_path = os.path.relpath(wave_tcl.name)
+            options, simulator = self._validated([
+                "--simulator",
+                "XRUN",
+                "--waves",
+                "--wave-tcl",
+                relative_path,
+            ])
+
+            capture = simulator.get_wave_capture_options(
+                SimpleNamespace(job_dir=tempfile.mkdtemp()),
+                "/tmp/generated-waves.tcl",
+            )
+
+            self.assertEqual(os.path.abspath(relative_path), capture["wave_tcl_path"])
+
     def test_xcelium_pldm_modes_use_separate_bazel_filelists(self):
         for mode, suffix in (("pldm_sa", "pldm_sa"), ("pldm_sim", "pldm_ice")):
             options = parse_args(["--simulator", "XRUN", "--emulator", mode])
@@ -532,9 +551,12 @@ class VcsRuntimeContractTest(unittest.TestCase):
                 "--covfile",
                 xrun_covfile.name,
             ])
-            xrun_inputs = XceliumSimulator(xrun_options, DummyRegressionConfig(),
-                                           None).get_compile_fingerprint_inputs(DummyVcompJob())
+            xrun_simulator = XceliumSimulator(xrun_options, DummyRegressionConfig(), None)
+            xrun_simulator._xcelium_tool_identity = "xrun release = 25.03-s001"
+            xrun_inputs = xrun_simulator.get_compile_fingerprint_inputs(DummyVcompJob())
             self.assertIn(xrun_covfile.name, xrun_inputs["extra_input_paths"])
+            self.assertEqual("xrun release = 25.03-s001", xrun_inputs["environment"]["XCELIUM_TOOL_ID"])
+            self.assertNotIn("LM_LICENSE_FILE", xrun_inputs["environment"])
 
     def test_shell_templates_quote_runtime_paths(self):
         for template_path in (
@@ -835,6 +857,24 @@ class VcsRuntimeContractTest(unittest.TestCase):
             with self.assertRaisesRegex(RuntimeError, "Unable to find a stable 'Compiler version'"):
                 simulator.get_tool_identity()
 
+    def test_xcelium_tool_identity_uses_supported_release_query_and_ignores_host_noise(self):
+        options = parse_args(["--simulator", "XRUN"])
+        with mock.patch.dict(os.environ, {"RV_XCELIUM_TOOL_ID": "Xcelium 25.03 unit test"}):
+            simulator = XceliumSimulator(options, DummyRegressionConfig(), None)
+            self.assertEqual("Xcelium 25.03 unit test", simulator.get_tool_identity())
+
+        identities = []
+        for host in ("sh-cloud24", "sh-cloud25"):
+            stdout = "runmod: selected host {}\n".format(host)
+            stderr = "TOOL: xrun(64) 25.03-s001: Started on Jul 17, 2026 at 12:34:56 CST\n"
+            probe = XceliumSimulator(options, DummyRegressionConfig(), None)
+            with mock.patch("lib.simulators.xcelium.subprocess.run",
+                            return_value=SimpleNamespace(returncode=0, stdout=stdout, stderr=stderr)) as run:
+                identities.append(probe.get_tool_identity())
+            self.assertEqual(["-64", "-version"], run.call_args.args[0][-2:])
+
+        self.assertEqual(["xrun release = 25.03-s001", "xrun release = 25.03-s001"], identities)
+
     def test_vcs_partcomp_default_preserves_single_slot_lsf_job(self):
         lsf_environment = {
             "LSB_DJOB_NUMPROC": "1",
@@ -942,6 +982,7 @@ class VcsRuntimeContractTest(unittest.TestCase):
         simulator._vcs_tool_identity = "VCS Y-2026.03 unit test"
         vcomp = DummyVcompJob()
         Path(vcomp.job_dir, "simv").touch()
+        Path(vcomp.job_dir, "simv").chmod(0o755)
         vcomp.compile_fingerprint = {
             "compile_args_sha256": "args",
             "compile_inputs_manifest_sha256": "inventory",
@@ -1189,15 +1230,17 @@ class VcsRuntimeContractTest(unittest.TestCase):
             XceliumSimulator(wrong_key_options, DummyRegressionConfig(), None).prepare_compile_job(vcomp())
 
     def test_xcelium_wave_template_honors_delta_and_end_time(self):
-        template = self._read_repo_file("bin/templates/xrun_wave_cmd_template.tcl.j2")
+        template_text = self._read_repo_file("bin/templates/xrun_wave_cmd_template.tcl.j2")
 
-        self.assertIn("-default{{ delta }}", template)
-        self.assertNotIn("options.delta", template)
-        self.assertIn("options.wave_end - options.wave_start", template)
-        self.assertIn("database -close shm_db", template)
-        self.assertIn("database -close vcd_db", template)
+        self.assertIn("-default{{ delta }}", template_text)
+        self.assertNotIn("options.delta", template_text)
+        self.assertIn("options.wave_end - options.wave_start", template_text)
+        self.assertIn("database -close shm_db", template_text)
+        self.assertIn("database -close vcd_db", template_text)
 
-        rendered = jinja2.Template(template, undefined=jinja2.StrictUndefined).render(
+        environment = jinja2.Environment(undefined=jinja2.StrictUndefined)
+        environment.filters["tcl_quote"] = _tcl_quote
+        rendered = environment.from_string(template_text).render(
             delta=" -event",
             options=SimpleNamespace(
                 probe_packed=128,
@@ -1208,9 +1251,10 @@ class VcsRuntimeContractTest(unittest.TestCase):
                 wave_start=20,
                 wave_type="shm",
             ),
-            waves_db="waves.shm",
+            waves_db="/tmp/waves directory/waves.shm",
         )
         self.assertIn("-default -event", rendered)
+        self.assertIn('-into "/tmp/waves directory/waves.shm"', rendered)
         self.assertIn("run 80ns", rendered)
         self.assertIn("database -close shm_db", rendered)
 
@@ -1315,6 +1359,53 @@ class VcsRuntimeContractTest(unittest.TestCase):
             self.assertIn("set -Eeuo pipefail", template)
             self.assertIn('"$@"', template)
         self.assertIn('"${PYTHON:-python3}" ./{LINT_PARSER}', lint_templates[1])
+
+    def test_svunit_waves_and_launch_preserve_execution_argv(self):
+        root = Path(tempfile.mkdtemp(prefix="svunit argv contract "))
+        self.addCleanup(shutil.rmtree, root, ignore_errors=True)
+        simulator_stub = root / "simulator stub.sh"
+        viewer_stub = root / "wave viewer stub.sh"
+        simulator_args = root / "simulator args.txt"
+        viewer_args = root / "viewer args.txt"
+        wave_tcl = root / "wave commands with spaces.tcl"
+        wave_tcl.touch()
+        simulator_stub.write_text(
+            "#!/usr/bin/env bash\nprintf '%s\\n' \"$@\" > {}\nprintf '[testrunner]: PASSED\\n' > run.log\n".format(
+                shlex.quote(simulator_args.name)),
+            encoding="utf-8",
+            newline="\n",
+        )
+        viewer_stub.write_text(
+            "#!/usr/bin/env bash\n"
+            "printf '%s\\n' \"$@\" > {}\n".format(shlex.quote(viewer_args.name)),
+            encoding="utf-8",
+            newline="\n",
+        )
+        simulator_stub.chmod(0o755)
+        viewer_stub.chmod(0o755)
+
+        template = self._read_repo_file("vendors/cadence/verilog_rtl_unit_test_svunit.sh.template").replace(
+            "\r\n", "\n")
+        script_text = template.replace("{SIMULATOR_COMMAND}", shlex.quote("./" + simulator_stub.name))
+        script_text = script_text.replace("{WAVES_RENDER_CMD_PATH}", wave_tcl.name)
+        script_text = script_text.replace("{WAVE_VIEWER_COMMAND}", shlex.quote("./" + viewer_stub.name))
+        for placeholder in ("{PRE_FLIST_ARGS}", "{FLISTS}", "{POST_FLIST_ARGS}"):
+            script_text = script_text.replace(placeholder, "")
+        script = root / "run svunit.sh"
+        script.write_text(script_text, encoding="utf-8", newline="\n")
+
+        subprocess.run(
+            ["bash", script.name, "--waves", "--launch", "user argument with spaces"],
+            cwd=root,
+            check=True,
+        )
+
+        arguments = simulator_args.read_text(encoding="utf-8").splitlines()
+        wave_index = arguments.index("-input {}".format(wave_tcl.name))
+        self.assertEqual(["-r", "-input {}".format(wave_tcl.name), "-r", "-access r"],
+                         arguments[wave_index - 1:wave_index + 3])
+        self.assertEqual("user argument with spaces", arguments[-1])
+        self.assertEqual(["waves.shm"], viewer_args.read_text(encoding="utf-8").splitlines())
 
     def test_sim_template_cleans_socket_sidecar_after_unexpected_failure(self):
         # Given: a long-running socket sidecar and an invalid simulation work directory.
@@ -1483,6 +1574,7 @@ class VcsRuntimeContractTest(unittest.TestCase):
         self.assertIn("mkdir -p {{ (VCOMP_DIR ~ '/csrc')|shell_quote }}", template)
         self.assertIn("-Mdir={{ (VCOMP_DIR ~ '/csrc')|shell_quote }}", template)
         self.assertIn("-Mlib={{ (VCOMP_DIR ~ '/csrc')|shell_quote }}", template)
+        self.assertNotIn("-p1800_macro_expansion", template)
         self.assertIn("{{ partcomp_opts }}", template)
         self.assertIn("{% if options.vso -%}", template)
         self.assertIn("-vso_opts buildname={{ vso_build_name|shell_quote }}", template)
@@ -1493,7 +1585,60 @@ class VcsRuntimeContractTest(unittest.TestCase):
         self.assertNotIn("+systemverilogext", compile_args)
         self.assertIn("-Mupdate", compile_args)
 
-    def test_vcs_no_compile_requires_simv(self):
+    def test_vcs_compile_template_preserves_defines_and_coverage_paths_with_spaces(self):
+        root = Path(tempfile.mkdtemp(prefix="vcs compile argv "))
+        self.addCleanup(shutil.rmtree, root, ignore_errors=True)
+        runfiles = root / "runfiles root"
+        vcomp_dir = root / "compile output"
+        runfiles.mkdir()
+        stub = root / "vcs stub.sh"
+        captured = root / "vcs args.txt"
+        stub.write_text("#!/usr/bin/env bash\nprintf '%s\\n' \"$@\" > {}\n".format(shlex.quote("../" + captured.name)),
+                        encoding="utf-8",
+                        newline="\n")
+        stub.chmod(0o755)
+
+        environment = jinja2.Environment(undefined=jinja2.StrictUndefined)
+        environment.filters["shell_quote"] = shlex.quote
+        template = environment.from_string(
+            self._read_repo_file("bin/templates/vcs_compile_template.sh.j2").replace("\r\n", "\n"))
+        rendered = template.render(
+            VCOMP_DIR=vcomp_dir.name,
+            additional_defines=["MESSAGE=value with spaces", "APOSTROPHE=a'b"],
+            bazel_compile_args="compile args.f",
+            bazel_runfiles_main=runfiles.name,
+            cov_opts=shlex.join(["-cm_dir", "../coverage database"]),
+            debug_mode="default",
+            options=SimpleNamespace(
+                compile_args_file=None,
+                dtl=False,
+                fgp=None,
+                gui=False,
+                smartlog=False,
+                vcs_profile=False,
+                vso=False,
+                vso_cbv=False,
+                vso_ccex=False,
+                waves=None,
+                xprop_was_explicit=False,
+            ),
+            partcomp_opts="",
+            vcs_runner=shlex.quote("../" + stub.name),
+            vso_build_name="",
+            vso_workdir="",
+            xprop_cmd=None,
+        )
+        script = root / "compile.sh"
+        script.write_text(rendered, encoding="utf-8", newline="\n")
+        subprocess.run(["bash", script.name], cwd=root, check=True)
+
+        arguments = captured.read_text(encoding="utf-8").splitlines()
+        self.assertIn("+define+MESSAGE=value with spaces", arguments)
+        self.assertIn("+define+APOSTROPHE=a'b", arguments)
+        self.assertEqual("../coverage database", arguments[arguments.index("-cm_dir") + 1])
+        self.assertNotIn("-p1800_macro_expansion", arguments)
+
+    def test_reusable_compile_artifacts_require_backend_elaboration_outputs(self):
         options = parse_args(["-t", "unit:test", "--simulator", "VCS"])
         simulator = VcsSimulator(options, DummyRegressionConfig(), None)
         job_dir = Path(tempfile.mkdtemp())
@@ -1501,8 +1646,25 @@ class VcsRuntimeContractTest(unittest.TestCase):
 
         with self.assertRaises(FileNotFoundError):
             simulator.validate_reusable_compile_artifacts(vcomp)
-        (job_dir / "simv").touch()
+        (job_dir / "simv").mkdir()
+        with self.assertRaises(FileNotFoundError):
+            simulator.validate_reusable_compile_artifacts(vcomp)
+        (job_dir / "simv").rmdir()
+        (job_dir / "simv").touch(mode=0o600)
+        with mock.patch("lib.simulators.vcs.os.access", return_value=False):
+            with self.assertRaises(FileNotFoundError):
+                simulator.validate_reusable_compile_artifacts(vcomp)
+        (job_dir / "simv").chmod(0o755)
         simulator.validate_reusable_compile_artifacts(vcomp)
+
+        xcelium_options = parse_args(["-t", "unit:test", "--simulator", "XRUN"])
+        xcelium = XceliumSimulator(xcelium_options, DummyRegressionConfig(), None)
+        xcelium_job_dir = Path(tempfile.mkdtemp())
+        xcelium_vcomp = SimpleNamespace(job_dir=str(xcelium_job_dir))
+        with self.assertRaises(FileNotFoundError):
+            xcelium.validate_reusable_compile_artifacts(xcelium_vcomp)
+        (xcelium_job_dir / "run.lnx8664.25.03.d").mkdir()
+        xcelium.validate_reusable_compile_artifacts(xcelium_vcomp)
 
     def test_xcelium_batch_vwdb_and_xprop_contract(self):
         options, simulator = self._validated(["-t", "unit:test", "--simulator", "XRUN", "--waves", "--xprop", "F"])
@@ -1553,6 +1715,67 @@ class VcsRuntimeContractTest(unittest.TestCase):
         Path(test_job.coverage_db_path).mkdir(parents=True)
         simulator.cleanup_test_coverage(test_job)
         self.assertFalse(Path(test_job.coverage_db_path).exists())
+
+    def test_backend_generated_coverage_paths_with_spaces_remain_single_arguments(self):
+        root = Path(tempfile.mkdtemp(prefix="coverage path contract "))
+        self.addCleanup(shutil.rmtree, root, ignore_errors=True)
+        hierarchy = root / "coverage hierarchy.cfg"
+        hierarchy.touch()
+        vcs_options = parse_args([
+            "--simulator",
+            "VCS",
+            "--cm",
+            "line",
+            "--vcs-cm-hier",
+            str(hierarchy),
+        ])
+        vcs_config = DummyRegressionConfig()
+        vcs_config.regression_dir = str(root / "vcs regression")
+        vcs = VcsSimulator(vcs_options, vcs_config, None)
+        with mock.patch.object(vcs, "setup_coverage_merge"):
+            vcs_vcomp = DummyVcompJob()
+            vcs_arguments = shlex.split(vcs.generate_compile_options(vcs_vcomp)["cov_opts"])
+        self.assertEqual(vcs_vcomp.cov_work_dir, vcs_arguments[vcs_arguments.index("-cm_dir") + 1])
+        self.assertEqual(str(hierarchy), vcs_arguments[vcs_arguments.index("-cm_hier") + 1])
+
+        xcelium_options = parse_args(["--simulator", "XRUN", "--coverage", "A"])
+        xcelium_config = DummyRegressionConfig()
+        xcelium_config.regression_dir = str(root / "xrun regression")
+        xcelium = XceliumSimulator(xcelium_options, xcelium_config, None)
+        xcelium_vcomp = DummyVcompJob()
+        xcelium_vcomp.bazel_runfiles_main = str(root)
+        xcelium.generate_compile_options(xcelium_vcomp)
+        coverage_root = Path(xcelium_vcomp.cov_work_dir)
+        merge_tcl = (coverage_root / "merge_exec.tcl").read_text(encoding="utf-8")
+        report_tcl = (coverage_root / "imc_report.tcl").read_text(encoding="utf-8")
+        merge_script = (coverage_root / "merge.sh").read_text(encoding="utf-8")
+        self.assertIn(_tcl_quote(str(coverage_root / "merged_db")), merge_tcl)
+        self.assertIn(_tcl_quote(str(coverage_root / "coverage_code.txt")), report_tcl)
+        self.assertEqual(
+            str(coverage_root / "merge_exec.tcl"),
+            shlex.split(merge_script.splitlines()[1])[shlex.split(merge_script.splitlines()[1]).index("-exec") + 1],
+        )
+
+    def test_xcelium_shared_cleanup_keeps_top_level_names_matched_only_by_old_globs(self):
+        runfiles = Path(tempfile.mkdtemp(prefix="xrun shared runfiles "))
+        self.addCleanup(shutil.rmtree, runfiles, ignore_errors=True)
+        for name in ("environment.sv", "xmsim_source.err", "xp_elab.log.backup"):
+            (runfiles / name).write_text("legitimate runfile\n", encoding="utf-8")
+        (runfiles / "waves.shm").mkdir()
+        (runfiles / "waves.shm" / "source.sv").touch()
+        (runfiles / "xp_elab.log").touch()
+        (runfiles / "verisium_debug_logs").mkdir()
+
+        options = parse_args(["--simulator", "XRUN"])
+        simulator = XceliumSimulator(options, DummyRegressionConfig(), None)
+        simulator.cleanup_shared_runtime_artifacts({
+            "//unit:tb": SimpleNamespace(bazel_runfiles_main=str(runfiles)),
+        })
+
+        for name in ("environment.sv", "xmsim_source.err", "xp_elab.log.backup", "waves.shm"):
+            self.assertTrue((runfiles / name).exists(), name)
+        self.assertFalse((runfiles / "xp_elab.log").exists())
+        self.assertFalse((runfiles / "verisium_debug_logs").exists())
 
     def test_xcelium_coverage_report_command_preserves_paths_with_spaces(self):
         options = parse_args(["--simulator", "XRUN", "--coverage", "A"])
@@ -1712,6 +1935,7 @@ class VcsRuntimeContractTest(unittest.TestCase):
         manager.log = mock.Mock()
         manager._todo = [simulation]
         manager._skipped = []
+        manager._condition = threading.Condition()
 
         manager._move_children_to_skipped(vcomp)
 

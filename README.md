@@ -22,8 +22,13 @@ http_archive(
 
 load("@rules_verilog//:deps.bzl", "verilog_dependencies")
 verilog_dependencies()
+
+load("@rules_python//python:repositories.bzl", "py_repositories")
+py_repositories()
 ```
-Pin a reviewed commit and its archive SHA rather than tracking `main` directly.
+The second load/call initializes the pinned rules_python 0.40 repositories after
+`verilog_dependencies` declares `@rules_python`. Pin a reviewed commit and its
+archive SHA rather than tracking `main` directly.
 
 
 Cadence Xcelium needs both `HOME` and `LM_LICENSE_FILE`; add them to your `.bazelrc` file:
@@ -391,8 +396,8 @@ Load rules into your `BUILD` files from [@rules_verilog//verilog:defs.bzl](veril
 These rules were written with the Cadence and Synopsys tools as the underlying compiler and simulator. Abstraction leaks are prevalent throughout the rules.
 
 ### UVM Testbenches
-Use one-step `verilog_dv_unit_test`/`verilog_rtl_unit_test` for small tests under
-either simulator. Full VCS UVM regressions should use
+Use one-step `verilog_dv_unit_test`/`verilog_rtl_unit_test` for small Xcelium
+tests. VCS simulations, including small tests, should use
 [verilog_dv_tb](docs/defs.md#verilog_dv_tb),
 [verilog_dv_test_cfg](docs/defs.md#verilog_dv_test_cfg), and `simmer` so the
 compiled `simv` can be reused across tests.

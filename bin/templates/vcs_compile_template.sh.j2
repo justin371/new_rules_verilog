@@ -10,7 +10,6 @@ cd {{ bazel_runfiles_main|shell_quote }}
   -full64 \
   -Mdir={{ (VCOMP_DIR ~ '/csrc')|shell_quote }} \
   -Mlib={{ (VCOMP_DIR ~ '/csrc')|shell_quote }} \
-  -p1800_macro_expansion \
   {% if options.fgp is not none -%}
     -fgp \
   {% endif -%}
@@ -40,7 +39,7 @@ cd {{ bazel_runfiles_main|shell_quote }}
 
   -file {{ bazel_compile_args|shell_quote }} \
   {% for define in additional_defines -%}
-    +define+{{ define }} \
+    {{ ('+define+' ~ define)|shell_quote }} \
   {% endfor -%}
   {% if debug_mode == "waves" -%}
     {% if options.dtl -%}

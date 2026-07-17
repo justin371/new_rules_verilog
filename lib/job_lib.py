@@ -172,6 +172,9 @@ class Job():
     def post_run_failed(self, exc):
         self.error_message = str(exc)
 
+    def cancel(self):
+        """Release job-owned resources after an explicit scheduler shutdown."""
+
     @property
     def duration_s(self):
         try:
@@ -206,6 +209,7 @@ class JobRunner():
 class SubprocessJobRunner(JobRunner):
 
     TERM_GRACE_SECONDS = 10
+    KILL_GRACE_SECONDS = 2
 
     def __init__(self, job, manager):
         super(SubprocessJobRunner, self).__init__(job, manager)
@@ -238,6 +242,18 @@ class SubprocessJobRunner(JobRunner):
             os.killpg(self._process_group_id, sig)
         except ProcessLookupError:
             pass
+
+    def _process_group_exists(self):
+        try:
+            os.killpg(self._process_group_id, 0)
+        except ProcessLookupError:
+            return False
+        return True
+
+    def _wait_for_process_group_exit(self, deadline):
+        while self._process_group_exists() and time.monotonic() < deadline:
+            time.sleep(0.05)
+        return not self._process_group_exists()
 
     def _close_output_streams(self):
         for stream in (getattr(self, "stdout_fp", None), getattr(self, "stderr_fp", None)):
@@ -323,16 +339,29 @@ class SubprocessJobRunner(JobRunner):
         return self._p.returncode
 
     def kill(self):
+        """Terminate the complete subprocess group and synchronously reap it."""
         self._signal_process_group(signal.SIGTERM)
-        # None of the following variants seemed to work (due to shell=True ?)
-        # process = psutil.Process(self._p.pid)
-        # for proc in process.children(recursive=True):
-        #     proc.kill()
-        # process.kill()
+        term_deadline = time.monotonic() + self.TERM_GRACE_SECONDS
+        try:
+            self._p.wait(timeout=self.TERM_GRACE_SECONDS)
+        except subprocess.TimeoutExpired:
+            pass
 
-        # self._p.terminate()
+        if not self._wait_for_process_group_exit(term_deadline):
+            self.log.warning("%s did not exit after SIGTERM; sending SIGKILL", self.job)
+            self._signal_process_group(signal.SIGKILL)
+            self._kill_sent = True
 
-        # self._p.kill()
+        try:
+            self._p.wait(timeout=self.KILL_GRACE_SECONDS)
+        except subprocess.TimeoutExpired:
+            # A process outside the new session cannot be reached through the
+            # process-group signal. Reap the shell as a final fallback.
+            self._p.kill()
+            self._p.wait()
+        self._wait_for_process_group_exit(time.monotonic() + self.KILL_GRACE_SECONDS)
+        self._close_output_streams()
+        self.done = True
 
 
 class JobManager():
@@ -341,10 +370,16 @@ class JobManager():
 
     def __init__(self, options, log):
         self.log = log
+        if options['idle_print_seconds'] < 1:
+            raise ValueError("idle_print_seconds must be positive")
         self.idle_print_interval = datetime.timedelta(seconds=options['idle_print_seconds'])
-        self.active_job_limit = max(1, int(options.get('active_job_limit', 1)))
+        self.active_job_limit = int(options.get('active_job_limit', 1))
+        if self.active_job_limit < 1:
+            raise ValueError("active_job_limit must be positive")
 
         self._quit_count = options['quit_count']
+        if self._quit_count < 1:
+            raise ValueError("quit_count must be positive")
         self._error_count = 0
         self._done_grace_exit = False
         self.exited_prematurely = False
@@ -367,7 +402,10 @@ class JobManager():
 
         self._skipped = []
 
-        self._jobs_added = threading.Event()
+        # Every queue transition and scheduler lifecycle flag is protected by
+        # this condition. Hooks and subprocess operations always run outside it.
+        self._condition = threading.Condition(threading.RLock())
+        self._launching = []
 
         self._run_jobs_thread = threading.Thread(name="_run_jobs", target=self._run_jobs)
         self._run_jobs_thread.daemon = True
@@ -379,50 +417,52 @@ class JobManager():
         self._last_done_or_idle_print = datetime.datetime.now()
 
     def _print_state(self, log_fn):
-        job_queues = ["_todo", "_ready", "_active", "_done", "_skipped"]
+        with self._condition:
+            self._print_state_locked(log_fn)
+
+    def _print_state_locked(self, log_fn):
+        job_queues = ["_todo", "_ready", "_launching", "_active", "_done", "_skipped"]
         for jq in job_queues:
-            log_fn("%s: %s", jq, getattr(self, jq))
+            log_fn("%s: %s", jq, list(getattr(self, jq)))
 
     def _run_jobs(self):
-        while self._run_jobs_thread_active:
-            self._move_todo_to_ready()
-            self._move_ready_to_active()
-            while len(self._active):
-                for i, job in enumerate(self._active):
-                    if job.job_lib.check_for_done():
-                        self.log.debug("%s body done", job)
-                        try:
-                            job.post_run()
-                        except (Exception, SystemExit) as exc:
-                            self.log.error("%s  post_run_failed()\n:%s", job, exc)
-                            job.job_stop_time = datetime.datetime.now()
-                            job.jobstatus = JobStatus.FAILED
-                            try:
-                                job.post_run_failed(exc)
-                            except (Exception, SystemExit) as record_exc:
-                                self.log.error("%s failed to record post_run failure:\n%s", job, record_exc)
-                        if not job.jobstatus.successful:
-                            self._error_count += 1
-                            if self._error_count >= self._quit_count:
-                                self._graceful_exit()
-                            self._move_children_to_skipped(job)
-                        self._active.pop(i)
-                        self._last_done_or_idle_print = datetime.datetime.now()
-                        self._done.append(job)
-                        # Ideally this would be before post_run, but pass_fail status may be set there
-                        self._move_todo_to_ready()
-                        self._move_ready_to_active()
-                time_since_last_done_or_idle_print = datetime.datetime.now() - self._last_done_or_idle_print
-                if time_since_last_done_or_idle_print > self.idle_print_interval:
-                    self._last_done_or_idle_print = datetime.datetime.now()
-                    self._print_state(self.log.info)
+        while True:
+            with self._condition:
+                if not self._run_jobs_thread_active:
+                    return
+                self._move_todo_to_ready_locked()
+                job_to_launch = self._take_ready_job_locked()
+                active_jobs = list(self._active)
+                self._condition.notify_all()
+                if job_to_launch is None and not active_jobs:
+                    self._condition.wait()
+                    continue
 
-                time.sleep(self.POLL_SLEEP_SECONDS)
-            if not len(self._active):
-                self._jobs_added.wait()
-                self._jobs_added.clear()
+            if job_to_launch is not None:
+                self._launch_job(job_to_launch)
+                continue
 
-    def _move_children_to_skipped(self, job):
+            completed_job = None
+            for job in active_jobs:
+                if job.job_lib.check_for_done():
+                    completed_job = job
+                    break
+
+            if completed_job is not None:
+                with self._condition:
+                    if not self._run_jobs_thread_active:
+                        return
+                self._complete_job(completed_job)
+                continue
+
+            now = datetime.datetime.now()
+            with self._condition:
+                if now - self._last_done_or_idle_print > self.idle_print_interval:
+                    self._last_done_or_idle_print = now
+                    self._print_state_locked(self.log.info)
+                self._condition.wait(timeout=self.POLL_SLEEP_SECONDS)
+
+    def _move_children_to_skipped_locked(self, job):
         for child in job._children:
             self.log.info("Skipping job %s due to dependency (%s) failure", child, job)
             try:
@@ -435,10 +475,16 @@ class JobManager():
                 #    raise ValueError("Couldn't find child job to mark as skipped")
                 continue
             self._skipped.append(child)
-            self._move_children_to_skipped(child)
+            self._move_children_to_skipped_locked(child)
 
-    def _move_todo_to_ready(self):
-        self._print_state(self.log.debug)
+    def _move_children_to_skipped(self, job):
+        """Compatibility entry point for callers outside scheduler transitions."""
+        with self._condition:
+            self._move_children_to_skipped_locked(job)
+            self._condition.notify_all()
+
+    def _move_todo_to_ready_locked(self):
+        self._print_state_locked(self.log.debug)
         jobs_that_advanced_state = []
         for i, job in enumerate(self._todo):
             if len(job._dependencies) == 0:
@@ -463,67 +509,89 @@ class JobManager():
         for i in reversed(jobs_that_advanced_state):
             self._todo.pop(i)
 
-    def _move_ready_to_active(self):
-        self._print_state(self.log.debug)
-        jobs_that_advanced_state = []
+    def _can_launch_locked(self, job):
+        running_jobs = self._active + self._launching
+        if job.execution_mode == "exclusive":
+            return len(running_jobs) == 0
+        if job.execution_mode != "parallel":
+            raise ValueError("Unknown execution mode '{}'".format(job.execution_mode))
+        if any(active_job.execution_mode != "parallel" for active_job in running_jobs):
+            return False
+        return len(running_jobs) < self.active_job_limit
 
-        def can_launch(job):
-            if job.execution_mode == "exclusive":
-                return len(self._active) == 0
+    def _take_ready_job_locked(self):
+        self._print_state_locked(self.log.debug)
+        for index, job in enumerate(self._ready):
+            if self._can_launch_locked(job):
+                self._ready.pop(index)
+                self._launching.append(job)
+                return job
+        return None
 
-            if job.execution_mode != "parallel":
-                raise ValueError("Unknown execution mode '{}'".format(job.execution_mode))
+    def _launch_job(self, job):
+        try:
+            job.pre_run()
+            self.log.debug("%s priority: %d", job, job.priority)
+            runner = self.job_lib_type(job, self)
+        except (Exception, SystemExit) as exc:
+            self.log.error("%s launch_failed(): %s", job, exc)
+            job.job_stop_time = datetime.datetime.now()
+            job.jobstatus = JobStatus.FAILED
+            try:
+                job.launch_failed(exc)
+            except (Exception, SystemExit) as record_exc:
+                self.log.error("Could not record launch failure for %s: %s", job, record_exc)
+            with self._condition:
+                self._launching.remove(job)
+                self._error_count += 1
+                self._move_children_to_skipped_locked(job)
+                if self._error_count >= self._quit_count:
+                    self._graceful_exit_locked()
+                self._done.append(job)
+                self._last_done_or_idle_print = datetime.datetime.now()
+                self._condition.notify_all()
+            return
 
-            if any(active_job.execution_mode != "parallel" for active_job in self._active):
-                return False
-
-            return len(self._active) < self.active_job_limit
-
-        made_progress = True
-        while made_progress:
-            made_progress = False
-            for i, job in enumerate(self._ready):
-                if i in jobs_that_advanced_state:
-                    continue
-                if not can_launch(job):
-                    continue
-
-                try:
-                    job.pre_run()
-                    self.log.debug("%s priority: %d", job, job.priority)
-                    self.job_lib_type(job, self)
-                except (Exception, SystemExit) as exc:
-                    self.log.error("%s launch_failed(): %s", job, exc)
-                    job.job_stop_time = datetime.datetime.now()
-                    job.jobstatus = JobStatus.FAILED
-                    try:
-                        job.launch_failed(exc)
-                    except Exception as record_exc:
-                        self.log.error("Could not record launch failure for %s: %s", job, record_exc)
-                    self._error_count += 1
-                    self._move_children_to_skipped(job)
-                    if self._error_count >= self._quit_count:
-                        self._graceful_exit()
-                    jobs_that_advanced_state.append(i)
-                    self._done.append(job)
-                    self._last_done_or_idle_print = datetime.datetime.now()
-                    made_progress = True
-                    continue
-                jobs_that_advanced_state.append(i)
+        cancel_runner = False
+        with self._condition:
+            self._launching.remove(job)
+            if self._run_jobs_thread_active:
                 self._active.append(job)
-                made_progress = True
+            else:
+                cancel_runner = True
+            self._condition.notify_all()
+        if cancel_runner:
+            try:
+                runner.kill()
+            finally:
+                job.cancel()
 
-                if job.execution_mode == "exclusive":
-                    break
+    def _complete_job(self, job):
+        self.log.debug("%s body done", job)
+        try:
+            job.post_run()
+        except (Exception, SystemExit) as exc:
+            self.log.error("%s post_run_failed():\n%s", job, exc)
+            job.job_stop_time = datetime.datetime.now()
+            job.jobstatus = JobStatus.FAILED
+            try:
+                job.post_run_failed(exc)
+            except (Exception, SystemExit) as record_exc:
+                self.log.error("%s failed to record post_run failure:\n%s", job, record_exc)
 
-                if len(self._active) >= self.active_job_limit:
-                    break
+        with self._condition:
+            if not job.jobstatus.successful:
+                self._error_count += 1
+                if self._error_count >= self._quit_count:
+                    self._graceful_exit_locked()
+                self._move_children_to_skipped_locked(job)
+            self._active.remove(job)
+            self._last_done_or_idle_print = datetime.datetime.now()
+            self._done.append(job)
+            self._move_todo_to_ready_locked()
+            self._condition.notify_all()
 
-        for i in reversed(jobs_that_advanced_state):
-            if i < len(self._ready):
-                self._ready.pop(i)
-
-    def _graceful_exit(self):
+    def _graceful_exit_locked(self):
         if self._done_grace_exit:
             return
         self.exited_prematurely = True
@@ -537,29 +605,57 @@ class JobManager():
     def add_job(self, job):
         if not isinstance(job, Job):
             raise ValueError("Tried to add a non-Job job {} of type {}".format(job, type(job)))
-        if not self._done_grace_exit:
-            bisect.insort_right(self._todo, job)
-            self._jobs_added.set()
-        else:
-            self._skipped.append(job)
+        with self._condition:
+            if not self._done_grace_exit and self._run_jobs_thread_active:
+                bisect.insort_right(self._todo, job)
+            else:
+                self._skipped.append(job)
+            self._condition.notify_all()
 
     def wait(self):
         """Blocks until no jobs are left."""
         self.log.info("Waiting until all jobs are completed.")
-        while len(self._todo) or len(self._ready) or len(self._active):
-            self.log.debug("still waiting")
-            time.sleep(self.POLL_SLEEP_SECONDS)
+        with self._condition:
+            while self._todo or self._ready or self._launching or self._active:
+                self.log.debug("still waiting")
+                self._condition.wait()
 
     def stop(self):
-        """Stop the job runner thread (cpu intenstive). This is really more of a pause than a full stop&exit."""
-        self._run_jobs_thread_active = False
-        self._jobs_added.set()
+        """Stop and join the scheduler thread."""
+        with self._condition:
+            self._run_jobs_thread_active = False
+            self._condition.notify_all()
+        if threading.current_thread() is not self._run_jobs_thread:
+            self._run_jobs_thread.join()
 
     def kill(self):
-        self.exited_prematurely = True
-        self.stop()
-        for job in self._active:
-            job.job_lib.kill()
+        with self._condition:
+            self.exited_prematurely = True
+            self._run_jobs_thread_active = False
+            self._skipped.extend(self._todo)
+            self._todo = []
+            self._skipped.extend(self._ready)
+            self._ready = []
+            active_jobs = list(self._active)
+            self._condition.notify_all()
+
+        first_error = None
+        for job in active_jobs:
+            try:
+                job.job_lib.kill()
+            except Exception as exc: # Keep terminating the remaining process groups.
+                if first_error is None:
+                    first_error = exc
+            finally:
+                try:
+                    job.cancel()
+                except Exception as exc:
+                    if first_error is None:
+                        first_error = exc
+        if threading.current_thread() is not self._run_jobs_thread:
+            self._run_jobs_thread.join()
+        if first_error is not None:
+            raise first_error
 
 
 class BazelTBJob(Job):

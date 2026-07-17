@@ -117,8 +117,14 @@ def parse_args(argv):
     options = parser.parse_args(argv)
     if options.jobs is not None and options.jobs < 1:
         parser.error("--jobs must be a positive integer.")
+    if options.quit_count < 1:
+        parser.error("--quit-count must be a positive integer.")
+    if options.idle_print_seconds < 1:
+        parser.error("--idle-print-seconds must be a positive integer.")
     if options.history is not None and options.history < 1:
         parser.error("--history must be a positive integer.")
+    if options.timeout < 0:
+        parser.error("--timeout must be non-negative (0 disables the timeout).")
     options.simulator_was_explicit = simulator_explicitly_requested(argv)
     options.xprop_was_explicit = any(
         argument_explicitly_requested(argv, argument) for argument in ('--xprop', '--vcs-xprop'))

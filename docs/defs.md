@@ -22,9 +22,10 @@ A DV Library.
     provide shared libraries through the `dpi` attribute, for example:
 
 ```python
-cc_library(
+cc_binary(
     name = "dpi",
     srcs = glob(["*.c"]),
+    linkshared = True,
 )
 
 verilog_dv_library(
@@ -42,7 +43,7 @@ verilog_dv_library(
 | :------------- | :------------- | :------------- | :------------- | :------------- |
 | <a id="verilog_dv_library-name"></a>name |  A unique name for this target.   | <a href="https://bazel.build/docs/build-ref.html#name">Name</a> | required |  |
 | <a id="verilog_dv_library-deps"></a>deps |  verilog_dv_library targets that this target is dependent on.   | <a href="https://bazel.build/docs/build-ref.html#labels">List of labels</a> | optional | [] |
-| <a id="verilog_dv_library-dpi"></a>dpi |  cc_libraries to link in through the DPI. Currently, cc_import is not supported for precompiled shared libraries. Prefer placing shared libraries here rather than globbing `.so` files into `srcs`. Example: `cc_library(name = "dpi", srcs = glob(["*.c"]))` then `verilog_dv_library(name = "pkg", srcs = glob(["*.sv"]), dpi = [":dpi"])`.   | <a href="https://bazel.build/docs/build-ref.html#labels">List of labels</a> | optional | [] |
+| <a id="verilog_dv_library-dpi"></a>dpi |  Shared libraries to load through the DPI. Build source-based DPI libraries with `cc_binary(linkshared = True)` and pass that target here. Currently, cc_import is not supported for precompiled shared libraries. Prefer placing shared libraries here rather than globbing `.so` files into `srcs`. Example: `cc_binary(name = "dpi", srcs = glob(["*.c"]), linkshared = True)` then `verilog_dv_library(name = "pkg", srcs = glob(["*.sv"]), dpi = [":dpi"])`.   | <a href="https://bazel.build/docs/build-ref.html#labels">List of labels</a> | optional | [] |
 | <a id="verilog_dv_library-in_flist"></a>in_flist |  Files to be placed directly in the generated flist. Best practice recommends 'pkg' and 'interface' files be declared here. If this attribute is empty (default), all srcs will put into the flist instead.   | <a href="https://bazel.build/docs/build-ref.html#labels">List of labels</a> | optional | [] |
 | <a id="verilog_dv_library-incdir"></a>incdir |  Generate a +incdir in generated flist for every file's directory declared in 'srcs' attribute.   | Boolean | optional | True |
 | <a id="verilog_dv_library-makelib"></a>makelib |  Compile this target into the named Xcelium library through `-makelib`/`-endlib`. VCS receives the same ordered sources through a separate `-file` boundary; VCS recompilation isolation is provided by `-Mupdate` and Partition Compile rather than Xcelium library syntax.   | String | optional | `""` |
@@ -55,7 +56,7 @@ verilog_dv_library(
 
 <pre>
 verilog_dv_tb(<a href="#verilog_dv_tb-name">name</a>, <a href="#verilog_dv_tb-ccf">ccf</a>, <a href="#verilog_dv_tb-defines">defines</a>, <a href="#verilog_dv_tb-deps">deps</a>, <a href="#verilog_dv_tb-dut_instance">dut_instance</a>, <a href="#verilog_dv_tb-dut_top">dut_top</a>, <a href="#verilog_dv_tb-extra_compile_args">extra_compile_args</a>, <a href="#verilog_dv_tb-extra_runfiles">extra_runfiles</a>,
-              <a href="#verilog_dv_tb-extra_runtime_args">extra_runtime_args</a>, <a href="#verilog_dv_tb-msie_incremental_deps">msie_incremental_deps</a>, <a href="#verilog_dv_tb-msie_incremental_extra_compile_args">msie_incremental_extra_compile_args</a>, <a href="#verilog_dv_tb-msie_incremental_extra_runfiles">msie_incremental_extra_runfiles</a>, <a href="#verilog_dv_tb-msie_primary_deps">msie_primary_deps</a>, <a href="#verilog_dv_tb-msie_primary_extra_compile_args">msie_primary_extra_compile_args</a>, <a href="#verilog_dv_tb-msie_primary_extra_runfiles">msie_primary_extra_runfiles</a>, <a href="#verilog_dv_tb-run_fail_patterns">run_fail_patterns</a>, <a href="#verilog_dv_tb-run_pass_patterns">run_pass_patterns</a>, <a href="#verilog_dv_tb-shells">shells</a>, <a href="#verilog_dv_tb-simulator">simulator</a>, <a href="#verilog_dv_tb-vcs_cm_hier">vcs_cm_hier</a>, <a href="#verilog_dv_tb-warning_waivers">warning_waivers</a>, <a href="#verilog_dv_tb-xcelium_covfile">xcelium_covfile</a>)
+              <a href="#verilog_dv_tb-extra_runtime_args">extra_runtime_args</a>, <a href="#verilog_dv_tb-msie_incremental_deps">msie_incremental_deps</a>, <a href="#verilog_dv_tb-msie_incremental_extra_compile_args">msie_incremental_extra_compile_args</a>, <a href="#verilog_dv_tb-msie_incremental_extra_runfiles">msie_incremental_extra_runfiles</a>, <a href="#verilog_dv_tb-msie_primary_deps">msie_primary_deps</a>, <a href="#verilog_dv_tb-msie_primary_extra_compile_args">msie_primary_extra_compile_args</a>, <a href="#verilog_dv_tb-msie_primary_extra_runfiles">msie_primary_extra_runfiles</a>, <a href="#verilog_dv_tb-run_fail_patterns">run_fail_patterns</a>, <a href="#verilog_dv_tb-run_pass_patterns">run_pass_patterns</a>, <a href="#verilog_dv_tb-shells">shells</a>, <a href="#verilog_dv_tb-simulator">simulator</a>, <a href="#verilog_dv_tb-vcs_cm_hier">vcs_cm_hier</a>, <a href="#verilog_dv_tb-verilog_config">verilog_config</a>, <a href="#verilog_dv_tb-warning_waivers">warning_waivers</a>, <a href="#verilog_dv_tb-xcelium_covfile">xcelium_covfile</a>)
 </pre>
 
 A DV Testbench.
@@ -99,6 +100,7 @@ A DV Testbench.
 | <a id="verilog_dv_tb-shells"></a>shells |  List of shells to use. Each label must be a verilog_rtl_shell instance. Each shell thrown will create two defines:  \<code>define gumi_{module} {module}_shell  \</code>define gumi_use_{module}_shell The shell module declaration must be guarded by the gumi_use_{module}_shell define:  \<code>ifdef gumi_use_{module}_shell     module {module}_shell(/*AUTOARGS*/);       ...     endmodule  \</code>endif   | <a href="https://bazel.build/docs/build-ref.html#labels">List of labels</a> | optional | [] |
 | <a id="verilog_dv_tb-simulator"></a>simulator |  Simulator to use for this DV testbench. Supported values are XRUN and VCS. The selected simulator determines which compile/runtime filelists are generated.   | String | optional | `"XRUN"` |
 | <a id="verilog_dv_tb-vcs_cm_hier"></a>vcs_cm_hier |  VCS `-cm_hier` coverage configuration file.   | <a href="https://bazel.build/docs/build-ref.html#labels">Label</a> | optional | None |
+| <a id="verilog_dv_tb-verilog_config"></a>verilog_config |  Key/value pairs where each key is a Verilog configuration name and each value is the relative path to its configuration `.v` file.   | <a href="https://bazel.build/docs/skylark/lib/dict.html">Dictionary: String -> String</a> | optional | {} |
 | <a id="verilog_dv_tb-warning_waivers"></a>warning_waivers |  Waive warnings in the compile. By default, simmer promotes all compile warnings to errors. This list is converted to python regular expressions which are imported by simmer to waive warning. Xcelium waivers commonly match '\*W,&lt;ID&gt;'; VCS waivers commonly match 'Warning-\[&lt;ID&gt;\]'.   | List of strings | optional | [] |
 | <a id="verilog_dv_tb-xcelium_covfile"></a>xcelium_covfile |  Xcelium coverage configuration file. Replaces the legacy `ccf` attribute.   | <a href="https://bazel.build/docs/build-ref.html#labels">Label</a> | optional | None |
 
@@ -343,7 +345,7 @@ Provides a way to run a test against a set of libs.
 | <a id="verilog_test-post_flist_args"></a>post_flist_args | Commands and arguments after flist arguments | List of strings | optional | [] |
 | <a id="verilog_test-pre_flist_args"></a>pre_flist_args | Commands and arguments before flist arguments | List of strings | optional | [] |
 | <a id="verilog_test-shells"></a>shells | List of verilog_rtl_shell Labels. For each Label, a gumi define will be placed on the command line to use this shell instead of the original module. This requires that the original module was instantiated using \<code>gumi_&lt;module_name&gt; instead of just &lt;module_name&gt;. | <a href="https://bazel.build/docs/build-ref.html#labels">List of labels</a> | optional | [] |
-| <a id="verilog_test-tool"></a>tool | Label to a single tool to run. Inserted before pre_flist_args if set. Do not duplicate in pre_flist_args. | <a href="https://bazel.build/docs/build-ref.html#labels">Label</a> | optional | None |
+| <a id="verilog_test-tool"></a>tool | Label to a single executable tool to run. The executable and its default runfiles are available to the generated runner. Inserted before pre_flist_args if set. Do not duplicate in pre_flist_args. | <a href="https://bazel.build/docs/build-ref.html#labels">Label</a> | optional | None |
 
 
 <a id="verilog_tool_encapsulation"></a>

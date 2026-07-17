@@ -9,7 +9,7 @@ runmod -t xrun -- \
   -xmlibdirname {{ VCOMP_DIR|shell_quote }} \
   {% endif -%}
   {% for define in additional_defines -%}
-    -define {{ define }} \
+    -define {{ define|shell_quote }} \
   {% endfor -%}
   {% if options.mce -%}
     -mce \

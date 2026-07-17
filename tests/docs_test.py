@@ -1,8 +1,17 @@
+import os
 from pathlib import Path
 import re
 import unittest
 
-REPO_ROOT = Path(__file__).resolve().parents[1]
+
+def _repo_root():
+    test_srcdir = os.environ.get("TEST_SRCDIR")
+    if test_srcdir:
+        return Path(test_srcdir) / os.environ.get("TEST_WORKSPACE", "rules_verilog")
+    return Path(__file__).resolve().parents[1]
+
+
+REPO_ROOT = _repo_root()
 
 
 class DocsTest(unittest.TestCase):

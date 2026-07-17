@@ -1,6 +1,8 @@
 import os
 import json
+import multiprocessing
 import tempfile
+import time
 import unittest
 from pathlib import Path
 from types import SimpleNamespace
@@ -39,6 +41,30 @@ class _Timer:
 
     def stop_and_print(self):
         pass
+
+
+def _cache_config_for_process(project_dir):
+    config = RegressionConfig.__new__(RegressionConfig)
+    config.proj_dir = project_dir
+    config.log = _Log()
+    return config
+
+
+def _write_partial_cache_generation(project_dir, ready, release):
+    config = _cache_config_for_process(project_dir)
+    payload = {"generation": "new"}
+    with config._discovery_cache_lock(exclusive=True):
+        config.dict_to_json(payload, "all_vcomp.json")
+        ready.set()
+        release.wait(5.0)
+        for filename in ("tests_to_tags.json", "tests_to_simulator.json", "discovery_manifest.json"):
+            config.dict_to_json(payload, filename)
+
+
+def _read_cache_generation(project_dir, result_queue):
+    config = _cache_config_for_process(project_dir)
+    generation = config._load_discovery_cache_generation()
+    result_queue.put([payload["generation"] for payload in generation])
 
 
 class RegressionDiscoveryTest(unittest.TestCase):
@@ -94,6 +120,34 @@ class RegressionDiscoveryTest(unittest.TestCase):
         config._write_discovery_manifest()
         build_file.unlink()
         self.assertFalse(config._discovery_cache_is_fresh())
+
+    @unittest.skipUnless(os.name == "posix", "POSIX advisory-lock behavior")
+    def test_cache_reader_cannot_observe_a_partial_generation(self):
+        project_dir = tempfile.mkdtemp()
+        config = self._config(Path(project_dir))
+        old_payload = {"generation": "old"}
+        for filename in ("all_vcomp.json", "tests_to_tags.json", "tests_to_simulator.json", "discovery_manifest.json"):
+            config.dict_to_json(old_payload, filename)
+
+        context = multiprocessing.get_context("fork")
+        ready = context.Event()
+        release = context.Event()
+        result_queue = context.Queue()
+        writer = context.Process(target=_write_partial_cache_generation, args=(project_dir, ready, release))
+        reader = context.Process(target=_read_cache_generation, args=(project_dir, result_queue))
+
+        writer.start()
+        self.assertTrue(ready.wait(2.0))
+        reader.start()
+        time.sleep(0.1)
+        self.assertTrue(reader.is_alive(), "reader did not wait for the generation lock")
+        release.set()
+        writer.join(5.0)
+        reader.join(5.0)
+
+        self.assertEqual(0, writer.exitcode)
+        self.assertEqual(0, reader.exitcode)
+        self.assertEqual(["new"] * 4, result_queue.get(timeout=1.0))
 
     @mock.patch("lib.regression.os.walk", side_effect=AssertionError("walk should not run"))
     @mock.patch("lib.regression.subprocess.run")

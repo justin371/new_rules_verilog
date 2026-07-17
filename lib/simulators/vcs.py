@@ -349,23 +349,24 @@ class VcsSimulator(SimulatorInterface):
         # Coverage (Functional/Code)
         if self.options.cm:
             vcomp_job.cov_work_dir = os.path.join(self.rcfg.regression_dir, vcomp_job.name + "__COV_WORK_VCS.vdb")
-            opts['cov_opts'] += ' -cm_dir {} '.format(vcomp_job.cov_work_dir)
+            cov_args = ["-cm_dir", vcomp_job.cov_work_dir]
             # Translate coverage level options if needed
             cm_level = self.options.cm
             if 'A' in cm_level:
                 cm_level = 'line+cond+fsm+tgl+assert+branch'
-            opts['cov_opts'] += ' -cm {} '.format(cm_level)
+            cov_args.extend(["-cm", cm_level])
             if self.options.vcs_cm_line is not None:
-                opts['cov_opts'] += ' -cm_line {} '.format(self.options.vcs_cm_line)
+                cov_args.extend(["-cm_line", self.options.vcs_cm_line])
             for report_mode in self.options.vcs_cm_report or []:
-                opts['cov_opts'] += ' -cm_report {} '.format(report_mode)
+                cov_args.extend(["-cm_report", report_mode])
             if self.options.vcs_cm_cond is not None:
-                opts['cov_opts'] += ' -cm_cond {} '.format(self.options.vcs_cm_cond)
+                cov_args.extend(["-cm_cond", self.options.vcs_cm_cond])
             if self.options.vcs_cm_tgl is not None:
-                opts['cov_opts'] += ' -cm_tgl {} '.format(self.options.vcs_cm_tgl)
+                cov_args.extend(["-cm_tgl", self.options.vcs_cm_tgl])
             cm_hier = self.options.vcs_cm_hier or getattr(vcomp_job, "tb_options", {}).get("vcs_cm_hier")
             if cm_hier:
-                opts['cov_opts'] += ' -cm_hier {} '.format(cm_hier)
+                cov_args.extend(["-cm_hier", cm_hier])
+            opts['cov_opts'] = " " + shlex.join(cov_args) + " "
             self.setup_coverage_merge(vcomp_job) # Setup merge script
 
         # XPROP
@@ -729,7 +730,7 @@ class VcsSimulator(SimulatorInterface):
 
     def validate_reusable_compile_artifacts(self, vcomp_job):
         simv_path = os.path.join(vcomp_job.job_dir, "simv")
-        if not os.path.exists(simv_path):
+        if not os.path.isfile(simv_path) or not os.access(simv_path, os.X_OK):
             raise FileNotFoundError(
                 "VCS --no-compile requires an existing elaborated executable at '{}'".format(simv_path))
 

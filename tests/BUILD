@@ -55,6 +55,7 @@ py_test(
         "//:README.md",
         "//docs:defs.md",
         "//docs:eda_workflow_review.md",
+        "//docs:examples/vcs_fsdb_dump.tcl",
         "//docs:simmer_vcs_xcelium.md",
         "//docs:simulator_migration_checklist.md",
         "//verilog:defs.bzl",
@@ -122,6 +123,28 @@ py_test(
     name = "simmer_results_test",
     srcs = ["simmer_results_test.py"],
     deps = ["//lib:simmer_results"],
+)
+
+py_test(
+    name = "simmer_runtime_hardening_test",
+    srcs = ["simmer_runtime_hardening_test.py"],
+    data = ["//bin:simmer.py"],
+    deps = [
+        "//bin:args_parser_lib",
+        "//bin:check_test_lib",
+        "//lib:cmn_logging",
+        "//lib:compile_cache",
+        "//lib:job_lib",
+        "//lib:parser_actions",
+        "//lib:regression",
+        "//lib:regression_report",
+        "//lib:runtime_options",
+        "//lib:rv_utils",
+        "//lib:seed_plan",
+        "//lib:sim_artifacts",
+        "//lib:simmer_results",
+        "//lib/simulators",
+    ],
 )
 
 py_test(

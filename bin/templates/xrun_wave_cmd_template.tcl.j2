@@ -2,7 +2,7 @@
 {% if options.wave_start -%}
 run {{ options.wave_start }}ns
 {% endif -%}
-call xmDumpfile {{ waves_db }}
+call xmDumpfile {{ waves_db|tcl_quote }}
 {% for probe in options.probes -%}
 call xmDumpvars {{ probe }} {{ options.wave_depth }} +all +packedmda+struct +struct +parameter +cell_instance=0 +packed_limit={{ options.probe_packed }} +unpacked_limit={{ options.probe_unpacked }}
 {% endfor -%}
@@ -25,7 +25,7 @@ exit
 {% if options.wave_start -%}
 run {{ options.wave_start }}ns
 {% endif -%}
-database -open shm_db -shm -into {{ waves_db }} -default{{ delta }}
+database -open shm_db -shm -into {{ waves_db|tcl_quote }} -default{{ delta }}
 {% for probe in options.probes -%}
 probe -database shm_db {{ probe }} -all -memories -dynamic -depth {{ options.wave_depth }} -packed {{ options.probe_packed }} -unpacked {{ options.probe_unpacked }}
 {% endfor -%}
@@ -42,7 +42,7 @@ run
 {% if options.wave_start -%}
 run {{ options.wave_start }}ns
 {% endif -%}
-database -open -vcd vcd_db -into {{ waves_db }} -default
+database -open -vcd vcd_db -into {{ waves_db|tcl_quote }} -default
 {% for probe in options.probes -%}
 probe -database vcd_db {{ probe }} -all -memories -depth all -vcd -packed {{ options.probe_packed }} -unpacked {{ options.probe_unpacked }}
 {% endfor -%}

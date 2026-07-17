@@ -4,6 +4,7 @@ import unittest
 import datetime
 import os
 import signal
+import subprocess
 from pathlib import Path
 from types import SimpleNamespace
 from unittest import mock
@@ -79,6 +80,64 @@ class _FailingPostRunJob(Job):
 
     def post_run_failed(self, exc):
         self.recorded_post_run_failure = str(exc)
+
+
+class _BlockingPreRunJob(Job):
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.pre_run_started = threading.Event()
+        self.release_pre_run = threading.Event()
+
+    def pre_run(self):
+        self.pre_run_started.set()
+        self.release_pre_run.wait()
+        super().pre_run()
+
+
+class _TermIgnoringProcess:
+
+    def __init__(self):
+        self.wait_calls = []
+        self.kill_called = False
+        self.returncode = None
+
+    def wait(self, timeout=None):
+        self.wait_calls.append(timeout)
+        if len(self.wait_calls) == 1:
+            raise subprocess.TimeoutExpired("job", timeout)
+        self.returncode = -signal.SIGKILL
+        return self.returncode
+
+    def kill(self):
+        self.kill_called = True
+
+
+class _BlockingLaunchRunner:
+    started = threading.Event()
+    release = threading.Event()
+    killed = threading.Event()
+
+    def __init__(self, job, _manager):
+        job.job_lib = self
+        self.started.set()
+        self.release.wait()
+
+    def check_for_done(self):
+        return False
+
+    def kill(self):
+        self.killed.set()
+
+
+class _CancelableJob(Job):
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.cancelled = threading.Event()
+
+    def cancel(self):
+        self.cancelled.set()
 
 
 class _ExitedProcess:
@@ -202,6 +261,66 @@ class JobManagerLaunchTest(unittest.TestCase):
             manager.stop()
 
         self.assertFalse(manager.exited_prematurely)
+
+    def test_wait_and_add_are_race_safe_while_pre_run_is_unlocked(self):
+        log = _Logger()
+        rcfg = SimpleNamespace(options=SimpleNamespace(timeout=1), log=log)
+        first = _BlockingPreRunJob(rcfg, "first")
+        first.job_dir = str(Path(tempfile.mkdtemp()) / "first")
+        second = Job(rcfg, "second")
+        second.job_dir = str(Path(tempfile.mkdtemp()) / "second")
+        manager = JobManager({"idle_print_seconds": 60, "quit_count": 2}, log)
+        manager.job_lib_type = _RecordingRunner
+        wait_finished = threading.Event()
+        add_finished = threading.Event()
+
+        try:
+            manager.add_job(first)
+            self.assertTrue(first.pre_run_started.wait(1.0))
+
+            waiter = threading.Thread(target=lambda: (manager.wait(), wait_finished.set()))
+            adder = threading.Thread(target=lambda: (manager.add_job(second), add_finished.set()))
+            waiter.start()
+            adder.start()
+
+            self.assertTrue(add_finished.wait(1.0), "add_job blocked behind pre_run")
+            self.assertFalse(wait_finished.wait(0.05), "wait returned during the launch transition")
+            with manager._condition:
+                self.assertIn(first, manager._launching)
+
+            first.release_pre_run.set()
+            waiter.join(2.0)
+            adder.join(2.0)
+            self.assertTrue(wait_finished.is_set())
+            self.assertEqual({first, second}, set(manager._done))
+        finally:
+            first.release_pre_run.set()
+            manager.stop()
+
+    def test_kill_during_launch_terminates_runner_and_releases_job_resources(self):
+        log = _Logger()
+        rcfg = SimpleNamespace(options=SimpleNamespace(timeout=1), log=log)
+        job = _CancelableJob(rcfg, "launching")
+        job.job_dir = str(Path(tempfile.mkdtemp()) / "launching")
+        manager = JobManager({"idle_print_seconds": 60, "quit_count": 1}, log)
+        manager.job_lib_type = _BlockingLaunchRunner
+        _BlockingLaunchRunner.started.clear()
+        _BlockingLaunchRunner.release.clear()
+        _BlockingLaunchRunner.killed.clear()
+
+        manager.add_job(job)
+        self.assertTrue(_BlockingLaunchRunner.started.wait(1.0))
+        killer = threading.Thread(target=manager.kill)
+        killer.start()
+        self.assertTrue(killer.is_alive(), "kill did not wait for the in-flight launch")
+
+        _BlockingLaunchRunner.release.set()
+        killer.join(2.0)
+
+        self.assertFalse(killer.is_alive())
+        self.assertTrue(_BlockingLaunchRunner.killed.is_set())
+        self.assertTrue(job.cancelled.is_set())
+        self.assertFalse(manager._run_jobs_thread.is_alive())
 
     def test_pre_run_failure_fails_job_without_killing_scheduler(self):
         log = _Logger()
@@ -355,6 +474,26 @@ class JobManagerLaunchTest(unittest.TestCase):
 
         self.assertTrue(runner._timed_out)
         killpg.assert_called_once_with(456, signal.SIGTERM)
+
+    @unittest.skipUnless(os.name == "posix", "POSIX process-group behavior")
+    def test_explicit_kill_waits_and_escalates_the_process_group(self):
+        runner = SubprocessJobRunner.__new__(SubprocessJobRunner)
+        runner.job = SimpleNamespace(name="stuck")
+        runner.log = _Logger()
+        runner._p = _TermIgnoringProcess()
+        runner._process_group_id = 456
+        runner._kill_sent = False
+        runner.done = False
+        runner.TERM_GRACE_SECONDS = 0.01
+        runner.KILL_GRACE_SECONDS = 0.01
+
+        with mock.patch.object(runner, "_signal_process_group") as signal_group, \
+             mock.patch.object(runner, "_wait_for_process_group_exit", side_effect=[False, True]):
+            runner.kill()
+
+        self.assertEqual([mock.call(signal.SIGTERM), mock.call(signal.SIGKILL)], signal_group.call_args_list)
+        self.assertEqual([0.01, 0.01], runner._p.wait_calls)
+        self.assertTrue(runner.done)
 
     def test_simmer_profile_prints_phase_and_job_details(self):
         log = _SummaryLogger()

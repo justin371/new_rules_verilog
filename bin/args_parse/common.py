@@ -115,11 +115,11 @@ def add_debug_arguments(parser):
                              default=False,
                              action="store_true",
                              help="Enable ANSI colors in simmer terminal output; disable for plain CI logs.")
-    debug_group.add_argument(
-        '--quit-count',
-        default=10,
-        type=int,
-        help="Stop launching new jobs after this many failures (default: 10); running jobs finish normally.")
+    debug_group.add_argument('--quit-count',
+                             default=10,
+                             type=int,
+                             help=("Stop launching new jobs after this positive number of failures (default: 10); "
+                                   "running jobs finish normally."))
     debug_group.add_argument(
         "--allow-no-run",
         default=False,
@@ -216,7 +216,7 @@ def add_regression_arguments(parser):
         '--idle-print-seconds',
         type=int,
         default=60 * 20,
-        help=('Print compile/simulation queue state after this many idle seconds (default: 1200). '
+        help=('Print compile/simulation queue state after this positive number of idle seconds (default: 1200). '
               'Use a smaller value when diagnosing stalled jobs.'))
     regression_group.add_argument('--jobs',
                                   type=int,
