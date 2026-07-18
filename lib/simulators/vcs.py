@@ -33,6 +33,12 @@ def _stable_vcs_compiler_identity(output):
     return "Compiler version = {}".format(version) if version else None
 
 
+def _tcl_quote(value):
+    escaped = str(value).replace("\\", "\\\\").replace('"', '\\"').replace("$", "\\$")
+    escaped = escaped.replace("[", "\\[").replace("]", "\\]").replace("\n", "\\n").replace("\r", "\\r")
+    return '"{}"'.format(escaped)
+
+
 def _positive_integer(value):
     try:
         value = int(value)
@@ -145,6 +151,8 @@ class VcsSimulator(SimulatorInterface):
 
     def __init__(self, options, rcfg, env):
         super().__init__(options, rcfg, env)
+        if self.env is not None:
+            self.env.filters['tcl_quote'] = _tcl_quote
         self.vso_workflow = VsoWorkflow(options, rcfg)
         self._vso_init_job = None
         self._vso_ask_job = None
@@ -339,6 +347,16 @@ class VcsSimulator(SimulatorInterface):
         os.makedirs(os.path.dirname(dbdir), exist_ok=True)
         return shlex.split(self.get_tool_runner()) + ["crg", "-dir", dbdir, "-shared", "init"], log_path
 
+    def prepare_regression_runtime(self, vcomp_jobs):
+        if not self.options.cm:
+            return
+        coverage_jobs = []
+        for vcomp_job in vcomp_jobs.values():
+            vcomp_job.cov_work_dir = os.path.join(self.rcfg.regression_dir, vcomp_job.name + "__COV_WORK_VCS.vdb")
+            coverage_jobs.append(vcomp_job)
+        for vcomp_job in sorted(coverage_jobs, key=lambda job: os.path.abspath(job.cov_work_dir)):
+            vcomp_job.acquire_shared_runtime_lock(vcomp_job.cov_work_dir)
+
     def generate_compile_options(self, vcomp_job):
         opts = {
             'cov_opts': '',
@@ -350,7 +368,8 @@ class VcsSimulator(SimulatorInterface):
 
         # Coverage (Functional/Code)
         if self.options.cm:
-            vcomp_job.cov_work_dir = os.path.join(self.rcfg.regression_dir, vcomp_job.name + "__COV_WORK_VCS.vdb")
+            if getattr(vcomp_job, "cov_work_dir", None) is None:
+                vcomp_job.cov_work_dir = os.path.join(self.rcfg.regression_dir, vcomp_job.name + "__COV_WORK_VCS.vdb")
             vcomp_job.acquire_shared_runtime_lock(vcomp_job.cov_work_dir)
             cov_args = ["-cm_dir", vcomp_job.cov_work_dir]
             # Translate coverage level options if needed

@@ -5,6 +5,11 @@ local_repository(
     path = "../..",
 )
 
+local_repository(
+    name = "external_verilog_fixture",
+    path = "external_verilog_fixture",
+)
+
 load("@rules_verilog//:deps.bzl", "verilog_dependencies")
 
 verilog_dependencies()

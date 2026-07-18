@@ -29,5 +29,6 @@ python_path="$(command -v python3.12)"
     --repository_cache="$temporary_root/repository-cache" \
     --experimental_convenience_symlinks=ignore \
     --test_output=errors \
-    //:external_setup_smoke_test
+    //:external_setup_smoke_test \
+    //:external_verilog_test
 )

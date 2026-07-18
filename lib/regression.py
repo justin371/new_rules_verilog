@@ -8,6 +8,7 @@ import fnmatch
 import hashlib
 import os
 import re
+import shlex
 import subprocess
 import sys
 import json
@@ -32,11 +33,14 @@ DISCOVERY_ROOT_FILES = {
     ".bazelignore",
     ".bazelrc",
     ".bazelversion",
+    ".gitmodules",
     "MODULE.bazel",
     "MODULE.bazel.lock",
     "WORKSPACE",
     "WORKSPACE.bazel",
 }
+DISCOVERY_MAX_ARG_CHARS = 100000
+DISCOVERY_MAX_SOURCE_RETRIES = 2
 
 
 def resolve_report_generation(report_option, total_simulations):
@@ -247,20 +251,23 @@ class RegressionConfig():
         with self._discovery_cache_lock(exclusive=False):
             return self._read_discovery_cache_locked()
 
-    def _publish_discovery_cache(self):
+    def _publish_discovery_cache(self, manifest=None):
         """Publish all discovery payloads as one advisory-locked generation."""
+        if manifest is None:
+            manifest = self._discovery_dependency_manifest()
         with self._discovery_cache_lock(exclusive=True):
             self.dict_to_json(self.all_vcomp, "all_vcomp.json")
             self.dict_to_json(self.tests_to_tags, "tests_to_tags.json")
             self.dict_to_json(self.tests_to_simulator, "tests_to_simulator.json")
-            self.dict_to_json(self._discovery_dependency_manifest(), "discovery_manifest.json")
+            self.dict_to_json(manifest, "discovery_manifest.json")
 
     def _have_discovery_cache(self):
         return all(os.path.exists(self._cache_path(filename)) for filename in DISCOVERY_CACHE_FILES)
 
     def _discovery_dependency_manifest(self):
+        submodule_state = self._git_submodule_state()
         files = []
-        for path in sorted(set(self._iter_discovery_dependency_paths())):
+        for path in sorted(set(self._iter_discovery_dependency_paths(submodule_state))):
             relative_path = os.path.relpath(path, self.proj_dir).replace(os.sep, "/")
             try:
                 with open(path, "rb") as filep:
@@ -269,17 +276,68 @@ class RegressionConfig():
                 digest = "missing"
             files.append({"path": relative_path, "sha256": digest})
         return {
-            "schema_version": 1,
+            "schema_version": 2,
             "allow_no_run": bool(self.options.allow_no_run),
             "discovery_query": self._build_vcomp_discovery_query(),
+            "git_submodules": submodule_state,
             "files": files,
         }
+
+    def _git_submodule_state(self):
+        result = subprocess.run(
+            ["git", "submodule", "status", "--recursive"],
+            cwd=self.proj_dir,
+            check=False,
+            capture_output=True,
+            text=True,
+        )
+        return sorted(line.strip() for line in result.stdout.splitlines()) if result.returncode == 0 else []
+
+    @staticmethod
+    def _is_discovery_dependency(relative_path):
+        filename = os.path.basename(relative_path)
+        return (filename in ("BUILD", "BUILD.bazel") or filename.endswith(".bzl") or filename.startswith(".bazelrc")
+                or filename.endswith(".bazelrc") or relative_path in DISCOVERY_ROOT_FILES)
+
+    def _bazelrc_dependency_paths(self):
+        pending = [
+            "/etc/bazel.bazelrc",
+            os.path.expanduser("~/.bazelrc"),
+            os.path.join(self.proj_dir, ".bazelrc"),
+        ]
+        seen = set()
+        while pending:
+            path = os.path.abspath(pending.pop())
+            if path in seen:
+                continue
+            seen.add(path)
+            yield path
+            try:
+                with open(path, "r", encoding="utf-8", errors="surrogateescape") as filep:
+                    lines = filep
+                    for line in lines:
+                        try:
+                            fields = shlex.split(line, comments=True, posix=True)
+                        except ValueError:
+                            continue
+                        if len(fields) != 2 or fields[0] not in ("import", "try-import"):
+                            continue
+                        imported_path = fields[1]
+                        imported_path = imported_path.strip().replace("%workspace%", self.proj_dir)
+                        imported_path = imported_path.replace("%home%", os.path.expanduser("~"))
+                        if not os.path.isabs(imported_path):
+                            imported_path = os.path.join(os.path.dirname(path), imported_path)
+                        pending.append(imported_path)
+            except OSError:
+                continue
 
     def _write_discovery_manifest(self):
         with self._discovery_cache_lock(exclusive=True):
             self.dict_to_json(self._discovery_dependency_manifest(), "discovery_manifest.json")
 
-    def _iter_discovery_dependency_paths(self):
+    def _iter_discovery_dependency_paths(self, submodule_state=None):
+        if submodule_state is None:
+            submodule_state = self._git_submodule_state()
         indexed_result = subprocess.run(
             ["git", "ls-files", "--cached", "--others", "--exclude-standard"],
             cwd=self.proj_dir,
@@ -298,6 +356,8 @@ class RegressionConfig():
                 ":(glob)**/BUILD",
                 ":(glob)**/BUILD.bazel",
                 ":(glob)**/*.bzl",
+                ":(glob)**/*.bazelrc",
+                ":(glob)**/.bazelrc*",
                 *sorted(DISCOVERY_ROOT_FILES),
             ],
             cwd=self.proj_dir,
@@ -313,10 +373,20 @@ class RegressionConfig():
                     discovery_paths.append(relative_path)
                     seen_paths.add(relative_path)
             for relative_path in discovery_paths:
-                filename = os.path.basename(relative_path)
-                if filename in ("BUILD",
-                                "BUILD.bazel") or filename.endswith(".bzl") or relative_path in DISCOVERY_ROOT_FILES:
+                if self._is_discovery_dependency(relative_path):
                     yield os.path.join(self.proj_dir, os.path.normpath(relative_path))
+            for line in submodule_state:
+                fields = line.lstrip("-+U ").split()
+                if len(fields) < 2:
+                    continue
+                submodule_root = os.path.join(self.proj_dir, fields[1])
+                for root, dirs, files in os.walk(submodule_root):
+                    dirs[:] = [directory for directory in dirs if directory not in (".git", ".simmer")]
+                    for filename in files:
+                        relative_path = os.path.relpath(os.path.join(root, filename), self.proj_dir)
+                        if self._is_discovery_dependency(relative_path):
+                            yield os.path.join(root, filename)
+            yield from self._bazelrc_dependency_paths()
             return
 
         for root, dirs, files in os.walk(self.proj_dir):
@@ -326,9 +396,9 @@ class RegressionConfig():
             ]
             for filename in files:
                 relative_path = os.path.relpath(os.path.join(root, filename), self.proj_dir)
-                if filename in ("BUILD",
-                                "BUILD.bazel") or filename.endswith(".bzl") or relative_path in DISCOVERY_ROOT_FILES:
+                if self._is_discovery_dependency(relative_path):
                     yield os.path.join(root, filename)
+        yield from self._bazelrc_dependency_paths()
 
     def _discovery_cache_is_fresh(self):
         try:
@@ -448,7 +518,35 @@ class RegressionConfig():
                         os.remove(profile_path)
         return result.returncode, result.stdout, result.stderr
 
+    @staticmethod
+    def _chunk_arguments(arguments, max_chars=DISCOVERY_MAX_ARG_CHARS):
+        chunks = []
+        current = []
+        current_chars = 0
+        for argument in arguments:
+            argument_chars = len(argument) + 1
+            if current and current_chars + argument_chars > max_chars:
+                chunks.append(current)
+                current = []
+                current_chars = 0
+            current.append(argument)
+            current_chars += argument_chars
+        if current:
+            chunks.append(current)
+        return chunks
+
     def test_discovery_all(self):
+        for attempt in range(DISCOVERY_MAX_SOURCE_RETRIES + 1):
+            manifest_before = self._discovery_dependency_manifest()
+            self._discover_test_metadata()
+            manifest_after = self._discovery_dependency_manifest()
+            if manifest_before == manifest_after:
+                self._publish_discovery_cache(manifest_after)
+                return
+            self.log.warning("Discovery inputs changed while Bazel metadata was being collected; retrying")
+        self.log.critical("Discovery inputs kept changing; rerun simmer from a stable checkout")
+
+    def _discover_test_metadata(self):
         """
         Discover all available tests in the checkout
         Filters based on command line specifications
@@ -470,31 +568,32 @@ class RegressionConfig():
             self.tests_to_simulator = {}
             return
 
-        combined_test_query = " union ".join("({})".format(self._build_test_cfg_query(vcomp))
-                                             for vcomp in sorted(self.all_vcomp))
-
-        dtp.reset()
-        returncode, stdout, stderr = self._run_command(["bazel", "cquery", combined_test_query], )
-        dtp.stop_and_print()
-        if returncode:
-            self.log.critical("bazel test discovery failed:\n%s", stderr)
-
-        query_results = re.sub(r"\([a-z0-9]{7,64}\) *", "", stdout.replace('\n', ' ')).split()
+        test_queries = ["({})".format(self._build_test_cfg_query(vcomp)) for vcomp in sorted(self.all_vcomp)]
+        query_results = []
+        for query_chunk in self._chunk_arguments(test_queries):
+            combined_test_query = " union ".join(query_chunk)
+            dtp.reset()
+            returncode, stdout, stderr = self._run_command(["bazel", "cquery", combined_test_query], )
+            dtp.stop_and_print()
+            if returncode:
+                self.log.critical("bazel test discovery failed:\n%s", stderr)
+            query_results.extend(re.sub(r"\([a-z0-9]{7,64}\) *", "", stdout.replace('\n', ' ')).split())
+        query_results = list(dict.fromkeys(query_results))
 
         text = []
-        if query_results:
+        for target_chunk in self._chunk_arguments(query_results):
             dtp.reset()
             returncode, stdout, stderr = self._run_command([
                 "bazel",
                 "build",
-                *query_results,
+                *target_chunk,
                 "--aspects",
                 "@rules_verilog//verilog/private:dv.bzl%verilog_dv_test_cfg_info_aspect",
             ])
             dtp.stop_and_print()
             if returncode:
                 self.log.critical("bazel test discovery failed:\n%s", stderr)
-            text = stdout.split('\n') + stderr.split('\n')
+            text.extend(stdout.split('\n') + stderr.split('\n'))
 
             # Parse test information from output
         ttv = [
@@ -527,9 +626,6 @@ class RegressionConfig():
                     table_output.append(self.table_format('', test, str(count)))
 
         self.log.debug("Tests available:\n%s", "\n".join(table_output))
-
-        # Save test information as one coherent cache generation.
-        self._publish_discovery_cache()
 
     def test_discovery_match(self):
         """

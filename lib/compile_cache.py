@@ -4,6 +4,7 @@ import hashlib
 import json
 import os
 import re
+import shlex
 import tempfile
 
 FINGERPRINT_FILE = ".compile_fingerprint.json"
@@ -111,19 +112,93 @@ def _read_compile_inputs_digest(path):
     return digest
 
 
-def _extra_inputs_digest(paths):
-    digest = hashlib.sha256()
+def _extra_input_digests(paths):
+    path_digest = hashlib.sha256()
+    content_digests = []
     for path in sorted(os.path.abspath(os.fspath(path)) for path in paths if path):
-        digest.update(path.encode("utf-8"))
-        digest.update(b"\0")
-        digest.update(_file_bytes(path))
-        digest.update(b"\0")
-    return digest.hexdigest()
+        content = _file_bytes(path)
+        path_digest.update(path.encode("utf-8"))
+        path_digest.update(b"\0")
+        path_digest.update(content)
+        path_digest.update(b"\0")
+        content_digests.append(_digest_bytes(content))
+    content_digest = _digest_bytes(*(digest.encode("ascii") for digest in sorted(content_digests)))
+    return path_digest.hexdigest(), content_digest
 
 
-def _extra_inputs_content_digest(paths):
-    file_digests = sorted(_digest_bytes(_file_bytes(path)) for path in paths if path)
-    return _digest_bytes(*(digest.encode("ascii") for digest in file_digests))
+def _directory_inputs(path):
+    for root, dirs, files in os.walk(path):
+        dirs.sort()
+        for filename in sorted(files):
+            yield os.path.join(root, filename)
+
+
+def discover_filelist_inputs(filelist_path, working_directory):
+    """Return existing files and include/library directory contents referenced by a simulator filelist."""
+    if not filelist_path:
+        return []
+
+    working_directory = os.path.abspath(working_directory)
+    root_filelist = os.path.abspath(filelist_path)
+    discovered = set()
+    parsed_filelists = set()
+    pending = [(root_filelist, working_directory)]
+
+    def resolve(path, base_directory):
+        expanded = os.path.expanduser(os.path.expandvars(path))
+        return os.path.abspath(expanded if os.path.isabs(expanded) else os.path.join(base_directory, expanded))
+
+    def add_path(path, base_directory, include_directory=False):
+        resolved = resolve(path, base_directory)
+        if os.path.isfile(resolved):
+            discovered.add(resolved)
+        elif include_directory and os.path.isdir(resolved):
+            discovered.update(_directory_inputs(resolved))
+        return resolved
+
+    while pending:
+        current_filelist, relative_base = pending.pop()
+        if current_filelist in parsed_filelists:
+            continue
+        parsed_filelists.add(current_filelist)
+        if not os.path.isfile(current_filelist):
+            continue
+        discovered.add(current_filelist)
+        try:
+            with open(current_filelist, "r", encoding="utf-8", errors="surrogateescape") as filep:
+                tokens = shlex.split(filep.read(), comments=True, posix=True)
+        except ValueError:
+            continue
+
+        index = 0
+        while index < len(tokens):
+            token = tokens[index]
+            if token in ("-f", "-file", "-F") and index + 1 < len(tokens):
+                nested_base = os.path.dirname(current_filelist) if token == "-F" else relative_base
+                nested = add_path(tokens[index + 1], nested_base)
+                pending.append((nested, nested_base))
+                index += 2
+                continue
+            if token.startswith("-file="):
+                nested = add_path(token.split("=", 1)[1], relative_base)
+                pending.append((nested, relative_base))
+                index += 1
+                continue
+            if token.startswith("+incdir+"):
+                for directory in token[len("+incdir+"):].split("+"):
+                    if directory:
+                        add_path(directory, relative_base, include_directory=True)
+                index += 1
+                continue
+            if token in ("-v", "-y") and index + 1 < len(tokens):
+                add_path(tokens[index + 1], relative_base, include_directory=(token == "-y"))
+                index += 2
+                continue
+            if not token.startswith(("-", "+")):
+                add_path(token, relative_base)
+            index += 1
+
+    return sorted(discovered)
 
 
 def normalize_compile_script_paths(compile_script, path_replacements):
@@ -157,8 +232,9 @@ def compile_fingerprint(project_dir,
                                                     compile_inputs_path, runfiles_root))
         fingerprint["compile_inputs_manifest_sha256"] = _compile_inputs_manifest_digest(compile_inputs_path)
     if extra_input_paths:
-        fingerprint["extra_inputs_sha256"] = _extra_inputs_digest(extra_input_paths)
-        fingerprint["extra_inputs_content_sha256"] = _extra_inputs_content_digest(extra_input_paths)
+        extra_inputs_digest, extra_inputs_content_digest = _extra_input_digests(extra_input_paths)
+        fingerprint["extra_inputs_sha256"] = extra_inputs_digest
+        fingerprint["extra_inputs_content_sha256"] = extra_inputs_content_digest
     return fingerprint
 
 

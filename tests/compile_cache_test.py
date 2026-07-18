@@ -4,8 +4,10 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
-from lib.compile_cache import (CompileDirectoryLock, can_reuse_compile, compile_fingerprint,
+from lib import compile_cache
+from lib.compile_cache import (CompileDirectoryLock, can_reuse_compile, compile_fingerprint, discover_filelist_inputs,
                                invalidate_compile_fingerprint, normalize_compile_script_paths,
                                validate_compile_fingerprint, write_compile_fingerprint)
 
@@ -242,6 +244,37 @@ class CompileCacheTest(unittest.TestCase):
             environment={"VCS_HOME": "/tools/vcs/Y-2026.03"},
         )
         self.assertEqual(config_changed["extra_inputs_content_sha256"], equivalent["extra_inputs_content_sha256"])
+
+    def test_filelist_input_discovery_tracks_nested_sources_and_include_directories(self):
+        runfiles = Path(tempfile.mkdtemp())
+        external = Path(tempfile.mkdtemp())
+        source = external / "external.sv"
+        source.write_text("module external; endmodule\n", encoding="utf-8")
+        include_dir = external / "include"
+        include_dir.mkdir()
+        header = include_dir / "external.svh"
+        header.write_text("`define EXTERNAL 1\n", encoding="utf-8")
+        nested = runfiles / "nested.f"
+        nested.write_text("{}\n+incdir+{}\n".format(source, include_dir), encoding="utf-8")
+        root = external / "compile.f"
+        root.write_text("-f nested.f\n", encoding="utf-8")
+
+        inputs = discover_filelist_inputs(root, runfiles)
+
+        self.assertEqual(sorted(map(str, (root, nested, source, header))), inputs)
+
+        with mock.patch("lib.compile_cache._file_bytes", wraps=compile_cache._file_bytes) as read_file:
+            compile_fingerprint(
+                external,
+                "vcs -f {}".format(root),
+                root,
+                extra_input_paths=inputs,
+            )
+
+        read_paths = [os.path.abspath(os.fspath(call.args[0])) for call in read_file.call_args_list]
+        self.assertEqual(2, read_paths.count(str(root))) # Compile args plus one external-input read.
+        for path in (nested, source, header):
+            self.assertEqual(1, read_paths.count(str(path)))
 
 
 if __name__ == "__main__":

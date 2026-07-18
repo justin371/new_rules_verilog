@@ -5,6 +5,7 @@ import datetime
 import os
 import signal
 import subprocess
+import time
 from pathlib import Path
 from types import SimpleNamespace
 from unittest import mock
@@ -51,6 +52,42 @@ class _RecordingRunner:
         job.job_lib = self
         job.jobstatus = JobStatus.PASSED
         self.started.set()
+
+    def check_for_done(self):
+        return True
+
+
+class _PausableRunner:
+    instances = {}
+
+    def __init__(self, job, _manager):
+        job.job_lib = self
+        self.job = job
+        self.finish = threading.Event()
+        self.paused = threading.Event()
+        self.resumed = threading.Event()
+        self.__class__.instances[job.name] = self
+
+    def check_for_done(self):
+        if not self.finish.is_set():
+            return False
+        self.job.jobstatus = JobStatus.PASSED
+        return True
+
+    def pause(self):
+        self.paused.set()
+        return True
+
+    def resume(self):
+        self.resumed.set()
+        return True
+
+
+class _IncompleteCompletionRunner:
+
+    def __init__(self, job, _manager):
+        job.job_lib = self
+        self.shutdown_incomplete = True
 
     def check_for_done(self):
         return True
@@ -130,6 +167,21 @@ class _TermIgnoringProcess:
         self.kill_called = True
 
 
+class _NeverReapedProcess:
+
+    def __init__(self):
+        self.wait_calls = []
+        self.kill_called = False
+        self.returncode = None
+
+    def wait(self, timeout=None):
+        self.wait_calls.append(timeout)
+        raise subprocess.TimeoutExpired("job", timeout)
+
+    def kill(self):
+        self.kill_called = True
+
+
 class _BlockingLaunchRunner:
     started = threading.Event()
     release = threading.Event()
@@ -171,7 +223,7 @@ class _ExitedProcess:
     def poll(self):
         return self.returncode
 
-    def wait(self):
+    def wait(self, timeout=None):
         return self.returncode
 
 
@@ -412,11 +464,90 @@ class JobManagerLaunchTest(unittest.TestCase):
             job.release_post_run.set()
             manager._run_jobs_thread.join(2.0)
 
+    def test_completed_finalizing_job_is_not_reported_as_interrupted(self):
+        log = _Logger()
+        rcfg = SimpleNamespace(options=SimpleNamespace(timeout=1), log=log)
+        job = _BlockingPostRunJob(rcfg, "finalizing")
+        job.job_dir = str(Path(tempfile.mkdtemp()) / "finalizing")
+        manager = JobManager({"idle_print_seconds": 60, "quit_count": 1}, log)
+        manager.job_lib_type = _RecordingRunner
+
+        try:
+            manager.add_job(job)
+            self.assertTrue(job.post_run_started.wait(1.0))
+            killer = threading.Thread(target=manager.kill)
+            killer.start()
+            job.release_post_run.set()
+            killer.join(2.0)
+
+            self.assertEqual(JobStatus.PASSED, job.jobstatus)
+            self.assertEqual((), manager.interrupted_jobs)
+        finally:
+            job.release_post_run.set()
+            manager._run_jobs_thread.join(2.0)
+
     def test_default_shutdown_wait_covers_process_group_escalation_budget(self):
         self.assertGreaterEqual(
             JobManager.SHUTDOWN_JOIN_SECONDS,
-            SubprocessJobRunner.TERM_GRACE_SECONDS + SubprocessJobRunner.KILL_GRACE_SECONDS,
+            SubprocessJobRunner.TERM_GRACE_SECONDS + 2 * SubprocessJobRunner.KILL_GRACE_SECONDS,
         )
+
+    def test_pause_blocks_new_jobs_until_resume(self):
+        log = _Logger()
+        rcfg = SimpleNamespace(options=SimpleNamespace(timeout=1), log=log)
+        first = Job(rcfg, "first")
+        second = Job(rcfg, "second")
+        first.job_dir = str(Path(tempfile.mkdtemp()) / "first")
+        second.job_dir = str(Path(tempfile.mkdtemp()) / "second")
+        manager = JobManager({"idle_print_seconds": 60, "quit_count": 1, "active_job_limit": 1}, log)
+        manager.job_lib_type = _PausableRunner
+        _PausableRunner.instances = {}
+
+        try:
+            manager.add_job(first)
+            manager.add_job(second)
+            deadline = time.monotonic() + 2.0
+            while "first" not in _PausableRunner.instances and time.monotonic() < deadline:
+                time.sleep(0.01)
+            first_runner = _PausableRunner.instances["first"]
+
+            self.assertEqual(1, manager.pause())
+            self.assertTrue(manager.paused)
+            self.assertTrue(first_runner.paused.is_set())
+            first_runner.finish.set()
+            deadline = time.monotonic() + 2.0
+            while first not in manager.status_snapshot()["done"] and time.monotonic() < deadline:
+                time.sleep(0.01)
+            self.assertNotIn("second", _PausableRunner.instances)
+
+            self.assertEqual(0, manager.resume())
+            deadline = time.monotonic() + 2.0
+            while "second" not in _PausableRunner.instances and time.monotonic() < deadline:
+                time.sleep(0.01)
+            self.assertIn("second", _PausableRunner.instances)
+            _PausableRunner.instances["second"].finish.set()
+            manager.wait()
+        finally:
+            manager.stop()
+
+    def test_incomplete_process_shutdown_skips_post_run_and_stops_scheduling(self):
+        log = _Logger()
+        rcfg = SimpleNamespace(options=SimpleNamespace(timeout=1), log=log)
+        job = Job(rcfg, "unreaped")
+        job.job_dir = str(Path(tempfile.mkdtemp()) / "unreaped")
+        job.post_run = mock.Mock()
+        manager = JobManager({"idle_print_seconds": 60, "quit_count": 2}, log)
+        manager.job_lib_type = _IncompleteCompletionRunner
+
+        try:
+            manager.add_job(job)
+            manager.wait()
+
+            self.assertEqual(JobStatus.FAILED, job.jobstatus)
+            self.assertTrue(manager.shutdown_incomplete)
+            job.post_run.assert_not_called()
+        finally:
+            manager.stop()
 
     def test_kill_signals_active_jobs_concurrently(self):
         log = _Logger()
@@ -605,7 +736,7 @@ class JobManagerLaunchTest(unittest.TestCase):
 
         signal_group.assert_called_once_with(signal.SIGKILL)
 
-    def test_timed_out_runner_finishes_after_sigkill_grace_period(self):
+    def test_timed_out_runner_retains_ownership_until_process_exits(self):
         runner = SubprocessJobRunner.__new__(SubprocessJobRunner)
         runner.job = SimpleNamespace(suppress_output=False,
                                      rcfg=SimpleNamespace(options=SimpleNamespace(no_stdout=False)))
@@ -618,8 +749,143 @@ class JobManagerLaunchTest(unittest.TestCase):
         runner._kill_deadline = datetime.datetime.now() - datetime.timedelta(seconds=1)
         runner._kill_sent = True
 
-        self.assertTrue(runner._check_for_done())
+        self.assertFalse(runner._check_for_done())
         self.assertEqual(-signal.SIGTERM, runner.returncode)
+        runner._p = _ExitedProcess()
+        runner._p.returncode = -signal.SIGKILL
+        with mock.patch.object(runner, "_process_group_exists", return_value=False):
+            self.assertTrue(runner._check_for_done())
+        self.assertEqual(-signal.SIGKILL, runner.returncode)
+
+    def test_timed_out_runner_stops_waiting_after_bounded_ownership_grace(self):
+        runner = SubprocessJobRunner.__new__(SubprocessJobRunner)
+        runner.job = SimpleNamespace(suppress_output=False,
+                                     rcfg=SimpleNamespace(options=SimpleNamespace(no_stdout=False)))
+        runner.log = _Logger()
+        runner._p = _RunningProcess()
+        runner._process_group_id = 456
+        runner._timed_out = True
+        runner._orphaned_process_group = False
+        runner._term_deadline = datetime.datetime.now() - datetime.timedelta(seconds=2)
+        runner._kill_deadline = datetime.datetime.now() - datetime.timedelta(seconds=1)
+        runner._ownership_deadline = datetime.datetime.now() - datetime.timedelta(seconds=0.5)
+        runner._kill_sent = True
+        runner._kill_failure_reported = True
+
+        self.assertTrue(runner._check_for_done())
+        self.assertTrue(runner.shutdown_incomplete)
+
+    def test_runner_pause_resume_signals_group_and_excludes_paused_time_from_timeout(self):
+        runner = SubprocessJobRunner.__new__(SubprocessJobRunner)
+        runner.job = SimpleNamespace(timeout=1,
+                                     suppress_output=False,
+                                     rcfg=SimpleNamespace(options=SimpleNamespace(no_stdout=False)))
+        runner.log = _Logger()
+        runner.done = False
+        runner._p = _RunningProcess()
+        runner._process_group_id = 456
+        runner._timed_out = False
+        runner._orphaned_process_group = False
+        runner._kill_sent = False
+        runner._kill_lock = threading.Lock()
+        runner._paused = False
+        runner._paused_at = None
+        runner._pause_intervals = []
+        runner._start_time = datetime.datetime.now()
+
+        with mock.patch.object(runner, "_signal_process_group") as signal_group, \
+             mock.patch.object(runner, "_signal_sidecar_process_groups") as signal_sidecars:
+            self.assertTrue(runner.pause())
+            runner._paused_at -= datetime.timedelta(seconds=5)
+            self.assertFalse(runner._check_for_done())
+            self.assertTrue(runner.resume())
+
+        self.assertEqual([mock.call(signal.SIGSTOP), mock.call(signal.SIGCONT)], signal_group.call_args_list)
+        self.assertEqual([mock.call(signal.SIGSTOP), mock.call(signal.SIGCONT)], signal_sidecars.call_args_list)
+        self.assertGreaterEqual(runner._pause_intervals[0][1] - runner._pause_intervals[0][0],
+                                datetime.timedelta(seconds=5))
+
+    def test_pause_duration_only_counts_time_after_simulation_timeout_start(self):
+        runner = SubprocessJobRunner.__new__(SubprocessJobRunner)
+        now = datetime.datetime.now()
+        timeout_start = now - datetime.timedelta(seconds=3)
+        runner._paused = False
+        runner._paused_at = None
+        runner._pause_intervals = [
+            (now - datetime.timedelta(seconds=10), now - datetime.timedelta(seconds=5)),
+            (now - datetime.timedelta(seconds=4), now - datetime.timedelta(seconds=2)),
+        ]
+
+        self.assertEqual(datetime.timedelta(seconds=1), runner._paused_duration_since(timeout_start, now))
+
+    @unittest.skipUnless(os.name == "posix" and os.path.isdir("/proc"), "Linux process-group behavior")
+    def test_pause_and_resume_signal_socket_sidecar_process_groups(self):
+        sidecar_file = Path(tempfile.mkdtemp()) / "sidecars"
+        main_process = subprocess.Popen([
+            "bash",
+            "-c",
+            "set -m; bash -c 'while :; do sleep 1; done' & "
+            "printf '%s\\n' \"$!\" > \"$1\"; set +m; while :; do sleep 1; done",
+            "sidecar-parent",
+            str(sidecar_file),
+        ],
+                                        start_new_session=True)
+        deadline = time.monotonic() + 2
+        while not sidecar_file.exists() and time.monotonic() < deadline:
+            time.sleep(0.01)
+        self.assertTrue(sidecar_file.exists())
+        sidecar_pid = int(sidecar_file.read_text(encoding="ascii").strip())
+        runner = SubprocessJobRunner.__new__(SubprocessJobRunner)
+        runner.job = SimpleNamespace(sidecar_process_groups_path=str(sidecar_file))
+        runner.log = _Logger()
+        runner.done = False
+        runner._p = main_process
+        runner._process_group_id = main_process.pid
+        runner._timed_out = False
+        runner._kill_lock = threading.Lock()
+        runner._paused = False
+        runner._paused_at = None
+        runner._pause_intervals = []
+
+        def process_state(process_id):
+            stat = Path("/proc/{}/stat".format(process_id)).read_text(encoding="ascii")
+            return stat.rsplit(")", 1)[1].split()[0]
+
+        def wait_for_state(process_id, stopped):
+            deadline = time.monotonic() + 2
+            while time.monotonic() < deadline:
+                if (process_state(process_id) == "T") == stopped:
+                    return
+                time.sleep(0.01)
+            self.fail("process {} did not reach expected stopped={} state".format(process_id, stopped))
+
+        try:
+            self.assertTrue(runner.pause())
+            wait_for_state(main_process.pid, True)
+            wait_for_state(sidecar_pid, True)
+            self.assertTrue(runner.resume())
+            wait_for_state(main_process.pid, False)
+            wait_for_state(sidecar_pid, False)
+        finally:
+            for process_group in (main_process.pid, sidecar_pid):
+                try:
+                    os.killpg(process_group, signal.SIGKILL)
+                except ProcessLookupError:
+                    pass
+            main_process.wait(timeout=2)
+
+    def test_sidecar_registry_rejects_process_groups_from_another_session(self):
+        sidecar_file = Path(tempfile.mkdtemp()) / "sidecars"
+        sidecar_file.write_text("789 earlier\n", encoding="ascii")
+        runner = SubprocessJobRunner.__new__(SubprocessJobRunner)
+        runner.job = SimpleNamespace(sidecar_process_groups_path=str(sidecar_file))
+        runner._process_group_id = 456
+
+        with mock.patch.object(runner, "_linux_process_identity", return_value=(789, 456, "later")), \
+             mock.patch("lib.job_lib.os.killpg") as kill_group:
+            runner._signal_sidecar_process_groups(signal.SIGSTOP)
+
+        kill_group.assert_not_called()
 
     def test_successful_shell_with_background_processes_is_failed_and_reaped(self):
         runner = SubprocessJobRunner.__new__(SubprocessJobRunner)
@@ -654,12 +920,33 @@ class JobManagerLaunchTest(unittest.TestCase):
         runner._process_group_id = 456
         runner._check_for_done = mock.Mock(side_effect=RuntimeError("poll failed"))
 
-        with mock.patch("lib.job_lib.os.killpg") as killpg, mock.patch.object(runner._p, "wait",
-                                                                              wraps=runner._p.wait) as wait:
+        with mock.patch("lib.job_lib.os.killpg") as killpg, \
+             mock.patch.object(runner, "_wait_for_process_group_exit", return_value=True), \
+             mock.patch.object(runner._p, "wait", wraps=runner._p.wait) as wait:
             self.assertTrue(runner.check_for_done())
 
         killpg.assert_called_once_with(456, signal.SIGKILL)
-        wait.assert_called_once_with()
+        wait.assert_called_once_with(timeout=runner.KILL_GRACE_SECONDS)
+
+    def test_runner_exception_uses_bounded_wait_when_direct_child_cannot_be_reaped(self):
+        runner = SubprocessJobRunner.__new__(SubprocessJobRunner)
+        runner.done = False
+        runner.job = SimpleNamespace(suppress_output=False,
+                                     rcfg=SimpleNamespace(options=SimpleNamespace(no_stdout=False)))
+        runner.log = _Logger()
+        runner._p = _NeverReapedProcess()
+        runner._process_group_id = 456
+        runner._check_for_done = mock.Mock(side_effect=RuntimeError("poll failed"))
+        runner.KILL_GRACE_SECONDS = 0.01
+
+        with mock.patch.object(runner, "_signal_process_group"), \
+             mock.patch.object(runner, "_signal_sidecar_process_groups"), \
+             mock.patch.object(runner, "_wait_for_process_group_exit", return_value=False):
+            self.assertTrue(runner.check_for_done())
+
+        self.assertEqual([0.01, 0.01], runner._p.wait_calls)
+        self.assertTrue(runner._p.kill_called)
+        self.assertTrue(runner.shutdown_incomplete)
 
     def test_test_timeout_waits_for_simulator_log_creation(self):
         job_dir = Path(tempfile.mkdtemp())
@@ -716,6 +1003,29 @@ class JobManagerLaunchTest(unittest.TestCase):
         self.assertEqual([mock.call(signal.SIGTERM), mock.call(signal.SIGKILL)], signal_group.call_args_list)
         self.assertEqual([0.01, 0.01], runner._p.wait_calls)
         self.assertTrue(runner.done)
+
+    @unittest.skipUnless(os.name == "posix", "POSIX process-group behavior")
+    def test_explicit_kill_uses_bounded_wait_when_direct_child_cannot_be_reaped(self):
+        runner = SubprocessJobRunner.__new__(SubprocessJobRunner)
+        runner.job = SimpleNamespace(name="stuck")
+        runner.log = _Logger()
+        runner._p = _NeverReapedProcess()
+        runner._process_group_id = 456
+        runner._kill_sent = False
+        runner._kill_lock = threading.Lock()
+        runner.shutdown_incomplete = False
+        runner.done = False
+        runner.TERM_GRACE_SECONDS = 0.01
+        runner.KILL_GRACE_SECONDS = 0.01
+
+        with mock.patch.object(runner, "_signal_process_group"), \
+             mock.patch.object(runner, "_signal_sidecar_process_groups"), \
+             mock.patch.object(runner, "_wait_for_process_group_exit", return_value=False):
+            self.assertFalse(runner.kill())
+
+        self.assertEqual([0.01, 0.01, 0.01], runner._p.wait_calls)
+        self.assertTrue(runner._p.kill_called)
+        self.assertTrue(runner.shutdown_incomplete)
 
     def test_simmer_profile_prints_phase_and_job_details(self):
         log = _SummaryLogger()

@@ -25,3 +25,8 @@ local_repository(
     name = "filelist_external_fixture",
     path = "tests/external_fixture",
 )
+
+local_repository(
+    name = "external_verilog_fixture",
+    path = "tests/external_setup_smoke/external_verilog_fixture",
+)

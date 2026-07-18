@@ -315,7 +315,9 @@ class VCompJob(Job):
         runtime_path = os.path.abspath(runtime_path)
         if runtime_path in self._shared_runtime_locks:
             return
-        lock_path = runtime_path + ".simmer.lock"
+        runtime_identity = os.path.normcase(runtime_path).encode("utf-8")
+        runtime_digest = sha1(runtime_identity).hexdigest()[:20]
+        lock_path = os.path.join(self.rcfg.proj_dir, ".simmer", "locks", "runtime-{}.lock".format(runtime_digest))
         runtime_lock = compile_cache.CompileDirectoryLock(lock_path)
         if not runtime_lock.acquire(blocking=False):
             log.info("Waiting for shared runtime directory lock %s", lock_path)
@@ -332,15 +334,27 @@ class VCompJob(Job):
             log.debug("Released shared runtime directory lock %s", runtime_lock.path)
             del self._shared_runtime_locks[runtime_path]
 
+    def resolve_bazel_runfiles_main(self):
+        """Return the stable Bazel runfiles root without requiring it to exist yet."""
+        existing = getattr(self, "bazel_runfiles_main", None)
+        if existing:
+            return existing
+        relpath, bazel_target = self.bazel_vcomp_target.split(':')
+        relpath = relpath[2:]
+        bazel_bin = get_bazel_bin(self.rcfg.proj_dir)
+        self.bazel_runfiles_main = os.path.join(bazel_bin, relpath, "{}.runfiles".format(bazel_target), "__main__")
+        return self.bazel_runfiles_main
+
     def pre_run(self):
         self._acquire_compile_lock()
         super(VCompJob, self).pre_run()
 
         options = self.rcfg.options
+        if options.compile_args_file and not os.path.isabs(options.compile_args_file):
+            options.compile_args_file = os.path.abspath(os.path.join(self.rcfg.proj_dir, options.compile_args_file))
         relpath, bazel_target = self.bazel_vcomp_target.split(':')
         relpath = relpath[2:] # Remove leading //
-        bazel_bin = get_bazel_bin(self.rcfg.proj_dir)
-        self.bazel_runfiles_main = os.path.join(bazel_bin, relpath, "{}.runfiles".format(bazel_target), "__main__")
+        self.resolve_bazel_runfiles_main()
         self.bazel_compile_args = self.simulator.get_bazel_compile_args_file(self.bazel_runfiles_main, relpath,
                                                                              bazel_target)
         self.bazel_runtime_args = self.simulator.get_bazel_runtime_args_file(self.bazel_runfiles_main, relpath,
@@ -610,6 +624,10 @@ class VCompJob(Job):
         finally:
             self._release_compile_lock()
 
+    def incomplete_shutdown(self, message):
+        super().incomplete_shutdown(message)
+        simmer_results.record_compile_job(getattr(self.rcfg, "simmer_results_run", None), self)
+
     def cancel(self):
         self._release_compile_lock()
 
@@ -697,6 +715,20 @@ class TestJob(Job):
                 return directory_name, directory_path
             collision_index += 1
 
+    def _remove_stale_wave_artifacts(self, wave_type):
+        stale_wave_path = self.simulator.get_wave_artifact_path(self.job_dir, wave_type)
+        if os.path.isdir(stale_wave_path) and not os.path.islink(stale_wave_path):
+            shutil.rmtree(stale_wave_path)
+        else:
+            try:
+                os.remove(stale_wave_path)
+            except FileNotFoundError:
+                pass
+        try:
+            os.remove(os.path.join(self.job_dir, "run_waves.sh"))
+        except FileNotFoundError:
+            pass
+
     def _release_run_directory_lock(self):
         directory_lock = getattr(self, "_run_directory_lock", None)
         if directory_lock is None:
@@ -743,6 +775,8 @@ class TestJob(Job):
             os.remove(self._log_path)
         except FileNotFoundError:
             pass
+        if options.waves is not None:
+            self._remove_stale_wave_artifacts(options.wave_type)
 
         # --- Super pre_run and Socket Logic ---
         super(TestJob, self).pre_run()
@@ -750,6 +784,7 @@ class TestJob(Job):
         sim_opts = self.simulator.generate_sim_options(self, seed)
 
         socket_sidecars = []
+        self.sidecar_process_groups_path = None
         runtime_options = self.btcj.dynamic_args(self.target)
         configured_simulator = runtime_options['simulator']
         if configured_simulator != self.simulator.get_name().upper():
@@ -772,6 +807,12 @@ class TestJob(Job):
             sim_opts += " " + shlex.join(["+SOCKET__{}={}".format(socket_name, socket_endpoint_path)])
             sidecar_command = sidecar_command_template.replace("{socket_file}", socket_endpoint_path)
             socket_sidecars.append((socket_name, sidecar_command, socket_endpoint_path))
+        if socket_sidecars:
+            self.sidecar_process_groups_path = os.path.join(self.job_dir, ".socket_sidecar_pgids")
+            try:
+                os.remove(self.sidecar_process_groups_path)
+            except FileNotFoundError:
+                pass
 
         # --- Add Test Name and Merge CLI/Bazel Options (Common Logic) ---
         sim_opts += " " + shlex.join(["+UVM_TESTNAME={}".format(runtime_options['uvm_testname'])])
@@ -1042,6 +1083,11 @@ class TestJob(Job):
         finally:
             self._release_run_directory_lock()
 
+    def incomplete_shutdown(self, message):
+        super().incomplete_shutdown(message)
+        self.simulation_duration_s = None
+        simmer_results.record_test_job(getattr(self.rcfg, "simmer_results_run", None), self)
+
     def cancel(self):
         self._release_run_directory_lock()
 
@@ -1109,6 +1155,104 @@ class _IgnoreAdditionalInterrupts:
 
     def __exit__(self, _exc_type, _exc_value, _traceback):
         signal.signal(signal.SIGINT, self._previous_handler)
+
+
+def _flush_interrupt_logs(rcfg, jm):
+    """Flush Python-owned logs before prompting or changing process state."""
+    if jm is not None:
+        jm.flush_output_streams()
+    for handler in getattr(rcfg.log, "handlers", ()):
+        try:
+            handler.flush()
+        except Exception as exc:
+            rcfg.log.warning("Could not flush a simmer log handler: %s", exc)
+    sys.stdout.flush()
+    sys.stderr.flush()
+
+
+def _log_interrupt_status(rcfg, jm):
+    snapshot = jm.status_snapshot()
+    rcfg.log.info(
+        "Scheduler status: %s; %d queued, %d launching, %d active, %d finalizing, %d done, %d skipped",
+        "paused" if snapshot["paused"] else "running",
+        len(snapshot["queued"]),
+        len(snapshot["launching"]),
+        len(snapshot["active"]),
+        len(snapshot["finalizing"]),
+        len(snapshot["done"]),
+        len(snapshot["skipped"]),
+    )
+    for state in ("launching", "active", "finalizing"):
+        for job in snapshot[state]:
+            log_path = getattr(job, "_log_path", None) or vars(job).get("log_path")
+            if log_path:
+                rcfg.log.info("  %-10s %s; log: %s", state, job, log_path)
+            else:
+                rcfg.log.info("  %-10s %s; directory: %s", state, job, getattr(job, "job_dir", "-"))
+
+
+def _prompt_interrupt_action(rcfg, jm, input_fn=None, interactive=None):
+    """Return ``stop`` or ``continue`` after handling an interactive Ctrl-C."""
+    _flush_interrupt_logs(rcfg, jm)
+    if interactive is None:
+        interactive = sys.stdin.isatty()
+    if not interactive:
+        rcfg.log.info("Keyboard interrupt on non-interactive input; stopping jobs.")
+        return "stop"
+    if input_fn is None:
+        input_fn = input
+
+    while True:
+        try:
+            choice = input_fn("\nInterrupt: [s] stop  [p] pause  [c] continue  [i] status/logs\n"
+                              "Select [s]: ").strip().lower()
+        except (EOFError, KeyboardInterrupt):
+            print()
+            return "stop"
+        if choice in ("", "s", "stop", "q", "quit"):
+            return "stop"
+        if choice in ("c", "continue"):
+            rcfg.log.info("Continuing regression.")
+            return "continue"
+        if choice in ("i", "info", "status", "l", "logs"):
+            _log_interrupt_status(rcfg, jm)
+            continue
+        if choice not in ("p", "pause"):
+            print("Unknown selection. Choose stop, pause, continue, or status/logs.")
+            continue
+
+        paused_count = jm.pause()
+        _flush_interrupt_logs(rcfg, jm)
+        rcfg.log.info("Regression paused; %d active process group(s) stopped. Job artifacts are preserved.",
+                      paused_count)
+        _log_interrupt_status(rcfg, jm)
+        while True:
+            try:
+                paused_choice = input_fn("\nPaused: [r] resume  [s] stop  [i] status/logs\n"
+                                         "Select [r]: ").strip().lower()
+            except (EOFError, KeyboardInterrupt):
+                print()
+                return "stop"
+            if paused_choice in ("", "r", "resume", "c", "continue"):
+                resumed_count = jm.resume()
+                rcfg.log.info("Regression resumed; %d active process group(s) continued.", resumed_count)
+                return "continue"
+            if paused_choice in ("s", "stop", "q", "quit"):
+                return "stop"
+            if paused_choice in ("i", "info", "status", "l", "logs"):
+                _log_interrupt_status(rcfg, jm)
+                continue
+            print("Unknown selection. Choose resume, stop, or status/logs.")
+
+
+def _wait_for_jobs(jm, rcfg):
+    while True:
+        try:
+            jm.wait()
+            return
+        except KeyboardInterrupt:
+            if _prompt_interrupt_action(rcfg, jm) == "stop":
+                raise
 
 
 def main(rcfg, options):
@@ -1217,6 +1361,7 @@ def main(rcfg, options):
             'active_job_limit': get_active_job_limit(options, rcfg, simulator),
         }
         jm = job_lib.JobManager(jm_opts, log)
+        simulator.prepare_regression_runtime(vcomp_jobs)
 
         for job in btbj_jobs:
             if options.no_compile or options.no_bazel:
@@ -1260,7 +1405,7 @@ def main(rcfg, options):
                 elif not dynamic_test_plan:
                     jm.add_job(test)
 
-        jm.wait()
+        _wait_for_jobs(jm, rcfg)
         jm.stop()
         if options.no_run:
             rcfg.log.info("run_test:main(): --no_run option selected, exiting")
@@ -1290,7 +1435,12 @@ def main(rcfg, options):
     post_processing_complete = False
     total_failures = 0
     try:
-        workflow_finalize_failed = simulator.finalize_regression_workflow()
+        unsafe_runtime = jm.shutdown_incomplete
+        if unsafe_runtime:
+            workflow_finalize_failed = True
+            log.error("Skipping backend finalization because a process group could not be reaped")
+        else:
+            workflow_finalize_failed = simulator.finalize_regression_workflow()
         regression_log_path = rv_utils.print_summary(rcfg, vcomp_jobs, jm, trd)
 
         category_stats = None
@@ -1299,7 +1449,7 @@ def main(rcfg, options):
             rv_utils.print_category_summary(category_stats, rcfg.log, rv_utils.LOGGER_INDENT)
 
         report_header = {}
-        if options.report:
+        if options.report and not unsafe_runtime:
             if simulator.coverage_enabled():
                 coverage_merge_failed = rcfg._profile_step(
                     "coverage_merge",
@@ -1330,7 +1480,7 @@ def main(rcfg, options):
         failures = {}
         for bench, (icfgs, test_list) in rcfg.all_vcomp.items():
             failures[bench] = sum([j.jobstatus == JobStatus.FAILED for icfg in icfgs for j in icfg.jobs])
-            if options.report:
+            if options.report and not unsafe_runtime:
                 report_path = os.path.join(report_root, report_header['project_name'],
                                            bench.split(":")[1], "index.html")
                 report_url = os.environ.get("SIMMER_REPORT_URL")
@@ -1343,7 +1493,10 @@ def main(rcfg, options):
         for message in getattr(rcfg, "deferred_messages", []):
             log.info(message)
 
-        simulator.cleanup_shared_runtime_artifacts(vcomp_jobs)
+        if unsafe_runtime:
+            log.error("Skipping shared runtime cleanup because a process group could not be reaped")
+        else:
+            simulator.cleanup_shared_runtime_artifacts(vcomp_jobs)
         total_failures = sum(failures.values())
         post_processing_complete = True
         rcfg.log.exit_if_warnings_or_errors("Previous errors")

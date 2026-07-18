@@ -239,7 +239,7 @@ class XceliumSimulator(SimulatorInterface):
         inputs_sha256, input_count = self._msie_input_digest(vcomp_job)
         covfile = self._effective_covfile(vcomp_job)
         return {
-            "schema_version": 1,
+            "schema_version": 2,
             "bazel_target": vcomp_job.bazel_vcomp_target,
             "primary_top": vcomp_job.msie_primary_top,
             "primary_name": vcomp_job.msie_primary_name,
@@ -256,6 +256,7 @@ class XceliumSimulator(SimulatorInterface):
             "covfile_sha256": _sha256_file(covfile) if covfile else None,
             "rtl_defines": sorted(self.options.rtl_defines or []),
             "debug": self.options.waves is not None,
+            "xcelium_tool_id": self.get_tool_identity(),
             "tool_environment": {
                 key: os.environ.get(key, "")
                 for key in ("XCELIUMHOME", "SIM_PLATFORM", "LOADEDMODULES")
@@ -347,12 +348,24 @@ class XceliumSimulator(SimulatorInterface):
     def get_bazel_emu_compile_args_file(self, bazel_runfiles_main, relpath, bazel_target):
         return os.path.join(bazel_runfiles_main, relpath, "{}_compile_args_pldm_ice.f".format(bazel_target))
 
+    def prepare_regression_runtime(self, vcomp_jobs):
+        runtime_jobs = []
+        for vcomp_job in vcomp_jobs.values():
+            runfiles_dir = vcomp_job.resolve_bazel_runfiles_main()
+            runtime_jobs.append((runfiles_dir, vcomp_job))
+            if self.options.coverage:
+                vcomp_job.cov_work_dir = os.path.join(self.rcfg.regression_dir, vcomp_job.name + "__COV_WORK")
+                runtime_jobs.append((vcomp_job.cov_work_dir, vcomp_job))
+        for runtime_path, vcomp_job in sorted(runtime_jobs, key=lambda item: os.path.abspath(item[0])):
+            vcomp_job.acquire_shared_runtime_lock(runtime_path)
+
     def generate_compile_options(self, vcomp_job):
         opts = {'cov_opts': '', 'xprop_cmd': None, 'additional_defines': []}
 
         # Coverage
         if self.options.coverage:
-            vcomp_job.cov_work_dir = os.path.join(self.rcfg.regression_dir, vcomp_job.name + "__COV_WORK")
+            if getattr(vcomp_job, "cov_work_dir", None) is None:
+                vcomp_job.cov_work_dir = os.path.join(self.rcfg.regression_dir, vcomp_job.name + "__COV_WORK")
             vcomp_job.acquire_shared_runtime_lock(vcomp_job.cov_work_dir)
             for stale_path in [
                     os.path.join(vcomp_job.cov_work_dir, "scope"),

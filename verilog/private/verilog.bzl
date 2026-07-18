@@ -182,9 +182,9 @@ def _verilog_test_impl(ctx):
 
     if ctx.attr.tool:
         tool_executable = ctx.attr.tool[DefaultInfo].files_to_run.executable
-        content.append(runfiles_relative_short_path(tool_executable))
+        content.append(tool_executable.short_path)
 
-    flists_args = ["-f {}".format(runfiles_relative_short_path(f)) for f in flists_list]
+    flists_args = ["-f {}".format(f.short_path) for f in flists_list]
     content += ctx.attr.pre_flist_args
 
     for key, value in gather_shell_defines(ctx.attr.shells).items():
@@ -193,7 +193,7 @@ def _verilog_test_impl(ctx):
     content += flists_args
     for dep in ctx.attr.deps:
         if VerilogInfo in dep and dep[VerilogInfo].last_module:
-            content.append(runfiles_relative_short_path(dep[VerilogInfo].last_module))
+            content.append(dep[VerilogInfo].last_module.short_path)
     content += ctx.attr.post_flist_args
 
     content = ctx.expand_location("\n".join([content[0], " ".join(content[1:])]) + "\n", targets = ctx.attr.data)

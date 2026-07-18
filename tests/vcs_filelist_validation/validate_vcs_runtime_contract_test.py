@@ -30,7 +30,7 @@ import simmer
 from lib.job_lib import Job, JobManager, JobStatus
 from lib.regression import resolve_report_generation
 from lib.runtime_options import format_sim_opts_dict, resolve_test_timeout_hours
-from lib.simulators.vcs import PARTCOMP_MANIFEST_FILENAME, VcsSimulator, detect_allocated_cpus
+from lib.simulators.vcs import PARTCOMP_MANIFEST_FILENAME, VcsSimulator, _tcl_quote as _vcs_tcl_quote, detect_allocated_cpus
 from lib.simulators.xcelium import XceliumSimulator, _tcl_quote
 
 
@@ -222,6 +222,7 @@ class VcsRuntimeContractTest(unittest.TestCase):
         test_job = SimpleNamespace(
             _log_path=str(Path(job_dir) / "simulation.log"),
             job_dir=str(job_dir),
+            sidecar_process_groups_path=str(Path(job_dir) / ".socket_sidecar_pgids"),
             vcomper=SimpleNamespace(
                 bazel_runfiles_main=str(runfiles_root),
                 rcfg=SimpleNamespace(proj_dir=str(project_dir)),
@@ -1204,6 +1205,7 @@ class VcsRuntimeContractTest(unittest.TestCase):
         self.assertIn("dut_externs.v", rendered)
         self.assertNotIn("incr_pkg", rendered)
 
+    @mock.patch.dict(os.environ, {"RV_XCELIUM_TOOL_ID": "Xcelium MSIE unit-test release"})
     def test_xcelium_msie_manifest_rejects_wrong_primary_key(self):
         root = Path(tempfile.mkdtemp(prefix="xrun_msie_"))
         runfiles = root / "runfiles"
@@ -1311,6 +1313,8 @@ class VcsRuntimeContractTest(unittest.TestCase):
 
     def test_vcs_wave_template_uses_returned_fsdb_id_and_unlimited_default_depth(self):
         wave_template = self._read_repo_file("bin/templates/vcs_wave_cmd_template.tcl.j2")
+        environment = jinja2.Environment(undefined=jinja2.StrictUndefined)
+        environment.filters["tcl_quote"] = _vcs_tcl_quote
         wave_options = SimpleNamespace(
             probes=["hdl_top.dut"],
             wave_depth=999,
@@ -1318,7 +1322,7 @@ class VcsRuntimeContractTest(unittest.TestCase):
             wave_start=20,
         )
 
-        rendered_tcl = jinja2.Template(wave_template, undefined=jinja2.StrictUndefined).render(
+        rendered_tcl = environment.from_string(wave_template).render(
             options=wave_options,
             waves_db="/tmp/waves.fsdb",
         )
@@ -1330,7 +1334,7 @@ class VcsRuntimeContractTest(unittest.TestCase):
         self.assertNotIn("dump -close $wave_fid", rendered_tcl)
 
         wave_options.wave_depth = 8
-        rendered_tcl = jinja2.Template(wave_template, undefined=jinja2.StrictUndefined).render(
+        rendered_tcl = environment.from_string(wave_template).render(
             options=wave_options,
             waves_db="/tmp/waves.fsdb",
         )
@@ -1344,8 +1348,10 @@ class VcsRuntimeContractTest(unittest.TestCase):
         ])
         sim_options = shlex.split(simulator.generate_sim_options(SimpleNamespace(name="smoke", iteration=1), 42))
         wave_template = self._read_repo_file("bin/templates/vcs_wave_cmd_template.tcl.j2")
+        environment = jinja2.Environment(undefined=jinja2.StrictUndefined)
+        environment.filters["tcl_quote"] = _vcs_tcl_quote
         options.probes = ["hdl_top.dut"]
-        rendered_tcl = jinja2.Template(wave_template, undefined=jinja2.StrictUndefined).render(
+        rendered_tcl = environment.from_string(wave_template).render(
             options=options,
             waves_db="/tmp/waves.fsdb",
         )
@@ -1353,6 +1359,18 @@ class VcsRuntimeContractTest(unittest.TestCase):
         self.assertIn("+fsdb+glitch=0", sim_options)
         self.assertIn("+fsdb+force", sim_options)
         self.assertIn("dump -glitch on -fid $wave_fid", rendered_tcl)
+
+    def test_vcs_wave_template_quotes_tcl_substitutions_in_fsdb_path(self):
+        wave_template = self._read_repo_file("bin/templates/vcs_wave_cmd_template.tcl.j2")
+        environment = jinja2.Environment(undefined=jinja2.StrictUndefined)
+        environment.filters["tcl_quote"] = _vcs_tcl_quote
+        rendered_tcl = environment.from_string(wave_template).render(
+            options=SimpleNamespace(probes=["hdl_top"], wave_depth=1, wave_end=99999999, wave_start=0),
+            waves_db='/tmp/$USER/[exec touch injected]/waves".fsdb',
+        )
+
+        self.assertIn(r'\$USER', rendered_tcl)
+        self.assertIn(r'\[exec touch injected\]', rendered_tcl)
 
     def test_vcs_custom_wave_tcl_example_controls_scope_depth_and_time(self):
         example = self._read_repo_file("docs/examples/vcs_fsdb_dump.tcl")
@@ -1410,6 +1428,28 @@ class VcsRuntimeContractTest(unittest.TestCase):
             self.assertIn("set -Eeuo pipefail", template)
             self.assertIn('"$@"', template)
         self.assertIn('"${PYTHON:-python3}" ./{LINT_PARSER}', lint_templates[1])
+
+    def test_vcs_coverage_viewer_messages_do_not_expand_result_paths(self):
+        root = Path(tempfile.mkdtemp(prefix="vcs coverage quoting "))
+        marker = root / "injected"
+        template_text = self._read_repo_file("bin/templates/vcs_cov_merge_template.sh.j2")
+        environment = jinja2.Environment(undefined=jinja2.StrictUndefined)
+        environment.filters["shell_quote"] = shlex.quote
+        rendered = environment.from_string(template_text).render(
+            cov_db_path="{}$(touch {})".format(root / "cov", marker),
+            merged_db_path="{}$(touch {})".format(root / "merged", marker),
+            report_dir=str(root / "report"),
+            urg_command="true",
+            urg_parallel=False,
+            urg_show_tests=False,
+            verdi_command="verdi",
+        )
+        script = root / "merge.sh"
+        script.write_text(rendered, encoding="utf-8")
+
+        subprocess.run(["bash", str(script)], check=True, capture_output=True, text=True)
+
+        self.assertFalse(marker.exists())
 
     def test_svunit_waves_and_launch_preserve_execution_argv(self):
         root = Path(tempfile.mkdtemp(prefix="svunit argv contract "))
@@ -1543,6 +1583,7 @@ class VcsRuntimeContractTest(unittest.TestCase):
         # Then: the script fails, removes the endpoint, and terminates the sidecar group.
         self.assertNotEqual(0, completed_process.returncode)
         self.assertFalse(socket_endpoint.exists())
+        self.assertFalse((job_dir / ".socket_sidecar_pgids").exists())
         self.assertEqual(str(project_dir), (job_dir / "bridge.log").read_text(encoding="utf-8").splitlines()[0])
         sidecar_pid = int(sidecar_pid_file.read_text(encoding="utf-8"))
         for _ in range(20):
@@ -1853,6 +1894,34 @@ class VcsRuntimeContractTest(unittest.TestCase):
             shlex.split(merge_script.splitlines()[1])[shlex.split(merge_script.splitlines()[1]).index("-exec") + 1],
         )
 
+    def test_regression_shared_runtime_locks_use_global_path_order(self):
+        root = Path(tempfile.mkdtemp(prefix="runtime lock order "))
+        self.addCleanup(shutil.rmtree, root, ignore_errors=True)
+
+        def jobs(trace):
+            result = {}
+            for name, runfiles_name in (("z_tb", "a.runfiles"), ("a_tb", "z.runfiles")):
+                job = SimpleNamespace(name=name, cov_work_dir=None)
+                job.resolve_bazel_runfiles_main = lambda value=str(root / runfiles_name): value
+                job.acquire_shared_runtime_lock = lambda path, value=name: trace.append((os.path.abspath(path), value))
+                result[name] = job
+            return result
+
+        vcs_trace = []
+        vcs_options = parse_args(["--simulator", "VCS", "--cm", "line"])
+        vcs_config = DummyRegressionConfig()
+        vcs_config.regression_dir = str(root / "vcs")
+        VcsSimulator(vcs_options, vcs_config, None).prepare_regression_runtime(jobs(vcs_trace))
+        self.assertEqual(sorted(vcs_trace), vcs_trace)
+
+        xrun_trace = []
+        xrun_options = parse_args(["--simulator", "XRUN", "--coverage", "A"])
+        xrun_config = DummyRegressionConfig()
+        xrun_config.regression_dir = str(root / "xrun")
+        XceliumSimulator(xrun_options, xrun_config, None).prepare_regression_runtime(jobs(xrun_trace))
+        self.assertEqual(sorted(xrun_trace), xrun_trace)
+        self.assertEqual(4, len(xrun_trace))
+
     def test_xcelium_shared_cleanup_keeps_top_level_names_matched_only_by_old_globs(self):
         runfiles = Path(tempfile.mkdtemp(prefix="xrun shared runfiles "))
         self.addCleanup(shutil.rmtree, runfiles, ignore_errors=True)
@@ -2116,7 +2185,7 @@ class VcsRuntimeContractTest(unittest.TestCase):
 
         template = self._read_repo_file("bin/templates/vcs_cov_merge_template.sh.j2")
         self.assertIn("{{ urg_command }}", template)
-        self.assertIn("{{ verdi_command }}", template)
+        self.assertIn("~ verdi_command ~", template)
 
     def test_vcs_coverage_names_include_iteration_and_failed_db_can_be_removed(self):
         options = parse_args(["--simulator", "VCS", "--cm", "line"])

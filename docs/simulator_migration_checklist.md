@@ -29,10 +29,10 @@ Focus on these rule families first:
 bazel query //verilog/private:all
 ```
 
-2. Regenerate the Stardoc output and confirm the docs stay in sync:
+2. Update `docs/defs.md` directly and confirm the documentation checks stay in sync:
 
 ```bash
-bazel build //docs:defs_docs
+./tests/doc_test.sh
 ```
 
 3. Run one existing DV test that does not set `simulator`. It should resolve to `XRUN`.

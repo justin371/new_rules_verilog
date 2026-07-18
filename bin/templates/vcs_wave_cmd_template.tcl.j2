@@ -1,5 +1,5 @@
 # UCLI returns the actual dump file ID; do not assume a fixed identifier.
-set wave_fid [dump -file "{{ waves_db }}" -type FSDB]
+set wave_fid [dump -file {{ waves_db|tcl_quote }} -type FSDB]
 # Glitch capture is configured per open FSDB file, while +fsdb+force is a simv option.
 dump -glitch on -fid $wave_fid
 {% set fsdb_hierarchy_depth = 0 if options.wave_depth == 999 else options.wave_depth -%}
