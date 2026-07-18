@@ -20,7 +20,16 @@ CONSUMER_FILES = (
 
 def _repository_files(repository_root):
     result = subprocess.run(
-        ["git", "ls-files", "--cached", "--others", "--exclude-standard", "-z"],
+        [
+            "git",
+            "-c",
+            "safe.directory={}".format(repository_root),
+            "ls-files",
+            "--cached",
+            "--others",
+            "--exclude-standard",
+            "-z",
+        ],
         cwd=repository_root,
         check=True,
         capture_output=True,
