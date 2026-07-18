@@ -60,6 +60,19 @@ function socket_sidecar_group_is_owned {
     return 1
 }
 
+function socket_sidecar_process_is_running {
+    local sidecar_pid=$1
+    local expected_start_time=$2
+    [ -r "/proc/$sidecar_pid/stat" ] || return 1
+    local stat_fields
+    stat_fields="$(sed 's/.*) //' "/proc/$sidecar_pid/stat")"
+    local process_state
+    local start_time
+    process_state="$(awk '{print $1}' <<< "$stat_fields")"
+    start_time="$(awk '{print $20}' <<< "$stat_fields")"
+    [ "$process_state" != "Z" ] && [ "$start_time" = "$expected_start_time" ]
+}
+
 function terminate_socket_sidecars {
     local sidecar_pid
     local sidecar_start_time
@@ -241,6 +254,7 @@ function run_test {
     if [ -n "${!sidecar_pid_variable:-}" ]; then
         local sidecar_pid="${!sidecar_pid_variable}"
         local sidecar_start_time
+        local sidecar_stop_requested=0
         sidecar_start_time="$(awk -v pid="$sidecar_pid" '$1 == pid { print $2; exit }' "$SOCKET_SIDECAR_GROUPS_FILE")"
         echo "Waiting up to 5 seconds for socket {{ socket_name }} (PID $sidecar_pid) to exit..."
         local graceful_wait_seconds=0
@@ -251,6 +265,9 @@ function run_test {
         done
         if socket_sidecar_group_is_owned "$sidecar_pid" "$sidecar_start_time"; then
             echo "Stopping socket {{ socket_name }} after simulation."
+            if socket_sidecar_process_is_running "$sidecar_pid" "$sidecar_start_time"; then
+                sidecar_stop_requested=1
+            fi
             kill -CONT -- "-$sidecar_pid" 2>/dev/null || true
             kill -TERM -- "-$sidecar_pid" 2>/dev/null || true
             local termination_wait_seconds=0
@@ -270,7 +287,12 @@ function run_test {
             sidecar_exit_code=$?
         fi
         echo "Socket {{ socket_name }} exited with code: $sidecar_exit_code"
-        if [ "$sidecar_exit_code" -ne 0 ] && [ "$sidecar_exit_code" -ne 137 ] && [ "$sidecar_exit_code" -ne 143 ]; then
+        local requested_signal_exit=0
+        if [ "$sidecar_stop_requested" -ne 0 ] && \
+           { [ "$sidecar_exit_code" -eq 137 ] || [ "$sidecar_exit_code" -eq 143 ]; }; then
+            requested_signal_exit=1
+        fi
+        if [ "$sidecar_exit_code" -ne 0 ] && [ "$requested_signal_exit" -eq 0 ]; then
             echo "%E- ERROR: Socket process {{ socket_name }} (PID $sidecar_pid) returned non-zero exit code $sidecar_exit_code."
             echo "Check log: {{ job.job_dir }}/{{ socket_name }}.log"
             sidecar_failure_detected=1

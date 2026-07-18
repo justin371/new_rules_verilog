@@ -292,7 +292,7 @@ class VcsSimulator(SimulatorInterface):
         return inputs
 
     def compile_script_for_fingerprint(self, compile_script):
-        return re.sub(r"-fastpartcomp=j\d+", "-fastpartcomp=jAUTO", compile_script)
+        return re.sub(r"(?<!\S)-fastpartcomp=j\d+(?=\s|$)", "-fastpartcomp=jAUTO", compile_script)
 
     def should_auto_reuse_compile(self):
         return self.options.vcs_auto_compile_cache

@@ -454,12 +454,15 @@ class JobManagerLaunchTest(unittest.TestCase):
             self.assertTrue(killer.is_alive(), "kill did not wait for post_run")
             self.assertFalse(job.cancel_requested)
             self.assertFalse(job.cancelled.is_set())
+            self.assertEqual(JobStatus.PASSED, job.jobstatus)
+            self.assertEqual((job, ), manager.interrupted_jobs)
 
             job.release_post_run.set()
             killer.join(2.0)
             self.assertFalse(killer.is_alive())
             self.assertEqual([True], shutdown_result)
             self.assertIn(job, manager._done)
+            self.assertEqual((), manager.interrupted_jobs)
         finally:
             job.release_post_run.set()
             manager._run_jobs_thread.join(2.0)

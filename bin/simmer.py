@@ -1157,6 +1157,22 @@ class _IgnoreAdditionalInterrupts:
         signal.signal(signal.SIGINT, self._previous_handler)
 
 
+class _SharedRuntimeCleanup:
+    """Run backend shared-runtime cleanup at most once for this invocation."""
+
+    def __init__(self, simulator, vcomp_jobs):
+        self._simulator = simulator
+        self._vcomp_jobs = vcomp_jobs
+        self.attempted = False
+
+    def cleanup(self):
+        if self.attempted:
+            return False
+        self.attempted = True
+        self._simulator.cleanup_shared_runtime_artifacts(self._vcomp_jobs)
+        return True
+
+
 def _flush_interrupt_logs(rcfg, jm):
     """Flush Python-owned logs before prompting or changing process state."""
     if jm is not None:
@@ -1282,6 +1298,7 @@ def main(rcfg, options):
     # ---
 
     vcomp_jobs = {}
+    shared_runtime_cleanup = _SharedRuntimeCleanup(simulator, vcomp_jobs)
     btcj_jobs = []
     btbj_jobs = []
     trd = []
@@ -1426,6 +1443,7 @@ def main(rcfg, options):
                 vcomp_jobs,
                 jm=jm,
                 cleanup_shared_runtime=shutdown_complete,
+                shared_runtime_cleanup=shared_runtime_cleanup,
             )
         log.error("Exiting due to keyboard interrupt")
         raise SystemExit(130)
@@ -1433,7 +1451,9 @@ def main(rcfg, options):
     workflow_finalize_failed = False
     regression_log_path = None
     post_processing_complete = False
+    post_processing_interrupted = False
     total_failures = 0
+    unsafe_runtime = True
     try:
         unsafe_runtime = jm.shutdown_incomplete
         if unsafe_runtime:
@@ -1496,12 +1516,26 @@ def main(rcfg, options):
         if unsafe_runtime:
             log.error("Skipping shared runtime cleanup because a process group could not be reaped")
         else:
-            simulator.cleanup_shared_runtime_artifacts(vcomp_jobs)
+            shared_runtime_cleanup.cleanup()
         total_failures = sum(failures.values())
         post_processing_complete = True
         rcfg.log.exit_if_warnings_or_errors("Previous errors")
+    except KeyboardInterrupt:
+        post_processing_interrupted = True
+        with _IgnoreAdditionalInterrupts():
+            _flush_interrupt_logs(rcfg, jm)
+            finalize_interrupted_run(
+                rcfg,
+                simulator,
+                vcomp_jobs,
+                jm=jm,
+                cleanup_shared_runtime=not unsafe_runtime,
+                shared_runtime_cleanup=shared_runtime_cleanup,
+            )
+        log.error("Exiting due to keyboard interrupt during regression finalization")
+        raise SystemExit(130)
     finally:
-        if getattr(rcfg, "simmer_results_run", None) is not None:
+        if not post_processing_interrupted and getattr(rcfg, "simmer_results_run", None) is not None:
             simmer_results.finalize_run(
                 rcfg.simmer_results_run,
                 regression_log_path=regression_log_path,
@@ -1535,11 +1569,19 @@ def persist_simmer_results(rcfg, fatal=True):
     return True
 
 
-def finalize_interrupted_run(rcfg, simulator, vcomp_jobs, jm=None, cleanup_shared_runtime=True):
+def finalize_interrupted_run(rcfg,
+                             simulator,
+                             vcomp_jobs,
+                             jm=None,
+                             cleanup_shared_runtime=True,
+                             shared_runtime_cleanup=None):
     """Clean backend state and persist a failed result record after Ctrl-C."""
     if cleanup_shared_runtime:
         try:
-            simulator.cleanup_shared_runtime_artifacts(vcomp_jobs)
+            if shared_runtime_cleanup is None:
+                simulator.cleanup_shared_runtime_artifacts(vcomp_jobs)
+            else:
+                shared_runtime_cleanup.cleanup()
         except Exception as exc:
             rcfg.log.error("Failed to clean shared runtime artifacts after interrupt: %s", exc)
     else:

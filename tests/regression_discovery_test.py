@@ -220,6 +220,144 @@ class RegressionDiscoveryTest(unittest.TestCase):
 
         self.assertFalse(config._discovery_cache_is_fresh())
 
+    def test_cache_manifest_tracks_local_repository_bazel_metadata_only(self):
+        project_dir = Path(tempfile.mkdtemp())
+        repository_dir = Path(tempfile.mkdtemp())
+        subprocess.run(["git", "init", "-q"], cwd=project_dir, check=True)
+        (project_dir / "WORKSPACE").write_text(
+            "local_repository(name = 'mutable_ip', path = {!r})\n".format(str(repository_dir)),
+            encoding="utf-8",
+        )
+        build_file = repository_dir / "rtl" / "BUILD"
+        build_file.parent.mkdir()
+        build_file.write_text("filegroup(name = 'first')\n", encoding="utf-8")
+        source_file = repository_dir / "rtl" / "large_source.sv"
+        source_file.write_text("module first; endmodule\n", encoding="utf-8")
+        config = self._config(project_dir)
+        cache_dir = project_dir / ".simmer" / "cache"
+        cache_dir.mkdir(parents=True)
+        for filename in ("all_vcomp.json", "tests_to_tags.json", "tests_to_simulator.json"):
+            (cache_dir / filename).write_text("{}", encoding="utf-8")
+
+        config._write_discovery_manifest()
+        manifest = json.loads((cache_dir / "discovery_manifest.json").read_text(encoding="utf-8"))
+        manifest_paths = {entry["path"] for entry in manifest["files"]}
+        self.assertIn(os.path.relpath(build_file, project_dir).replace(os.sep, "/"), manifest_paths)
+        self.assertNotIn(os.path.relpath(source_file, project_dir).replace(os.sep, "/"), manifest_paths)
+        self.assertTrue(config._discovery_cache_is_fresh())
+
+        build_file.write_text("filegroup(name = 'second')\n", encoding="utf-8")
+
+        self.assertFalse(config._discovery_cache_is_fresh())
+
+    def test_cache_manifest_tracks_wrapped_new_local_repository_declared_in_bzl(self):
+        project_dir = Path(tempfile.mkdtemp())
+        repository_dir = Path(tempfile.mkdtemp())
+        subprocess.run(["git", "init", "-q"], cwd=project_dir, check=True)
+        (project_dir / "WORKSPACE").write_text("load('//tools:repos.bzl', 'declare_repositories')\n", encoding="utf-8")
+        repos_bzl = project_dir / "tools" / "repos.bzl"
+        repos_bzl.parent.mkdir()
+        repos_bzl.write_text(
+            "def declare_repositories():\n"
+            "    maybe(native.new_local_repository, name = 'mutable_ip', path = {!r}, build_file = '//:BUILD')\n".
+            format(str(repository_dir)),
+            encoding="utf-8",
+        )
+        repository_bzl = repository_dir / "defs.bzl"
+        repository_bzl.write_text("VALUE = 'first'\n", encoding="utf-8")
+        config = self._config(project_dir)
+        cache_dir = project_dir / ".simmer" / "cache"
+        cache_dir.mkdir(parents=True)
+        for filename in ("all_vcomp.json", "tests_to_tags.json", "tests_to_simulator.json"):
+            (cache_dir / filename).write_text("{}", encoding="utf-8")
+
+        config._write_discovery_manifest()
+        self.assertTrue(config._discovery_cache_is_fresh())
+        repository_bzl.write_text("VALUE = 'second'\n", encoding="utf-8")
+
+        self.assertFalse(config._discovery_cache_is_fresh())
+
+    def test_local_repository_scan_follows_safe_metadata_symlink(self):
+        project_dir = Path(tempfile.mkdtemp())
+        repository_dir = Path(tempfile.mkdtemp())
+        subprocess.run(["git", "init", "-q"], cwd=project_dir, check=True)
+        (project_dir / "WORKSPACE").write_text(
+            "local_repository(name = 'mutable_ip', path = {!r})\n".format(str(repository_dir)),
+            encoding="utf-8",
+        )
+        real_build = Path(tempfile.mkdtemp()) / "real.BUILD"
+        real_build.write_text("filegroup(name = 'first')\n", encoding="utf-8")
+        linked_build = repository_dir / "BUILD"
+        try:
+            linked_build.symlink_to(real_build)
+        except OSError as exc:
+            self.skipTest("file symlinks are unavailable: {}".format(exc))
+        config = self._config(project_dir)
+        cache_dir = project_dir / ".simmer" / "cache"
+        cache_dir.mkdir(parents=True)
+        for filename in ("all_vcomp.json", "tests_to_tags.json", "tests_to_simulator.json"):
+            (cache_dir / filename).write_text("{}", encoding="utf-8")
+
+        metadata_paths = config._iter_local_repository_metadata(repository_dir)
+        config._write_discovery_manifest()
+        real_build.write_text("filegroup(name = 'second')\n", encoding="utf-8")
+
+        self.assertIn(str(linked_build), metadata_paths)
+        self.assertFalse(config._discovery_cache_is_fresh())
+
+    def test_local_repository_scan_limit_disables_cache_reuse_without_warning(self):
+        project_dir = Path(tempfile.mkdtemp())
+        repository_dir = Path(tempfile.mkdtemp())
+        subprocess.run(["git", "init", "-q"], cwd=project_dir, check=True)
+        (project_dir / "WORKSPACE").write_text(
+            "local_repository(name = 'mutable_ip', path = {!r})\n".format(str(repository_dir)),
+            encoding="utf-8",
+        )
+        (repository_dir / "BUILD").write_text("filegroup(name = 'first')\n", encoding="utf-8")
+        (repository_dir / "source.sv").write_text("module first; endmodule\n", encoding="utf-8")
+        config = self._config(project_dir)
+        config.log = mock.Mock(wraps=config.log)
+        cache_dir = project_dir / ".simmer" / "cache"
+        cache_dir.mkdir(parents=True)
+        for filename in ("all_vcomp.json", "tests_to_tags.json", "tests_to_simulator.json"):
+            (cache_dir / filename).write_text("{}", encoding="utf-8")
+
+        with mock.patch("lib.regression.DISCOVERY_LOCAL_REPOSITORY_MAX_ENTRIES", 1):
+            config._write_discovery_manifest()
+            manifest = json.loads((cache_dir / "discovery_manifest.json").read_text(encoding="utf-8"))
+            self.assertFalse(manifest["cacheable"])
+            self.assertFalse(config._discovery_cache_is_fresh())
+
+        config.log.warning.assert_not_called()
+
+    def test_oversized_local_repository_declaration_disables_cache_reuse(self):
+        project_dir = Path(tempfile.mkdtemp())
+        subprocess.run(["git", "init", "-q"], cwd=project_dir, check=True)
+        (project_dir / "WORKSPACE").write_text(
+            "local_repository(name = 'mutable_ip', path = '/tmp/ip')\n",
+            encoding="utf-8",
+        )
+        config = self._config(project_dir)
+
+        with mock.patch("lib.regression.DISCOVERY_LOCAL_REPOSITORY_MAX_DECLARATION_BYTES", 8):
+            manifest = config._discovery_dependency_manifest()
+
+        self.assertFalse(manifest["cacheable"])
+
+    def test_nonliteral_direct_local_repository_path_disables_cache_reuse(self):
+        project_dir = Path(tempfile.mkdtemp())
+        subprocess.run(["git", "init", "-q"], cwd=project_dir, check=True)
+        (project_dir / "WORKSPACE").write_text(
+            "mutable_ip_path = '/tmp/ip'\n"
+            "local_repository(name = 'mutable_ip', path = mutable_ip_path)\n",
+            encoding="utf-8",
+        )
+        config = self._config(project_dir)
+
+        manifest = config._discovery_dependency_manifest()
+
+        self.assertFalse(manifest["cacheable"])
+
     def test_no_bazel_rejects_stale_cache(self):
         config = self._config(Path(tempfile.mkdtemp()))
         config.options.no_bazel = True

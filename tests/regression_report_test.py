@@ -144,6 +144,39 @@ class RegressionReportTest(unittest.TestCase):
             report_html = (bench_path / "index.html").read_text(encoding="utf-8")
             self.assertGreaterEqual(report_html.count("N/A"), 2)
 
+    def test_compile_failure_log_is_copied_and_linked(self):
+        with tempfile.TemporaryDirectory() as temporary_dir:
+            compile_dir = Path(temporary_dir) / "compile"
+            compile_dir.mkdir()
+            compile_log = compile_dir / "cmp.log"
+            compile_log.write_text("compile failed\n", encoding="utf-8")
+            report = RegressionReport(SimpleNamespace(log=_Log()), self._report_environment(), temporary_dir)
+            header = {
+                "branch": "main",
+                "commit": "",
+                "project_name": "project",
+                "revision": "abc",
+                "simulator": "VCS",
+                "tag": "",
+                "time": "20260711_120000_000001",
+                "username": "user",
+            }
+
+            report.run(
+                header,
+                [("bench", "vcomp", "0:00:01", "", "", "1", "1", str(compile_log), "")],
+                {},
+                {},
+            )
+
+            bench_path = Path(temporary_dir) / "regression_report" / "project" / "bench"
+            copied_log = bench_path / "logs" / header["time"] / "vcomp_01_compile.log"
+            self.assertEqual("compile failed\n", copied_log.read_text(encoding="utf-8"))
+            report_html = (bench_path / "index.html").read_text(encoding="utf-8")
+            self.assertIn("{}/001_vcomp.html".format(header["time"]), report_html)
+            logs_html = (copied_log.parent / "001_vcomp.html").read_text(encoding="utf-8")
+            self.assertIn("vcomp_01_compile.log", logs_html)
+
     def test_report_retention_removes_snapshot_and_timestamp_logs(self):
         with tempfile.TemporaryDirectory() as temporary_dir:
             report = RegressionReport(SimpleNamespace(log=_Log()), self._report_environment(), temporary_dir)
