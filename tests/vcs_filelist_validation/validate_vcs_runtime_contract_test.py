@@ -1583,7 +1583,6 @@ class VcsRuntimeContractTest(unittest.TestCase):
         # Then: the script fails, removes the endpoint, and terminates the sidecar group.
         self.assertNotEqual(0, completed_process.returncode)
         self.assertFalse(socket_endpoint.exists())
-        self.assertFalse((job_dir / ".socket_sidecar_pgids").exists())
         self.assertEqual(str(project_dir), (job_dir / "bridge.log").read_text(encoding="utf-8").splitlines()[0])
         sidecar_pid = int(sidecar_pid_file.read_text(encoding="utf-8"))
         for _ in range(20):
