@@ -276,6 +276,40 @@ class CompileCacheTest(unittest.TestCase):
         for path in (nested, source, header):
             self.assertEqual(1, read_paths.count(str(path)))
 
+    def test_filelist_input_discovery_uses_nested_file_directory_for_dash_capital_f(self):
+        working_dir = Path(tempfile.mkdtemp())
+        filelist_dir = Path(tempfile.mkdtemp())
+        nested_dir = working_dir / "nested"
+        nested_dir.mkdir()
+        source = nested_dir / "relative.sv"
+        source.write_text("module relative; endmodule\n", encoding="utf-8")
+        nested = nested_dir / "nested.f"
+        nested.write_text("relative.sv\n", encoding="utf-8")
+        root = filelist_dir / "compile.f"
+        root.write_text("-F nested/nested.f\n", encoding="utf-8")
+
+        inputs = discover_filelist_inputs(root, working_dir)
+
+        self.assertEqual(sorted(map(str, (root, nested, source))), inputs)
+
+    def test_filelist_input_discovery_tracks_dash_incdir_contents(self):
+        root_dir = Path(tempfile.mkdtemp())
+        include_dir = root_dir / "include"
+        include_dir.mkdir()
+        header = include_dir / "definitions.svh"
+        header.write_text("`define VALUE 1\n", encoding="utf-8")
+        root = root_dir / "compile.f"
+        root.write_text("-incdir include\n", encoding="utf-8")
+
+        initial_inputs = discover_filelist_inputs(root, root_dir)
+        initial = compile_fingerprint(root_dir, "vcs -f compile.f", root, extra_input_paths=initial_inputs)
+        header.write_text("`define VALUE 2\n", encoding="utf-8")
+        changed_inputs = discover_filelist_inputs(root, root_dir)
+        changed = compile_fingerprint(root_dir, "vcs -f compile.f", root, extra_input_paths=changed_inputs)
+
+        self.assertEqual(sorted(map(str, (root, header))), initial_inputs)
+        self.assertNotEqual(initial, changed)
+
 
 if __name__ == "__main__":
     unittest.main()

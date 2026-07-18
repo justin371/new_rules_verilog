@@ -304,7 +304,7 @@ done
         run_logs_path = os.path.join(bench_path, "logs", timestamp)
         logs_list = []
 
-        for row_index, row in enumerate(details[1:-1], start=1):
+        for row_index, row in enumerate(details[:-1], start=1):
             copied_logs = []
             for log_index, log_path in enumerate(filter(None, row[8].split("|")), start=1):
                 source = Path(log_path)

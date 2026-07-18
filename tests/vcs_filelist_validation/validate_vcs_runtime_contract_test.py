@@ -858,6 +858,14 @@ class VcsRuntimeContractTest(unittest.TestCase):
         self.assertIn("jAUTO", simulator.compile_script_for_fingerprint("vcs -fastpartcomp=j3"))
         self.assertEqual("auto", parse_args(["--simulator", "VCS"]).vcs_partcomp_jobs)
 
+    def test_vcs_compile_fingerprint_normalizes_only_standalone_partcomp_argument(self):
+        simulator = VcsSimulator(parse_args(["--simulator", "VCS"]), DummyRegressionConfig(), None)
+        script = "vcs +define+OPTION=-fastpartcomp=j4 /tmp/-fastpartcomp=j5 -fastpartcomp=j3"
+        self.assertEqual(
+            "vcs +define+OPTION=-fastpartcomp=j4 /tmp/-fastpartcomp=j5 -fastpartcomp=jAUTO",
+            simulator.compile_script_for_fingerprint(script),
+        )
+
     def test_vcs_tool_identity_ignores_runner_and_host_noise(self):
         options = parse_args(["--simulator", "VCS"])
         with mock.patch.dict(os.environ, {"RV_VCS_TOOL_ID": "VCS Y-2026.03"}):
@@ -1593,6 +1601,143 @@ class VcsRuntimeContractTest(unittest.TestCase):
             time.sleep(0.05)
         else:
             self.fail("socket sidecar was left running after the simulation script exited")
+
+    @unittest.skipUnless(os.name == "posix" and os.path.isdir("/proc"), "Linux process-group behavior")
+    def test_sim_template_fails_when_sidecar_is_killed_without_simmer_request(self):
+        for signal_name, expected_exit_code in (("TERM", 143), ("KILL", 137)):
+            with self.subTest(signal_name=signal_name), tempfile.TemporaryDirectory(
+                    prefix="unexpected sidecar signal ") as temporary_dir:
+                temporary_root = Path(temporary_dir)
+                project_dir = temporary_root / "project"
+                job_dir = temporary_root / "job"
+                project_dir.mkdir()
+                job_dir.mkdir()
+                socket_endpoint = temporary_root / "sidecar.socket"
+                sidecar_pid_file = temporary_root / "sidecar.pid"
+                sidecar_command = (
+                    "printf '%s\\n' \"$$\" > {pid_file}; : > {endpoint}; while :; do sleep 1; done".format(
+                        pid_file=shlex.quote(str(sidecar_pid_file)),
+                        endpoint=shlex.quote(str(socket_endpoint)),
+                    ))
+                simulation_command = "kill -{signal_name} -- \"-$(cat {pid_file})\"".format(
+                    signal_name=signal_name,
+                    pid_file=shlex.quote(str(sidecar_pid_file)),
+                )
+                rendered_script = self._render_simulation_script(
+                    project_dir,
+                    job_dir,
+                    simulation_command,
+                    socket_sidecars=[("bridge", sidecar_command, str(socket_endpoint))],
+                )
+                sim_script = job_dir / "sim.sh"
+                sim_script.write_text(rendered_script, encoding="utf-8")
+
+                completed_process = subprocess.run(
+                    ["bash", str(sim_script)],
+                    cwd=temporary_root,
+                    capture_output=True,
+                    text=True,
+                    timeout=10,
+                )
+
+                self.assertEqual(1, completed_process.returncode, completed_process.stderr)
+                self.assertIn(
+                    "returned non-zero exit code {}".format(expected_exit_code),
+                    completed_process.stdout,
+                )
+
+    @unittest.skipUnless(os.name == "posix" and os.path.isdir("/proc"), "Linux process-group behavior")
+    def test_sim_template_accepts_simmer_requested_sidecar_term_and_kill(self):
+        for ignore_term, expected_exit_code in ((False, 143), (True, 137)):
+            with self.subTest(ignore_term=ignore_term), tempfile.TemporaryDirectory(
+                    prefix="requested sidecar signal ") as temporary_dir:
+                temporary_root = Path(temporary_dir)
+                project_dir = temporary_root / "project"
+                job_dir = temporary_root / "job"
+                fast_bin = temporary_root / "bin"
+                project_dir.mkdir()
+                job_dir.mkdir()
+                fast_bin.mkdir()
+                fast_sleep = fast_bin / "sleep"
+                fast_sleep.write_text(
+                    "#!/usr/bin/env bash\n{} -c 'import time; time.sleep(0.01)'\n".format(shlex.quote(sys.executable)),
+                    encoding="utf-8",
+                )
+                fast_sleep.chmod(0o755)
+                socket_endpoint = temporary_root / "sidecar.socket"
+                term_behavior = "trap '' TERM; " if ignore_term else ""
+                sidecar_command = "{}: > {}; while :; do :; done".format(
+                    term_behavior,
+                    shlex.quote(str(socket_endpoint)),
+                )
+                rendered_script = self._render_simulation_script(
+                    project_dir,
+                    job_dir,
+                    "true",
+                    socket_sidecars=[("bridge", sidecar_command, str(socket_endpoint))],
+                )
+                sim_script = job_dir / "sim.sh"
+                sim_script.write_text(rendered_script, encoding="utf-8")
+                environment = os.environ.copy()
+                environment["PATH"] = str(fast_bin) + os.pathsep + environment["PATH"]
+
+                completed_process = subprocess.run(
+                    ["bash", str(sim_script)],
+                    cwd=temporary_root,
+                    env=environment,
+                    capture_output=True,
+                    text=True,
+                    timeout=10,
+                )
+
+                self.assertEqual(0, completed_process.returncode, completed_process.stderr)
+                self.assertIn(
+                    "Socket bridge exited with code: {}".format(expected_exit_code),
+                    completed_process.stdout,
+                )
+
+    @unittest.skipUnless(os.name == "posix" and os.path.isdir("/proc"), "Linux process-group behavior")
+    def test_sim_template_socket_startup_timeout_still_fails(self):
+        with tempfile.TemporaryDirectory(prefix="sidecar startup timeout ") as temporary_dir:
+            temporary_root = Path(temporary_dir)
+            project_dir = temporary_root / "project"
+            job_dir = temporary_root / "job"
+            fast_bin = temporary_root / "bin"
+            project_dir.mkdir()
+            job_dir.mkdir()
+            fast_bin.mkdir()
+            fast_sleep = fast_bin / "sleep"
+            fast_sleep.write_text(
+                "#!/usr/bin/env bash\n{} -c 'import time; time.sleep(0.01)'\n".format(shlex.quote(sys.executable)),
+                encoding="utf-8",
+            )
+            fast_sleep.chmod(0o755)
+            socket_endpoint = temporary_root / "missing.socket"
+            simulation_marker = temporary_root / "simulation-ran"
+            sidecar_command = "trap '' TERM; while :; do :; done"
+            rendered_script = self._render_simulation_script(
+                project_dir,
+                job_dir,
+                "touch {}".format(shlex.quote(str(simulation_marker))),
+                socket_sidecars=[("bridge", sidecar_command, str(socket_endpoint))],
+            )
+            sim_script = job_dir / "sim.sh"
+            sim_script.write_text(rendered_script, encoding="utf-8")
+            environment = os.environ.copy()
+            environment["PATH"] = str(fast_bin) + os.pathsep + environment["PATH"]
+
+            completed_process = subprocess.run(
+                ["bash", str(sim_script)],
+                cwd=temporary_root,
+                env=environment,
+                capture_output=True,
+                text=True,
+                timeout=10,
+            )
+
+            self.assertEqual(1, completed_process.returncode, completed_process.stderr)
+            self.assertIn("Timeout waiting for socket bridge", completed_process.stdout)
+            self.assertFalse(simulation_marker.exists())
 
     def test_sim_template_does_not_report_captured_sim_failure_as_shell_error(self):
         # Given: a simulation command that exits with a known non-zero status.

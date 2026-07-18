@@ -1019,9 +1019,9 @@ class JobManager():
 
     @property
     def interrupted_jobs(self):
-        """Jobs that were launching or active when kill was requested."""
+        """Jobs captured during kill that have not completed finalization."""
         with self._condition:
-            return tuple(job for job in self._interrupted_jobs if not job.jobstatus.completed)
+            return tuple(job for job in self._interrupted_jobs if job not in self._done)
 
     def kill(self):
         with self._condition:

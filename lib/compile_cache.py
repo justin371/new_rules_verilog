@@ -174,9 +174,9 @@ def discover_filelist_inputs(filelist_path, working_directory):
         while index < len(tokens):
             token = tokens[index]
             if token in ("-f", "-file", "-F") and index + 1 < len(tokens):
-                nested_base = os.path.dirname(current_filelist) if token == "-F" else relative_base
-                nested = add_path(tokens[index + 1], nested_base)
-                pending.append((nested, nested_base))
+                nested = add_path(tokens[index + 1], relative_base)
+                contents_base = os.path.dirname(nested) if token == "-F" else relative_base
+                pending.append((nested, contents_base))
                 index += 2
                 continue
             if token.startswith("-file="):
@@ -189,6 +189,10 @@ def discover_filelist_inputs(filelist_path, working_directory):
                     if directory:
                         add_path(directory, relative_base, include_directory=True)
                 index += 1
+                continue
+            if token == "-incdir" and index + 1 < len(tokens):
+                add_path(tokens[index + 1], relative_base, include_directory=True)
+                index += 2
                 continue
             if token in ("-v", "-y") and index + 1 < len(tokens):
                 add_path(tokens[index + 1], relative_base, include_directory=(token == "-y"))

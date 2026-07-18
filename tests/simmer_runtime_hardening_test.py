@@ -212,6 +212,89 @@ class SimmerRuntimeHardeningTest(unittest.TestCase):
             set_handler.call_args_list,
         )
 
+    def test_post_processing_interrupt_cleans_once_and_persists_failed_history(self):
+        for interrupted_phase in ("backend", "coverage", "report", "cleanup"):
+            with self.subTest(interrupted_phase=interrupted_phase), tempfile.TemporaryDirectory() as project_dir:
+                run = {
+                    "planned_tests": 0,
+                    "tests": [],
+                    "compile": [],
+                    "launch_failures": [],
+                }
+                options = SimpleNamespace(
+                    category_cfg=None,
+                    gui=False,
+                    idle_print_seconds=60,
+                    no_bazel=False,
+                    no_compile=False,
+                    no_run=False,
+                    python_seed=None,
+                    quit_count=1,
+                    report=interrupted_phase in ("coverage", "report"),
+                    report_dir=None,
+                    seed=None,
+                    simmer_argv=["simmer"],
+                )
+                rcfg = SimpleNamespace(
+                    all_vcomp={},
+                    deferred_messages=[],
+                    log=mock.Mock(warn_count=0, error_count=0, handlers=[]),
+                    proj_dir=project_dir,
+                    regression_dir=project_dir,
+                )
+                rcfg._profile_step = mock.Mock(return_value=False)
+                simulator = mock.Mock()
+                simulator.get_name.return_value = "VCS"
+                simulator.uses_dynamic_test_plan.return_value = False
+                simulator.create_regression_jobs.return_value = []
+                simulator.finalize_regression_workflow.return_value = False
+                simulator.coverage_enabled.return_value = interrupted_phase == "coverage"
+                manager = mock.Mock(shutdown_incomplete=False, interrupted_jobs=())
+                report = mock.Mock()
+                lifecycle_events = []
+                manager.flush_output_streams.side_effect = lambda: lifecycle_events.append("flush")
+
+                def cleanup_shared_runtime(_vcomp_jobs):
+                    lifecycle_events.append("cleanup")
+                    if interrupted_phase == "cleanup":
+                        raise KeyboardInterrupt
+
+                simulator.cleanup_shared_runtime_artifacts.side_effect = cleanup_shared_runtime
+
+                if interrupted_phase == "backend":
+                    simulator.finalize_regression_workflow.side_effect = KeyboardInterrupt
+                elif interrupted_phase == "coverage":
+                    rcfg._profile_step.side_effect = KeyboardInterrupt
+                elif interrupted_phase == "report":
+                    report.prepare.side_effect = KeyboardInterrupt
+
+                with mock.patch("simmer.os.uname", return_value=("", "test-host"), create=True), \
+                     mock.patch("simmer.log", rcfg.log), \
+                     mock.patch("simmer.resolve_run_simulator"), \
+                     mock.patch("simmer.get_simulator", return_value=simulator), \
+                     mock.patch("simmer.get_active_job_limit", return_value=1), \
+                     mock.patch("simmer.job_lib.JobManager", return_value=manager), \
+                     mock.patch("simmer.rv_utils.print_summary", return_value="/tmp/regression.log"), \
+                     mock.patch("simmer.rv_utils.get_report_header", return_value={"project_name": "unit"}), \
+                     mock.patch("simmer.rv_utils.print_simmer_profile"), \
+                     mock.patch("simmer.regression_report.RegressionReport", return_value=report), \
+                     mock.patch("simmer.simmer_results.create_run", return_value=run), \
+                     mock.patch("simmer.simmer_results.save_run") as save_run, \
+                     mock.patch("simmer._IgnoreAdditionalInterrupts", return_value=mock.MagicMock()), \
+                     self.assertRaises(SystemExit) as raised:
+                    save_run.side_effect = lambda *_args: lifecycle_events.append("save")
+                    simmer.main(rcfg, options)
+
+                self.assertEqual(130, raised.exception.code)
+                simulator.cleanup_shared_runtime_artifacts.assert_called_once_with({})
+                manager.kill.assert_not_called()
+                manager.flush_output_streams.assert_called_once_with()
+                self.assertLess(lifecycle_events.index("flush"), lifecycle_events.index("save"))
+                if interrupted_phase != "cleanup":
+                    self.assertLess(lifecycle_events.index("flush"), lifecycle_events.index("cleanup"))
+                self.assertEqual("FAILED", run["status"])
+                save_run.assert_called_once_with(project_dir, run)
+
     def test_noninteractive_interrupt_stops_without_prompting(self):
         rcfg = SimpleNamespace(log=mock.Mock(handlers=[]))
         manager = mock.Mock()
