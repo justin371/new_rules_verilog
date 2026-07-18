@@ -22,7 +22,8 @@ function record_simulation_duration {
 {%- if sockets %}
 SOCKET_SIDECAR_GROUPS_FILE={{ job.sidecar_process_groups_path|shell_quote }}
 : > "$SOCKET_SIDECAR_GROUPS_FILE"
-SIMMER_SESSION_ID="$(ps -o sid= -p "$$" | tr -d ' ')"
+SIMMER_SELF_STAT_FIELDS="$(sed 's/.*) //' "/proc/$$/stat")"
+SIMMER_SESSION_ID="$(awk '{print $4}' <<< "$SIMMER_SELF_STAT_FIELDS")"
 
 function socket_sidecar_group_is_owned {
     local sidecar_pid=$1
@@ -43,8 +44,20 @@ function socket_sidecar_group_is_owned {
         fi
         return 1
     fi
-    ps -eo pgid=,sid= | awk -v pgid="$sidecar_pid" -v sid="$SIMMER_SESSION_ID" \
-        '$1 == pgid && $2 == sid { found = 1 } END { exit !found }'
+    local stat_path
+    for stat_path in /proc/[0-9]*/stat; do
+        [ -r "$stat_path" ] || continue
+        local stat_fields
+        stat_fields="$(sed 's/.*) //' "$stat_path")"
+        local process_group
+        local session_id
+        process_group="$(awk '{print $3}' <<< "$stat_fields")"
+        session_id="$(awk '{print $4}' <<< "$stat_fields")"
+        if [ "$process_group" = "$sidecar_pid" ] && [ "$session_id" = "$SIMMER_SESSION_ID" ]; then
+            return 0
+        fi
+    done
+    return 1
 }
 
 function terminate_socket_sidecars {
@@ -118,7 +131,7 @@ function run_test {
     while [ ! -e {{ socket_endpoint|shell_quote }} ]; do
         printf 'Waiting for %s (PID %s) to create %s...\n' {{ socket_name|shell_quote }} "$SOCKET_SIDECAR_{{ loop.index }}_PID" {{ socket_endpoint|shell_quote }}
         sleep 1
-        if ! ps -p "$SOCKET_SIDECAR_{{ loop.index }}_PID" > /dev/null; then
+        if ! kill -0 "$SOCKET_SIDECAR_{{ loop.index }}_PID" 2>/dev/null; then
            printf '%%E- ERROR: Socket process %s (PID %s) exited prematurely without creating %s.\n' {{ socket_name|shell_quote }} "$SOCKET_SIDECAR_{{ loop.index }}_PID" {{ socket_endpoint|shell_quote }}
            printf 'Check log: %s\n' {{ (job.job_dir ~ '/' ~ socket_name ~ '.log')|shell_quote }}
            overall_exit_code=1
