@@ -14,6 +14,6 @@ trap 'rc=$?; printf "ERROR: VCS coverage merge failed at line %s (exit %s): %s\n
   -report {{ report_dir|shell_quote }}
 
 # Launch Verdi for the merged database.
-echo "To view merged coverage: {{ verdi_command }} -cov -covdir {{ merged_db_path }}"
+printf '%s\n' {{ ('To view merged coverage: ' ~ verdi_command ~ ' -cov -covdir ' ~ merged_db_path)|shell_quote }}
 # Or launch Verdi for the unmerged simulation database.
-echo "To view unmerged coverage: {{ verdi_command }} -cov -covdir {{ cov_db_path }}"
+printf '%s\n' {{ ('To view unmerged coverage: ' ~ verdi_command ~ ' -cov -covdir ' ~ cov_db_path)|shell_quote }}

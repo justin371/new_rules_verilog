@@ -137,7 +137,7 @@ def record_test_job(run, test_job, waves_script=None, waves_path=None, status=No
         "wall_duration_s": wall_duration_s,
         "compile_dir": test_job.vcomper.job_dir,
         "sim_dir": test_job.job_dir,
-        "stdout_log": test_job._log_path,
+        "stdout_log": getattr(test_job, "_log_path", None),
         "cmp_log": test_job.vcomper.log_path,
         "waves": waves,
         "error_message": getattr(test_job, "error_message", None),
@@ -219,7 +219,10 @@ def load_store(project_dir):
 def save_run(project_dir, run, max_runs=MAX_RUNS):
     stored_run = dict(run)
     if int(run.get("planned_tests") or len(run["tests"])) > 1 and len(run["tests"]) > 1:
-        representative = next((test for test in run["tests"] if test.get("status") == "FAILED"), run["tests"][0])
+        representative = next(
+            (test for test in run["tests"] if test.get("status") == "FAILED"),
+            next((test for test in run["tests"] if test.get("status") == "INTERRUPTED"), run["tests"][0]),
+        )
         stored_run["tests"] = [representative]
     path = results_path(project_dir)
     with _store_lock(path):

@@ -20,25 +20,63 @@ function record_simulation_duration {
 }
 
 {%- if sockets %}
+SOCKET_SIDECAR_GROUPS_FILE={{ job.sidecar_process_groups_path|shell_quote }}
+: > "$SOCKET_SIDECAR_GROUPS_FILE"
+SIMMER_SESSION_ID="$(ps -o sid= -p "$$" | tr -d ' ')"
+
+function socket_sidecar_group_is_owned {
+    local sidecar_pid=$1
+    local expected_start_time=$2
+    if [ -r "/proc/$sidecar_pid/stat" ]; then
+        local stat_fields
+        stat_fields="$(sed 's/.*) //' "/proc/$sidecar_pid/stat")"
+        local process_group
+        local session_id
+        local start_time
+        process_group="$(awk '{print $3}' <<< "$stat_fields")"
+        session_id="$(awk '{print $4}' <<< "$stat_fields")"
+        start_time="$(awk '{print $20}' <<< "$stat_fields")"
+        if [ "$process_group" = "$sidecar_pid" ] && \
+           [ "$session_id" = "$SIMMER_SESSION_ID" ] && \
+           [ "$start_time" = "$expected_start_time" ]; then
+            return 0
+        fi
+        return 1
+    fi
+    ps -eo pgid=,sid= | awk -v pgid="$sidecar_pid" -v sid="$SIMMER_SESSION_ID" \
+        '$1 == pgid && $2 == sid { found = 1 } END { exit !found }'
+}
+
 function terminate_socket_sidecars {
     local sidecar_pid
-    local sidecar_pids
-    sidecar_pids="$(jobs -pr)"
-    for sidecar_pid in $sidecar_pids; do
-        kill -TERM -- "-$sidecar_pid" 2>/dev/null || true
-    done
-    if [ -n "$sidecar_pids" ]; then
+    local sidecar_start_time
+    while read -r sidecar_pid sidecar_start_time; do
+        if socket_sidecar_group_is_owned "$sidecar_pid" "$sidecar_start_time"; then
+            kill -CONT -- "-$sidecar_pid" 2>/dev/null || true
+            kill -TERM -- "-$sidecar_pid" 2>/dev/null || true
+        fi
+    done < "$SOCKET_SIDECAR_GROUPS_FILE"
+    if [ -s "$SOCKET_SIDECAR_GROUPS_FILE" ]; then
         sleep 1
     fi
-    for sidecar_pid in $sidecar_pids; do
-        if kill -0 -- "-$sidecar_pid" 2>/dev/null; then
+    while read -r sidecar_pid sidecar_start_time; do
+        if socket_sidecar_group_is_owned "$sidecar_pid" "$sidecar_start_time"; then
             kill -KILL -- "-$sidecar_pid" 2>/dev/null || true
         fi
         wait "$sidecar_pid" 2>/dev/null || true
-    done
+    done < "$SOCKET_SIDECAR_GROUPS_FILE"
  {%- for _, _, socket_endpoint in sockets %}
     rm -f {{ socket_endpoint|shell_quote }}
  {%- endfor %}
+    local sidecars_alive=0
+    while read -r sidecar_pid sidecar_start_time; do
+        if socket_sidecar_group_is_owned "$sidecar_pid" "$sidecar_start_time"; then
+            sidecars_alive=1
+        fi
+    done < "$SOCKET_SIDECAR_GROUPS_FILE"
+    if [ "$sidecars_alive" -eq 0 ]; then
+        rm -f "$SOCKET_SIDECAR_GROUPS_FILE"
+    fi
 }
 # The EXIT trap is the fallback for failures and signals before normal cleanup.
 trap terminate_socket_sidecars EXIT
@@ -57,9 +95,22 @@ function run_test {
     # Job control gives each sidecar a process group, so cleanup also reaches
     # grandchildren launched by the configured command.
     set -m
-    bash -c {{ sidecar_command|shell_quote }} > {{ (job.job_dir ~ '/' ~ socket_name ~ '.log')|shell_quote }} 2>&1 &
+    # The wrapper registers and stops itself before executing user code. This
+    # closes the pause race between creating a process group and recording it.
+    bash -c 'registry=$1; command=$2; stat_fields=$(sed "s/.*) //" "/proc/$$/stat"); start_time=$(awk "{print \$20}" <<< "$stat_fields"); printf "%s %s\n" "$$" "$start_time" >> "$registry"; kill -STOP "$$"; exec bash -c "$command"' \
+        simmer-sidecar "$SOCKET_SIDECAR_GROUPS_FILE" {{ sidecar_command|shell_quote }} \
+        > {{ (job.job_dir ~ '/' ~ socket_name ~ '.log')|shell_quote }} 2>&1 &
     declare SOCKET_SIDECAR_{{ loop.index }}_PID=$!
     set +m
+    while ! awk -v pid="$SOCKET_SIDECAR_{{ loop.index }}_PID" '$1 == pid { found = 1 } END { exit !found }' "$SOCKET_SIDECAR_GROUPS_FILE"; do
+        if ! kill -0 "$SOCKET_SIDECAR_{{ loop.index }}_PID" 2>/dev/null; then
+            printf '%%E- ERROR: Socket wrapper %s exited before registration.\n' {{ socket_name|shell_quote }}
+            overall_exit_code=1
+            break
+        fi
+        sleep 0.01
+    done
+    kill -CONT -- "-$SOCKET_SIDECAR_{{ loop.index }}_PID" 2>/dev/null || true
     printf 'Socket %s started with PID %s (Log: %s)\n' {{ socket_name|shell_quote }} "$SOCKET_SIDECAR_{{ loop.index }}_PID" {{ (job.job_dir ~ '/' ~ socket_name ~ '.log')|shell_quote }}
 
     local socket_start_wait_seconds=0
@@ -176,21 +227,26 @@ function run_test {
     sidecar_pid_variable="SOCKET_SIDECAR_{{ loop.index }}_PID"
     if [ -n "${!sidecar_pid_variable:-}" ]; then
         local sidecar_pid="${!sidecar_pid_variable}"
+        local sidecar_start_time
+        sidecar_start_time="$(awk -v pid="$sidecar_pid" '$1 == pid { print $2; exit }' "$SOCKET_SIDECAR_GROUPS_FILE")"
         echo "Waiting up to 5 seconds for socket {{ socket_name }} (PID $sidecar_pid) to exit..."
         local graceful_wait_seconds=0
-        while kill -0 -- "-$sidecar_pid" 2>/dev/null && [ "$graceful_wait_seconds" -lt 5 ]; do
+        while socket_sidecar_group_is_owned "$sidecar_pid" "$sidecar_start_time" && \
+              [ "$graceful_wait_seconds" -lt 5 ]; do
             sleep 1
             graceful_wait_seconds=$((graceful_wait_seconds + 1))
         done
-        if kill -0 -- "-$sidecar_pid" 2>/dev/null; then
+        if socket_sidecar_group_is_owned "$sidecar_pid" "$sidecar_start_time"; then
             echo "Stopping socket {{ socket_name }} after simulation."
+            kill -CONT -- "-$sidecar_pid" 2>/dev/null || true
             kill -TERM -- "-$sidecar_pid" 2>/dev/null || true
             local termination_wait_seconds=0
-            while kill -0 -- "-$sidecar_pid" 2>/dev/null && [ "$termination_wait_seconds" -lt 5 ]; do
+            while socket_sidecar_group_is_owned "$sidecar_pid" "$sidecar_start_time" && \
+                  [ "$termination_wait_seconds" -lt 5 ]; do
                 sleep 1
                 termination_wait_seconds=$((termination_wait_seconds + 1))
             done
-            if kill -0 -- "-$sidecar_pid" 2>/dev/null; then
+            if socket_sidecar_group_is_owned "$sidecar_pid" "$sidecar_start_time"; then
                 kill -KILL -- "-$sidecar_pid" 2>/dev/null || true
             fi
         fi

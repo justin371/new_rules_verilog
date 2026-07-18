@@ -60,6 +60,13 @@ simmer -t //hw/dv/project_benches/sys/tb:some_vcs_test --simulator VCS
 
 Override the launcher with `RV_VCS_RUNNER` or `--vcs-runner` only when a project needs a different module wrapper.
 
+### Interrupting a regression
+
+During an interactive run, `Ctrl-C` opens a terminal menu. Choose `stop` for bounded SIGTERM/SIGKILL cleanup and
+interrupted-history persistence, `pause` to stop active process groups and prevent new jobs from launching, `continue`
+to keep running, or `status/logs` to print active job directories and log paths. A paused regression can then be resumed
+or stopped. Non-interactive runs stop immediately so batch jobs and CI never wait for input.
+
 VCS simulations use the two-step `verilog_dv_tb` + `simmer` flow. The one-step
 DV and RTL unit-test rules remain Xcelium-only.
 

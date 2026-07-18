@@ -162,22 +162,44 @@ class RegressionDiscoveryTest(unittest.TestCase):
     @mock.patch("lib.regression.subprocess.run")
     def test_cache_uses_git_file_index_when_available(self, run, _walk):
         proj_dir = Path(tempfile.mkdtemp())
-        run.return_value = SimpleNamespace(
-            returncode=0,
-            stdout="pkg/BUILD\npkg/file.py\nrules/tool.bzl\n.bazelversion\nMODULE.bazel.lock\n",
-        )
+        run.side_effect = [
+            SimpleNamespace(returncode=0, stdout=""),
+            SimpleNamespace(
+                returncode=0,
+                stdout="pkg/BUILD\npkg/file.py\nrules/tool.bzl\n.bazelversion\nMODULE.bazel.lock\n",
+            ),
+            SimpleNamespace(returncode=0, stdout=""),
+        ]
         config = self._config(proj_dir)
 
-        self.assertEqual(
-            [
-                str(proj_dir / "pkg/BUILD"),
-                str(proj_dir / "rules/tool.bzl"),
-                str(proj_dir / ".bazelversion"),
-                str(proj_dir / "MODULE.bazel.lock"),
-            ],
-            list(config._iter_discovery_dependency_paths()),
-        )
-        self.assertEqual(2, run.call_count)
+        dependencies = list(config._iter_discovery_dependency_paths())
+        for expected in (
+                proj_dir / "pkg/BUILD",
+                proj_dir / "rules/tool.bzl",
+                proj_dir / ".bazelversion",
+                proj_dir / "MODULE.bazel.lock",
+                proj_dir / ".bazelrc",
+        ):
+            self.assertIn(str(expected), dependencies)
+        self.assertEqual(3, run.call_count)
+
+    def test_cache_manifest_tracks_imported_bazelrc(self):
+        proj_dir = Path(tempfile.mkdtemp())
+        imported_rc = proj_dir / "tools" / "settings.rc"
+        imported_rc.parent.mkdir()
+        imported_rc.write_text("build --define=MODE=first\n", encoding="utf-8")
+        (proj_dir / ".bazelrc").write_text("import %workspace%/tools/settings.rc\n", encoding="utf-8")
+        config = self._config(proj_dir)
+        cache_dir = proj_dir / ".simmer" / "cache"
+        cache_dir.mkdir(parents=True)
+        for filename in ("all_vcomp.json", "tests_to_tags.json", "tests_to_simulator.json"):
+            (cache_dir / filename).write_text("{}", encoding="utf-8")
+
+        config._write_discovery_manifest()
+        self.assertTrue(config._discovery_cache_is_fresh())
+        imported_rc.write_text("build --define=MODE=second\n", encoding="utf-8")
+
+        self.assertFalse(config._discovery_cache_is_fresh())
 
     def test_cache_manifest_tracks_ignored_bazel_metadata(self):
         proj_dir = Path(tempfile.mkdtemp())
@@ -286,6 +308,25 @@ class RegressionDiscoveryTest(unittest.TestCase):
             }},
             config.all_vcomp,
         )
+
+    def test_discovery_argument_chunks_stay_under_configured_budget(self):
+        self.assertEqual(
+            [["aaaa"], ["bbbb"], ["cc"]],
+            RegressionConfig._chunk_arguments(["aaaa", "bbbb", "cc"], max_chars=7),
+        )
+
+    def test_discovery_retries_when_source_manifest_changes(self):
+        config = self._config(Path(tempfile.mkdtemp()))
+        first = {"files": ["first"]}
+        second = {"files": ["second"]}
+        config._discovery_dependency_manifest = mock.Mock(side_effect=[first, second, second, second])
+        config._discover_test_metadata = mock.Mock()
+        config._publish_discovery_cache = mock.Mock()
+
+        config.test_discovery_all()
+
+        self.assertEqual(2, config._discover_test_metadata.call_count)
+        config._publish_discovery_cache.assert_called_once_with(second)
 
     @mock.patch("lib.regression.subprocess.run")
     def test_profiled_bazel_command_records_repositories_and_cleans_trace(self, run):

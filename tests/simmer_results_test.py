@@ -215,6 +215,25 @@ class SimmerResultsTest(unittest.TestCase):
         self.assertEqual(run["summary"], stored["summary"])
         self.assertEqual(["fail.log"], [test["stdout_log"] for test in stored["tests"]])
 
+    def test_multi_test_history_prefers_interrupted_test_over_passed_test(self):
+        run = self._completed_run()
+        run["planned_tests"] = 2
+        run["tests"] = [
+            {
+                "status": "PASSED",
+                "stdout_log": "pass.log"
+            },
+            {
+                "status": "INTERRUPTED",
+                "stdout_log": "interrupted.log"
+            },
+        ]
+
+        simmer_results.save_run(self.project_dir, run)
+
+        stored = simmer_results.load_store(self.project_dir)["last_run"]
+        self.assertEqual("interrupted.log", stored["tests"][0]["stdout_log"])
+
     def test_record_test_job_updates_existing_iteration(self):
         run = simmer_results.create_run(["simmer"], self.rcfg, 1)
         test_job = SimpleNamespace(

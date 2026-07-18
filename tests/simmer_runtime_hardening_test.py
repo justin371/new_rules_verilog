@@ -212,6 +212,135 @@ class SimmerRuntimeHardeningTest(unittest.TestCase):
             set_handler.call_args_list,
         )
 
+    def test_noninteractive_interrupt_stops_without_prompting(self):
+        rcfg = SimpleNamespace(log=mock.Mock(handlers=[]))
+        manager = mock.Mock()
+
+        action = simmer._prompt_interrupt_action(
+            rcfg,
+            manager,
+            input_fn=mock.Mock(side_effect=AssertionError("prompted")),
+            interactive=False,
+        )
+
+        self.assertEqual("stop", action)
+        manager.flush_output_streams.assert_called_once_with()
+
+    def test_interrupt_menu_can_show_status_and_continue(self):
+        rcfg = SimpleNamespace(log=mock.Mock(handlers=[]))
+        manager = mock.Mock()
+        manager.status_snapshot.return_value = {
+            "paused": False,
+            "queued": (),
+            "launching": (),
+            "active": (),
+            "finalizing": (),
+            "done": (),
+            "skipped": (),
+        }
+        choices = iter(["status", "continue"])
+
+        action = simmer._prompt_interrupt_action(rcfg, manager, input_fn=lambda _: next(choices), interactive=True)
+
+        self.assertEqual("continue", action)
+        manager.status_snapshot.assert_called_once_with()
+        manager.pause.assert_not_called()
+
+    def test_interrupt_menu_pauses_and_resumes_jobs(self):
+        rcfg = SimpleNamespace(log=mock.Mock(handlers=[]))
+        manager = mock.Mock()
+        manager.pause.return_value = 2
+        manager.resume.return_value = 2
+        manager.status_snapshot.return_value = {
+            "paused": True,
+            "queued": (object(), ),
+            "launching": (),
+            "active": (),
+            "finalizing": (),
+            "done": (),
+            "skipped": (),
+        }
+        choices = iter(["pause", "resume"])
+
+        action = simmer._prompt_interrupt_action(rcfg, manager, input_fn=lambda _: next(choices), interactive=True)
+
+        self.assertEqual("continue", action)
+        manager.pause.assert_called_once_with()
+        manager.resume.assert_called_once_with()
+
+    def test_wait_for_jobs_retries_after_continue(self):
+        rcfg = SimpleNamespace(log=mock.Mock(handlers=[]))
+        manager = mock.Mock()
+        manager.wait.side_effect = [KeyboardInterrupt, None]
+
+        with mock.patch("simmer._prompt_interrupt_action", return_value="continue") as prompt:
+            simmer._wait_for_jobs(manager, rcfg)
+
+        self.assertEqual(2, manager.wait.call_count)
+        prompt.assert_called_once_with(rcfg, manager)
+
+    def test_wait_for_jobs_reraises_after_stop(self):
+        rcfg = SimpleNamespace(log=mock.Mock(handlers=[]))
+        manager = mock.Mock()
+        manager.wait.side_effect = KeyboardInterrupt
+
+        with mock.patch("simmer._prompt_interrupt_action", return_value="stop"), self.assertRaises(KeyboardInterrupt):
+            simmer._wait_for_jobs(manager, rcfg)
+
+    def test_launching_test_without_log_path_is_persisted_as_interrupted(self):
+        run = {
+            "planned_tests": 1,
+            "tests": [],
+            "compile": [],
+            "launch_failures": [],
+        }
+        rcfg = SimpleNamespace(
+            proj_dir="/repo",
+            simmer_results_run=run,
+            options=SimpleNamespace(waves=None),
+            log=mock.Mock(),
+        )
+        vcomper = SimpleNamespace(
+            name="tb",
+            bazel_vcomp_target="//tb:tb",
+            job_dir="/compile",
+            log_path="/compile/cmp.log",
+        )
+        test_job = simmer.TestJob.__new__(simmer.TestJob)
+        test_job.rcfg = rcfg
+        test_job.vcomper = vcomper
+        test_job.name = "test"
+        test_job.target = "//tb:test"
+        test_job.iteration = 1
+        test_job.job_dir = None
+        test_job._log_path = None
+        test_job.job_start_time = None
+        test_job.job_stop_time = None
+        test_job.error_message = None
+        test_job._jobstatus = simmer.JobStatus.NOT_STARTED
+        manager = SimpleNamespace(interrupted_jobs=(test_job, ))
+
+        with mock.patch("simmer.simmer_results.save_run"):
+            simmer.finalize_interrupted_run(rcfg, mock.Mock(), {}, jm=manager)
+
+        self.assertEqual("INTERRUPTED", run["tests"][0]["status"])
+        self.assertIsNone(run["tests"][0]["stdout_log"])
+
+    def test_rerun_removes_stale_wave_artifact_and_viewer_script(self):
+        with tempfile.TemporaryDirectory() as job_dir:
+            wave_path = Path(job_dir) / "waves.fsdb"
+            wave_path.write_text("stale", encoding="utf-8")
+            viewer = Path(job_dir) / "run_waves.sh"
+            viewer.write_text("stale", encoding="utf-8")
+            test_job = simmer.TestJob.__new__(simmer.TestJob)
+            test_job.job_dir = job_dir
+            test_job.simulator = SimpleNamespace(get_wave_artifact_path=lambda *_args: str(wave_path))
+
+            test_job._remove_stale_wave_artifacts("fsdb")
+
+            self.assertFalse(wave_path.exists())
+            self.assertFalse(viewer.exists())
+
     @unittest.skipUnless(os.name == "posix", "POSIX advisory-lock behavior")
     def test_shared_runtime_lock_serializes_identical_regressions(self):
         first = simmer.VCompJob.__new__(simmer.VCompJob)
@@ -224,6 +353,8 @@ class SimmerRuntimeHardeningTest(unittest.TestCase):
         errors = []
 
         with tempfile.TemporaryDirectory() as root_dir, mock.patch("simmer.log", mock.Mock()):
+            first.rcfg = SimpleNamespace(proj_dir=root_dir)
+            second.rcfg = SimpleNamespace(proj_dir=root_dir)
             coverage_dir = os.path.join(root_dir, "tb__COV_WORK")
             first.acquire_shared_runtime_lock(coverage_dir)
 

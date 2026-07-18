@@ -2,6 +2,8 @@
 import abc
 import os
 
+from lib import compile_cache
+
 
 class ValidationErrorParser:
 
@@ -142,6 +144,10 @@ class SimulatorInterface(abc.ABC):
         """Prepare mutable backend state after the compile/reuse decision."""
         return
 
+    def prepare_regression_runtime(self, vcomp_jobs):
+        """Acquire backend directories shared for the lifetime of a regression."""
+        return
+
     def prepare_compile_job(self, vcomp_job):
         """Resolve and validate simulator-specific compile inputs."""
         return
@@ -218,8 +224,11 @@ class SimulatorInterface(abc.ABC):
     def get_compile_fingerprint_inputs(self, vcomp_job):
         """Return common external files and environment affecting compilation."""
         compile_args_file = self.options.compile_args_file
+        extra_input_paths = []
+        if compile_args_file:
+            extra_input_paths = compile_cache.discover_filelist_inputs(compile_args_file, vcomp_job.bazel_runfiles_main)
         return {
-            "extra_input_paths": [compile_args_file] if compile_args_file else [],
+            "extra_input_paths": extra_input_paths,
             "environment": {
                 key: os.environ.get(key, "")
                 for key in ("LOADEDMODULES", "MODULEPATH", "PATH")
