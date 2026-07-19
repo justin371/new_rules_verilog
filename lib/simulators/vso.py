@@ -7,6 +7,8 @@ import re
 import shlex
 import subprocess
 
+from .base import run_bounded_process
+
 
 class VsoWorkflow:
 
@@ -181,12 +183,11 @@ class VsoWorkflow:
         command = [self.driver_path()] + args
         with open(log_path, "w", encoding="utf-8") as filep:
             filep.write("Command: {}\n\n".format(shlex.join(command)))
-            result = subprocess.run(
+            result = run_bounded_process(
                 command,
                 cwd=self.rcfg.regression_dir,
                 stdout=filep,
                 stderr=subprocess.STDOUT,
-                check=False,
                 text=True,
             )
         if result.returncode:

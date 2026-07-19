@@ -27,7 +27,10 @@ printf 'Changing directory to %s\n' {{ job_dir|shell_quote }}
 cd {{ job_dir|shell_quote }}
 
 WAVE_VIEW_COMMAND={{ wave_view_command }}
-mapfile -t WAVE_VIEW_ARGV <<< "${WAVE_VIEW_COMMAND}"
+WAVE_VIEW_ARGV=()
+while IFS= read -r wave_view_arg; do
+    WAVE_VIEW_ARGV+=("$wave_view_arg")
+done <<< "${WAVE_VIEW_COMMAND}"
 if [[ -z "${WAVE_VIEW_ARGV[0]:-}" ]]; then
     echo "Error: Wave viewer command is empty." >&2
     exit 1
@@ -44,7 +47,10 @@ if [ -n "${SIMMER_WAVE_LAUNCHER:-}" ]; then
         echo "Error: Python 3 is required to parse SIMMER_WAVE_LAUNCHER." >&2
         exit 1
     fi
-    mapfile -d '' -t WAVE_LAUNCHER_ARGV < <(
+    WAVE_LAUNCHER_ARGV=()
+    while IFS= read -r -d '' wave_launcher_arg; do
+        WAVE_LAUNCHER_ARGV+=("$wave_launcher_arg")
+    done < <(
         "${WAVE_LAUNCHER_PYTHON}" -c \
             'import os, shlex, sys; sys.stdout.buffer.write(b"".join(os.fsencode(arg) + b"\0" for arg in shlex.split(sys.argv[1])))' \
             "${SIMMER_WAVE_LAUNCHER}"

@@ -118,6 +118,7 @@ class VcsFilelistValidationTest(unittest.TestCase):
         self.assertEqual("VCS", inherited_args["simulator"])
         self.assertEqual("dv_cfg_vcs", inherited_args["uvm_testname"])
         self.assertEqual(17, inherited_args["timeout_minutes"])
+        self.assertEqual("//tests:vcs_fixture_pre_run", inherited_args["pre_run"])
 
         abstract_child_args = ast.literal_eval(
             read_runfile("tests/vcs_filelist_validation/dv_cfg_vcs_from_abstract_dynamic_args.py", ))

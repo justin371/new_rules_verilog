@@ -289,8 +289,9 @@ class RegressionConfig():
             dependency_paths = sorted(set(exc.project_paths))
             cacheable = False
         files = []
+        project_root = os.path.realpath(self.proj_dir)
         for path in dependency_paths:
-            relative_path = os.path.relpath(path, self.proj_dir).replace(os.sep, "/")
+            relative_path = os.path.relpath(os.path.realpath(path), project_root).replace(os.sep, "/")
             try:
                 with open(path, "rb") as filep:
                     digest = hashlib.sha256(filep.read()).hexdigest()

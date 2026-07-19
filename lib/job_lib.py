@@ -9,11 +9,100 @@ import datetime
 import enum
 import os
 import signal
+import socket
 import subprocess
 import threading
 import time
 
 from lib.runtime_options import normalize_test_runtime_options
+
+
+def _positive_integer(value):
+    try:
+        value = int(value)
+    except (TypeError, ValueError):
+        return None
+    return value if value > 0 else None
+
+
+def _lsf_host_slots(value, hostname):
+    tokens = (value or "").split()
+    if len(tokens) < 2 or len(tokens) % 2:
+        return None
+    pairs = []
+    for index in range(0, len(tokens), 2):
+        slots = _positive_integer(tokens[index + 1])
+        if slots is None:
+            return None
+        pairs.append((tokens[index], slots))
+    if len(pairs) == 1:
+        return pairs[0][1]
+
+    local_names = {hostname.lower(), hostname.split('.', 1)[0].lower()}
+    for host, slots in pairs:
+        if host.lower() in local_names or host.split('.', 1)[0].lower() in local_names:
+            return slots
+    return min(slots for _, slots in pairs)
+
+
+def _lsf_host_list_slots(value, hostname):
+    hosts = (value or "").split()
+    if not hosts:
+        return None
+    local_names = {hostname.lower(), hostname.split('.', 1)[0].lower()}
+    local_slots = sum(1 for host in hosts
+                      if host.lower() in local_names or host.split('.', 1)[0].lower() in local_names)
+    if local_slots:
+        return local_slots
+    slots_by_host = {}
+    for host in hosts:
+        short_name = host.split('.', 1)[0].lower()
+        slots_by_host[short_name] = slots_by_host.get(short_name, 0) + 1
+    return min(slots_by_host.values())
+
+
+def detect_allocated_cpus(environment=None, hostname=None, affinity_getter=None, host_cpu_count=None):
+    environment = os.environ if environment is None else environment
+    hostname = hostname or socket.gethostname()
+    affinity_getter = affinity_getter if affinity_getter is not None else getattr(os, "sched_getaffinity", None)
+
+    affinity_count = None
+    if affinity_getter is not None:
+        try:
+            affinity_count = len(affinity_getter(0)) or None
+        except OSError:
+            pass
+
+    host_slots = _lsf_host_slots(environment.get("LSB_MCPU_HOSTS"), hostname)
+    if host_slots is None:
+        host_slots = _lsf_host_list_slots(environment.get("LSB_HOSTS"), hostname)
+        host_source = "LSB_HOSTS"
+    else:
+        host_source = "LSB_MCPU_HOSTS"
+    if host_slots is not None:
+        if affinity_count is not None and affinity_count < host_slots:
+            return affinity_count, "{} capped by CPU affinity".format(host_source)
+        return host_slots, host_source
+
+    slurm_cpus = _positive_integer(environment.get("SLURM_CPUS_PER_TASK"))
+    if slurm_cpus is not None:
+        if affinity_count is not None and affinity_count < slurm_cpus:
+            return affinity_count, "SLURM_CPUS_PER_TASK capped by CPU affinity"
+        return slurm_cpus, "SLURM_CPUS_PER_TASK"
+
+    lsf_total = _positive_integer(environment.get("LSB_DJOB_NUMPROC"))
+    if lsf_total is not None:
+        if affinity_count is not None and affinity_count < lsf_total:
+            return affinity_count, "LSB_DJOB_NUMPROC capped by CPU affinity"
+        if lsf_total == 1:
+            return 1, "LSB_DJOB_NUMPROC"
+        return 1, "LSB_DJOB_NUMPROC without per-host allocation (conservative)"
+
+    if affinity_count is not None:
+        return min(affinity_count, 8), "CPU affinity fallback (capped at 8)"
+
+    host_cpu_count = os.cpu_count() if host_cpu_count is None else host_cpu_count
+    return min(host_cpu_count or 1, 8), "host CPU count fallback (capped at 8)"
 
 
 @enum.unique
@@ -83,8 +172,6 @@ class JobCancelledError(RuntimeError):
 
 class Job():
 
-    _priority_cache = {}
-
     def __init__(self, rcfg, name):
         self.rcfg = rcfg # Regression cfg object
         self.name = name
@@ -107,7 +194,6 @@ class Job():
         self.timeout = rcfg.options.timeout
 
         self.priority = -3600 # Not sure that making this super negative is necessary if we log more stuff
-        self._get_priority()
         self.log = self.rcfg.log
         self.log.debug("%s priority=%d", self, self.priority)
 
@@ -122,13 +208,6 @@ class Job():
 
     def __lt__(self, other):
         return self.priority < other.priority
-
-    def _get_priority(self):
-        """This function is intended to assign a priority to this Job based on statistics of previous runs of this Job.
-
-        However, integration with the external simulation statistics aggregator didn't work well so support was removed.
-        """
-        return # Default zero priority
 
     @property
     def jobstatus(self):
@@ -304,31 +383,35 @@ class SubprocessJobRunner(JobRunner):
     def _linux_process_identity(process_id):
         with open("/proc/{}/stat".format(process_id), "r", encoding="ascii") as filep:
             stat_fields = filep.read().rsplit(")", 1)[1].split()
-        return int(stat_fields[2]), int(stat_fields[3]), stat_fields[19]
+        return stat_fields[0], int(stat_fields[2]), int(stat_fields[3]), stat_fields[19]
 
-    def _process_group_belongs_to_runner_session(self, group_id, expected_start_time=None):
-        try:
-            process_group, session_id, start_time = self._linux_process_identity(group_id)
-            if expected_start_time is not None and start_time != expected_start_time:
-                return False
-            return process_group == group_id and session_id == self._process_group_id
-        except (OSError, ValueError, IndexError):
-            pass
+    def _process_group_has_live_member(self, group_id, session_id=None):
         try:
             proc_entries = os.scandir("/proc")
         except OSError:
-            return False
+            return None
         with proc_entries:
             for entry in proc_entries:
                 if not entry.name.isdigit():
                     continue
                 try:
-                    process_group, session_id, _ = self._linux_process_identity(entry.name)
+                    state, process_group, process_session, _ = self._linux_process_identity(entry.name)
                 except (OSError, ValueError, IndexError):
                     continue
-                if process_group == group_id and session_id == self._process_group_id:
+                if process_group == group_id and state != "Z" and (session_id is None or process_session == session_id):
                     return True
         return False
+
+    def _process_group_belongs_to_runner_session(self, group_id, expected_start_time=None):
+        try:
+            state, process_group, session_id, start_time = self._linux_process_identity(group_id)
+            if expected_start_time is not None and start_time != expected_start_time:
+                return False
+            if state != "Z" and process_group == group_id and session_id == self._process_group_id:
+                return True
+        except (OSError, ValueError, IndexError):
+            pass
+        return bool(self._process_group_has_live_member(group_id, self._process_group_id))
 
     def _signal_sidecar_process_groups(self, sig):
         for group_id in self._sidecar_process_group_ids():
@@ -347,6 +430,9 @@ class SubprocessJobRunner(JobRunner):
         return False
 
     def _process_group_exists(self):
+        live_member = self._process_group_has_live_member(self._process_group_id)
+        if live_member is not None:
+            return live_member
         try:
             os.killpg(self._process_group_id, 0)
         except ProcessLookupError:

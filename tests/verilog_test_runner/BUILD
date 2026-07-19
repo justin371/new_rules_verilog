@@ -23,6 +23,7 @@ verilog_rtl_library(
 
 verilog_test(
     name = "verilog_test_runner_test",
+    timeout = "short",
     post_flist_args = ["--post-flist"],
     pre_flist_args = ["--pre-flist"],
     tool = ":verilog_test_tool",

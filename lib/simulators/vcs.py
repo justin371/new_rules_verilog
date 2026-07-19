@@ -12,7 +12,8 @@ import subprocess
 import tempfile
 
 from lib.coverage_data import aggregate_coverage_metrics, parse_coverage_summary
-from .base import SimulatorInterface, ValidationErrorParser
+from lib import job_lib
+from .base import SimulatorInterface, ValidationErrorParser, run_bounded_process
 from .options import validate_explicit_switches
 from .vcs_options import validate_vcs_runtime_options
 from .vso import VsoWorkflow
@@ -39,93 +40,13 @@ def _tcl_quote(value):
     return '"{}"'.format(escaped)
 
 
-def _positive_integer(value):
-    try:
-        value = int(value)
-    except (TypeError, ValueError):
-        return None
-    return value if value > 0 else None
-
-
-def _lsf_host_slots(value, hostname=None):
-    tokens = (value or "").split()
-    if len(tokens) < 2 or len(tokens) % 2:
-        return None
-    pairs = []
-    for index in range(0, len(tokens), 2):
-        slots = _positive_integer(tokens[index + 1])
-        if slots is None:
-            return None
-        pairs.append((tokens[index], slots))
-    if len(pairs) == 1:
-        return pairs[0][1]
-
-    hostname = hostname or socket.gethostname()
-    local_names = {hostname.lower(), hostname.split('.', 1)[0].lower()}
-    for host, slots in pairs:
-        if host.lower() in local_names or host.split('.', 1)[0].lower() in local_names:
-            return slots
-    return min(slots for _, slots in pairs)
-
-
-def _lsf_host_list_slots(value, hostname=None):
-    hosts = (value or "").split()
-    if not hosts:
-        return None
-    hostname = hostname or socket.gethostname()
-    local_names = {hostname.lower(), hostname.split('.', 1)[0].lower()}
-    local_slots = sum(1 for host in hosts
-                      if host.lower() in local_names or host.split('.', 1)[0].lower() in local_names)
-    if local_slots:
-        return local_slots
-    slots_by_host = {}
-    for host in hosts:
-        short_name = host.split('.', 1)[0].lower()
-        slots_by_host[short_name] = slots_by_host.get(short_name, 0) + 1
-    return min(slots_by_host.values())
-
-
 def detect_allocated_cpus(environment=None):
-    """Return CPUs assigned to this process and the allocation source."""
-    environment = os.environ if environment is None else environment
-
-    affinity_count = None
-    affinity = getattr(os, "sched_getaffinity", None)
-    if affinity is not None:
-        try:
-            affinity_count = len(affinity(0)) or None
-        except OSError:
-            pass
-
-    host_slots = _lsf_host_slots(environment.get("LSB_MCPU_HOSTS"))
-    if host_slots is None:
-        host_slots = _lsf_host_list_slots(environment.get("LSB_HOSTS"))
-        host_source = "LSB_HOSTS"
-    else:
-        host_source = "LSB_MCPU_HOSTS"
-    if host_slots is not None:
-        if affinity_count is not None and affinity_count < host_slots:
-            return affinity_count, "{} capped by CPU affinity".format(host_source)
-        return host_slots, host_source
-
-    slurm_cpus = _positive_integer(environment.get("SLURM_CPUS_PER_TASK"))
-    if slurm_cpus is not None:
-        if affinity_count is not None and affinity_count < slurm_cpus:
-            return affinity_count, "SLURM_CPUS_PER_TASK capped by CPU affinity"
-        return slurm_cpus, "SLURM_CPUS_PER_TASK"
-
-    lsf_total = _positive_integer(environment.get("LSB_DJOB_NUMPROC"))
-    if lsf_total is not None:
-        if affinity_count is not None and affinity_count < lsf_total:
-            return affinity_count, "LSB_DJOB_NUMPROC capped by CPU affinity"
-        if lsf_total == 1:
-            return 1, "LSB_DJOB_NUMPROC"
-        return 1, "LSB_DJOB_NUMPROC without per-host allocation (conservative)"
-
-    if affinity_count is not None:
-        return min(affinity_count, 8), "CPU affinity fallback (capped at 8)"
-
-    return min(os.cpu_count() or 1, 8), "host CPU count fallback (capped at 8)"
+    return job_lib.detect_allocated_cpus(
+        environment,
+        hostname=socket.gethostname(),
+        affinity_getter=getattr(os, "sched_getaffinity", None),
+        host_cpu_count=os.cpu_count(),
+    )
 
 
 class VcsSimulator(SimulatorInterface):
@@ -644,8 +565,8 @@ class VcsSimulator(SimulatorInterface):
                 failed = True
                 continue
             try:
-                result = subprocess.run(["bash", merge_script], capture_output=True, text=True)
-            except OSError as exc:
+                result = run_bounded_process(["bash", merge_script], capture_output=True, text=True)
+            except (OSError, subprocess.TimeoutExpired) as exc:
                 log.error("VCS coverage merge could not start for %s: %s", vcomp_job, exc)
                 failed = True
                 continue

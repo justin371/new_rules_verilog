@@ -242,8 +242,12 @@ class RegressionDiscoveryTest(unittest.TestCase):
         config._write_discovery_manifest()
         manifest = json.loads((cache_dir / "discovery_manifest.json").read_text(encoding="utf-8"))
         manifest_paths = {entry["path"] for entry in manifest["files"]}
-        self.assertIn(os.path.relpath(build_file, project_dir).replace(os.sep, "/"), manifest_paths)
-        self.assertNotIn(os.path.relpath(source_file, project_dir).replace(os.sep, "/"), manifest_paths)
+        canonical_project_dir = os.path.realpath(project_dir)
+        build_relative_path = os.path.relpath(os.path.realpath(build_file), canonical_project_dir).replace(os.sep, "/")
+        source_relative_path = os.path.relpath(os.path.realpath(source_file),
+                                               canonical_project_dir).replace(os.sep, "/")
+        self.assertIn(build_relative_path, manifest_paths)
+        self.assertNotIn(source_relative_path, manifest_paths)
         self.assertTrue(config._discovery_cache_is_fresh())
 
         build_file.write_text("filegroup(name = 'second')\n", encoding="utf-8")
@@ -302,7 +306,7 @@ class RegressionDiscoveryTest(unittest.TestCase):
         config._write_discovery_manifest()
         real_build.write_text("filegroup(name = 'second')\n", encoding="utf-8")
 
-        self.assertIn(str(linked_build), metadata_paths)
+        self.assertIn(os.path.realpath(linked_build), [os.path.realpath(path) for path in metadata_paths])
         self.assertFalse(config._discovery_cache_is_fresh())
 
     def test_local_repository_scan_limit_disables_cache_reuse_without_warning(self):

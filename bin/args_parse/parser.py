@@ -131,6 +131,7 @@ def parse_args(argv):
     options.xprop_was_explicit = any(
         argument_explicitly_requested(argv, argument) for argument in ('--xprop', '--vcs-xprop'))
     options.timeout_was_explicit = argument_explicitly_requested(argv, '--timeout')
+    options.wave_end_was_explicit = argument_explicitly_requested(argv, '--wave-end')
     options.covfile_was_explicit = argument_explicitly_requested(argv, '--covfile')
     options.mce_detail_was_explicit = any(
         argument_explicitly_requested(argv, argument) for argument in [
@@ -227,7 +228,7 @@ def parse_args(argv):
         parser.error("{} require --waves.".format(", ".join(requested_wave_details)))
     if options.wave_start < 0:
         parser.error("--wave-start must be non-negative.")
-    if options.wave_end <= options.wave_start:
+    if options.wave_end_was_explicit and options.wave_end <= options.wave_start:
         parser.error("--wave-end must be greater than --wave-start.")
     if options.wave_depth <= 0:
         parser.error("--wave-depth must be positive.")

@@ -14,7 +14,7 @@ import tempfile
 import jinja2
 
 from lib.coverage_data import aggregate_coverage_metrics, parse_coverage_summary
-from .base import SimulatorInterface, ValidationErrorParser
+from .base import SimulatorInterface, ValidationErrorParser, run_bounded_process
 from .options import validate_explicit_switches
 from .xcelium_options import validate_xcelium_runtime_options
 
@@ -542,12 +542,12 @@ class XceliumSimulator(SimulatorInterface):
                 continue
             merge_exec_tcl = os.path.join(cov_work_dir, "merge_exec.tcl")
             try:
-                result = subprocess.run(
+                result = run_bounded_process(
                     ["runmod", "xrun", "--", "imc", "-exec", merge_exec_tcl, "-verbose"],
                     capture_output=True,
                     text=True,
                 )
-            except OSError as exc:
+            except (OSError, subprocess.TimeoutExpired) as exc:
                 log.error("XRUN coverage merge could not start for %s: %s", vcomp, exc)
                 failed = True
                 continue
@@ -572,12 +572,12 @@ class XceliumSimulator(SimulatorInterface):
                 coverage[vcomp.split(":")[-1]] = aggregate_coverage_metrics({})
                 continue
             try:
-                result = subprocess.run(
+                result = run_bounded_process(
                     ["runmod", "xrun", "--", "imc", "-exec", report_tcl, "-verbose"],
                     capture_output=True,
                     text=True,
                 )
-            except OSError as exc:
+            except (OSError, subprocess.TimeoutExpired) as exc:
                 log.error("IMC report generation could not start for %s: %s", job, exc)
                 coverage[vcomp.split(":")[-1]] = aggregate_coverage_metrics({})
                 continue

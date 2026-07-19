@@ -250,7 +250,8 @@ def get_active_job_limit(options, rcfg, simulator):
     if options.jobs is not None:
         requested_jobs = options.jobs
     else:
-        cpu_count = os.cpu_count() or 1
+        cpu_count, allocation_source = job_lib.detect_allocated_cpus()
+        rcfg.log.info("Scheduler CPU allocation: %d (%s)", cpu_count, allocation_source)
         requested_jobs = max(1, cpu_count // simulator.get_scheduler_threads_per_test())
     return max(1, min(total_tests, requested_jobs))
 
@@ -1014,9 +1015,6 @@ class TestJob(Job):
                 self.jobstatus = JobStatus.FAILED
                 self.error_message = "Simulation completed without producing {}.".format(self._log_path)
 
-        if self.jobstatus == JobStatus.FAILED:
-            self.simulator.cleanup_test_coverage(self)
-
         # Wave path logging (adjust based on actual file names if they differ)
         if options.waves is not None:
             wave_path = self.job_dir
@@ -1027,26 +1025,27 @@ class TestJob(Job):
                     os.chmod(abs_wave_path, 0o755)
                 except OSError as exc:
                     log.debug("Could not chmod wave artifact %s: %s", abs_wave_path, exc)
+                run_wave_script_path = os.path.join(wave_path, "run_waves.sh")
+                bazel_runfiles_dir = os.path.join(wave_path, 'bazel_runfiles_main')
+                absolute_wave_path = os.path.abspath(abs_wave_path)
+                run_wave_template_vars = {
+                    "job_dir": wave_path,
+                    "wave_file_path": absolute_wave_path,
+                    "bazel_runfiles_dir": bazel_runfiles_dir,
+                    "wave_view_command":
+                    shlex.quote(self.simulator.get_wave_view_command(absolute_wave_path, wave_path)),
+                }
+                run_wave_script_content = RUN_WAVE_TEMPLATE.render(run_wave_template_vars)
+                sim_artifacts.write_executable_script(run_wave_script_path, run_wave_script_content)
+                log.info(f"Run wave: {run_wave_script_path}")
             else:
-                log.error("Dumped waves, but waves file doesn't exist.")
+                self.log.error("%s completed without expected wave artifact %s", self, abs_wave_path)
+                if self.jobstatus != JobStatus.FAILED:
+                    self.jobstatus = JobStatus.FAILED
+                    self.error_message = "Wave capture completed without producing {}.".format(abs_wave_path)
 
-            # Create the bash scripts using Jinja2 template
-            run_wave_script_name = "run_waves.sh"
-            run_wave_script_path = os.path.join(wave_path, run_wave_script_name)
-
-            bazel_runfiles_dir = os.path.join(wave_path, 'bazel_runfiles_main')
-            absolute_wave_path = os.path.abspath(abs_wave_path)
-
-            # Variables needed by the template
-            run_wave_template_vars = {
-                "job_dir": wave_path,
-                "wave_file_path": absolute_wave_path,
-                "bazel_runfiles_dir": bazel_runfiles_dir,
-                "wave_view_command": shlex.quote(self.simulator.get_wave_view_command(absolute_wave_path, wave_path)),
-            }
-            run_wave_script_content = RUN_WAVE_TEMPLATE.render(run_wave_template_vars)
-            sim_artifacts.write_executable_script(run_wave_script_path, run_wave_script_content)
-            log.info(f"Run wave: {run_wave_script_path}")
+        if self.jobstatus == JobStatus.FAILED:
+            self.simulator.cleanup_test_coverage(self)
 
         sys.stdout.flush()
         simmer_results.record_test_job(

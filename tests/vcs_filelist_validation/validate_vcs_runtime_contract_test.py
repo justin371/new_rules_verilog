@@ -2,6 +2,7 @@ import datetime
 import json
 import os
 from pathlib import Path
+import signal
 import shlex
 import shutil
 import subprocess
@@ -30,6 +31,7 @@ import simmer
 from lib.job_lib import Job, JobManager, JobStatus
 from lib.regression import resolve_report_generation
 from lib.runtime_options import format_sim_opts_dict, resolve_test_timeout_hours
+from lib.simulators.base import run_bounded_process
 from lib.simulators.vcs import PARTCOMP_MANIFEST_FILENAME, VcsSimulator, _tcl_quote as _vcs_tcl_quote, detect_allocated_cpus
 from lib.simulators.xcelium import XceliumSimulator, _tcl_quote
 
@@ -61,6 +63,70 @@ class DummyVcompJob:
 
 
 class VcsRuntimeContractTest(unittest.TestCase):
+
+    def test_bounded_process_kills_group_after_timeout(self):
+        process = mock.Mock(pid=123, returncode=-signal.SIGKILL)
+        timeout = subprocess.TimeoutExpired(["tool"], 1)
+        process.communicate.side_effect = [timeout, subprocess.TimeoutExpired(["tool"], 5), ("", "")]
+
+        with mock.patch("lib.simulators.base.subprocess.Popen", return_value=process), \
+             mock.patch("lib.simulators.base.os.killpg") as kill_group, \
+             self.assertRaises(subprocess.TimeoutExpired):
+            run_bounded_process(["tool"], timeout_seconds=1, capture_output=True, text=True)
+
+        self.assertEqual(
+            [mock.call(123, signal.SIGTERM), mock.call(123, signal.SIGKILL)],
+            kill_group.call_args_list,
+        )
+
+    def test_bounded_process_reaps_child_group_on_sigterm(self):
+        with tempfile.TemporaryDirectory() as temp_dir:
+            child_pid_path = Path(temp_dir) / "child.pid"
+            parent_code = """
+import sys
+sys.path.insert(0, sys.argv[1])
+from lib.simulators.base import run_bounded_process
+run_bounded_process([
+    sys.executable,
+    "-c",
+    "import os, pathlib, sys, time; pathlib.Path(sys.argv[1]).write_text(str(os.getpid())); time.sleep(60)",
+    sys.argv[2],
+])
+"""
+            parent = subprocess.Popen(
+                [sys.executable, "-c", parent_code,
+                 str(REPO_ROOT), str(child_pid_path)],
+                start_new_session=True,
+            )
+            child_pid = None
+            try:
+                deadline = time.monotonic() + 10
+                while time.monotonic() < deadline and not child_pid_path.exists():
+                    time.sleep(0.02)
+                self.assertTrue(child_pid_path.exists(), "bounded child did not start")
+                child_pid = int(child_pid_path.read_text(encoding="utf-8"))
+
+                os.kill(parent.pid, signal.SIGTERM)
+                self.assertEqual(128 + signal.SIGTERM, parent.wait(timeout=10))
+
+                deadline = time.monotonic() + 5
+                while time.monotonic() < deadline:
+                    try:
+                        os.killpg(child_pid, 0)
+                    except ProcessLookupError:
+                        break
+                    time.sleep(0.02)
+                else:
+                    self.fail("bounded child process group survived parent SIGTERM")
+            finally:
+                if parent.poll() is None:
+                    parent.kill()
+                    parent.wait(timeout=5)
+                if child_pid is not None:
+                    try:
+                        os.killpg(child_pid, signal.SIGKILL)
+                    except ProcessLookupError:
+                        pass
 
     def test_get_bazel_bin_prefers_project_symlink(self):
         with mock.patch("simmer.os.path.isdir", return_value=True), \
@@ -415,6 +481,25 @@ class VcsRuntimeContractTest(unittest.TestCase):
         sim_options = shlex.split(simulator.generate_sim_options(run, 42))
         self.assertEqual(["-vso", "cso"], sim_options[:2])
         self.assertIn("run_id=run-7", sim_options)
+
+    def test_vso_driver_uses_bounded_process_contract(self):
+        options = parse_args(["--simulator", "VCS", "--vso"])
+        simulator = VcsSimulator(options, DummyRegressionConfig(), None)
+        completed = SimpleNamespace(returncode=0)
+
+        with tempfile.TemporaryDirectory() as temp_dir, \
+             mock.patch.object(simulator.vso_workflow, "driver_path", return_value="/tools/vso/bin/driver"), \
+             mock.patch("lib.simulators.vso.run_bounded_process", return_value=completed) as run:
+            log_path = os.path.join(temp_dir, "vso.log")
+            simulator.vso_workflow._run_driver(["--init"], log_path, "init")
+
+        run.assert_called_once_with(
+            ["/tools/vso/bin/driver", "--init"],
+            cwd=simulator.rcfg.regression_dir,
+            stdout=mock.ANY,
+            stderr=subprocess.STDOUT,
+            text=True,
+        )
 
     def test_vso_ccex_is_separate_from_cso_and_ico(self):
         merge_dir = tempfile.mkdtemp(prefix="ccex merge ")
@@ -1306,9 +1391,10 @@ class VcsRuntimeContractTest(unittest.TestCase):
             options=SimpleNamespace(
                 probe_packed=128,
                 probe_unpacked=128,
-                probes=["hdl_top.dut"],
+                probes=["hdl_top.genblk[0].u"],
                 wave_depth=8,
                 wave_end=100,
+                wave_end_was_explicit=True,
                 wave_start=20,
                 wave_type="shm",
             ),
@@ -1316,6 +1402,7 @@ class VcsRuntimeContractTest(unittest.TestCase):
         )
         self.assertIn("-default -event", rendered)
         self.assertIn('-into "/tmp/waves directory/waves.shm"', rendered)
+        self.assertIn(_tcl_quote("hdl_top.genblk[0].u"), rendered)
         self.assertIn("run 80ns", rendered)
         self.assertIn("database -close shm_db", rendered)
 
@@ -1324,9 +1411,10 @@ class VcsRuntimeContractTest(unittest.TestCase):
         environment = jinja2.Environment(undefined=jinja2.StrictUndefined)
         environment.filters["tcl_quote"] = _vcs_tcl_quote
         wave_options = SimpleNamespace(
-            probes=["hdl_top.dut"],
+            probes=["hdl_top.genblk[0].u"],
             wave_depth=999,
             wave_end=100,
+            wave_end_was_explicit=True,
             wave_start=20,
         )
 
@@ -1338,6 +1426,7 @@ class VcsRuntimeContractTest(unittest.TestCase):
         self.assertIn('set wave_fid [dump -file "/tmp/waves.fsdb" -type FSDB]', rendered_tcl)
         self.assertNotIn("FSDB0", rendered_tcl)
         self.assertIn("-fid $wave_fid -depth 0", rendered_tcl)
+        self.assertIn(_vcs_tcl_quote("hdl_top.genblk[0].u"), rendered_tcl)
         self.assertIn("dump -close", rendered_tcl)
         self.assertNotIn("dump -close $wave_fid", rendered_tcl)
 
@@ -1373,7 +1462,13 @@ class VcsRuntimeContractTest(unittest.TestCase):
         environment = jinja2.Environment(undefined=jinja2.StrictUndefined)
         environment.filters["tcl_quote"] = _vcs_tcl_quote
         rendered_tcl = environment.from_string(wave_template).render(
-            options=SimpleNamespace(probes=["hdl_top"], wave_depth=1, wave_end=99999999, wave_start=0),
+            options=SimpleNamespace(
+                probes=["hdl_top"],
+                wave_depth=1,
+                wave_end=99999999,
+                wave_end_was_explicit=False,
+                wave_start=0,
+            ),
             waves_db='/tmp/$USER/[exec touch injected]/waves".fsdb',
         )
 
@@ -1550,6 +1645,7 @@ class VcsRuntimeContractTest(unittest.TestCase):
         self.assertEqual("user argument with spaces", arguments[-1])
         self.assertEqual(["waves.shm"], viewer_args.read_text(encoding="utf-8").splitlines())
 
+    @unittest.skipUnless(os.name == "posix" and os.path.isdir("/proc"), "Linux process-group behavior")
     def test_sim_template_cleans_socket_sidecar_after_unexpected_failure(self):
         # Given: a long-running socket sidecar and an invalid simulation work directory.
         temporary_root = Path(tempfile.mkdtemp(prefix="sim socket contract "))
@@ -2105,7 +2201,7 @@ class VcsRuntimeContractTest(unittest.TestCase):
         )
         failed = SimpleNamespace(returncode=1, stderr="failed")
 
-        with mock.patch("lib.simulators.xcelium.subprocess.run", return_value=failed) as run:
+        with mock.patch("lib.simulators.xcelium.run_bounded_process", return_value=failed) as run:
             coverage = simulator.collect_coverage_data({"//pkg:sys_tb": job})
 
         run.assert_called_once_with(
@@ -2125,7 +2221,7 @@ class VcsRuntimeContractTest(unittest.TestCase):
         simulator = XceliumSimulator(options, DummyRegressionConfig(), None)
         job = SimpleNamespace(coverage_report_tcl="/tmp/imc_report.tcl", merged_coverage_dir="/missing")
 
-        with mock.patch("lib.simulators.xcelium.subprocess.run") as run:
+        with mock.patch("lib.simulators.xcelium.run_bounded_process") as run:
             coverage = simulator.collect_coverage_data({"//pkg:sys_tb": job})
 
         run.assert_not_called()
@@ -2159,7 +2255,7 @@ class VcsRuntimeContractTest(unittest.TestCase):
             merged_coverage_dir=str(report_dir),
         )
 
-        with mock.patch("lib.simulators.xcelium.subprocess.run", return_value=SimpleNamespace(returncode=0)):
+        with mock.patch("lib.simulators.xcelium.run_bounded_process", return_value=SimpleNamespace(returncode=0)):
             coverage = simulator.collect_coverage_data({"//pkg:sys_tb": job})["sys_tb"]
 
         self.assertEqual("80.00%", coverage["cc"]["Overall"])
@@ -2279,7 +2375,7 @@ class VcsRuntimeContractTest(unittest.TestCase):
         simulator = VcsSimulator(options, DummyRegressionConfig(), None)
         vcomp = SimpleNamespace(coverage_merge_script="/tmp/unit_vcs_cov_merge.sh")
 
-        with mock.patch("lib.simulators.vcs.subprocess.run", return_value=SimpleNamespace(returncode=0)) as run:
+        with mock.patch("lib.simulators.vcs.run_bounded_process", return_value=SimpleNamespace(returncode=0)) as run:
             self.assertFalse(simulator.run_report_coverage_merge({"//unit:tb": vcomp}))
 
         run.assert_called_once_with(
@@ -2293,7 +2389,7 @@ class VcsRuntimeContractTest(unittest.TestCase):
         simulator = VcsSimulator(options, DummyRegressionConfig(), None)
         vcomp = SimpleNamespace(coverage_merge_script="/tmp/unit_vcs_cov_merge.sh")
 
-        with mock.patch("lib.simulators.vcs.subprocess.run",
+        with mock.patch("lib.simulators.vcs.run_bounded_process",
                         return_value=SimpleNamespace(returncode=1, stdout="", stderr="failed")):
             self.assertTrue(simulator.run_report_coverage_merge({"//unit:tb": vcomp}))
 
@@ -2302,7 +2398,7 @@ class VcsRuntimeContractTest(unittest.TestCase):
         simulator = XceliumSimulator(options, DummyRegressionConfig(), None)
         vcomp = SimpleNamespace(cov_work_dir=tempfile.mkdtemp())
 
-        with mock.patch("lib.simulators.xcelium.subprocess.run",
+        with mock.patch("lib.simulators.xcelium.run_bounded_process",
                         return_value=SimpleNamespace(returncode=1, stdout="", stderr="failed")):
             self.assertTrue(simulator.run_report_coverage_merge({"//unit:tb": vcomp}))
 
@@ -2404,7 +2500,7 @@ class VcsRuntimeContractTest(unittest.TestCase):
         self.assertIn("SIMMER_WAVE_LAUNCHER", waves_template)
         self.assertIn("Parse shell-style quoting without evaluating", waves_template)
         self.assertIn("shlex.split", waves_template)
-        self.assertIn("mapfile -t WAVE_VIEW_ARGV", waves_template)
+        self.assertIn('WAVE_VIEW_ARGV+=("$wave_view_arg")', waves_template)
         self.assertIn("{{ job_dir|shell_quote }}", waves_template)
         self.assertNotIn("eval ", waves_template)
         self.assertNotIn("/global/tools/lsf", waves_template)

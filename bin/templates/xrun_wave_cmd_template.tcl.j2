@@ -4,13 +4,13 @@ run {{ options.wave_start }}ns
 {% endif -%}
 call xmDumpfile {{ waves_db|tcl_quote }}
 {% for probe in options.probes -%}
-call xmDumpvars {{ probe }} {{ options.wave_depth }} +all +packedmda+struct +struct +parameter +cell_instance=0 +packed_limit={{ options.probe_packed }} +unpacked_limit={{ options.probe_unpacked }}
+call xmDumpvars {{ probe|tcl_quote }} {{ options.wave_depth }} +all +packedmda+struct +struct +parameter +cell_instance=0 +packed_limit={{ options.probe_packed }} +unpacked_limit={{ options.probe_unpacked }}
 {% endfor -%}
 call xmDumpLog
 call xmDumpMDA
 call xmDumpSVA +assertdebug
 call xmDumpflush
-{% if options.wave_end != 99999999 -%}
+{% if options.wave_end_was_explicit -%}
 run {{ options.wave_end - options.wave_start }}ns
 call xmDumpflush
 call xmDumpoff
@@ -27,9 +27,9 @@ run {{ options.wave_start }}ns
 {% endif -%}
 database -open shm_db -shm -into {{ waves_db|tcl_quote }} -default{{ delta }}
 {% for probe in options.probes -%}
-probe -database shm_db {{ probe }} -all -memories -dynamic -depth {{ options.wave_depth }} -packed {{ options.probe_packed }} -unpacked {{ options.probe_unpacked }}
+probe -database shm_db {{ probe|tcl_quote }} -all -memories -dynamic -depth {{ options.wave_depth }} -packed {{ options.probe_packed }} -unpacked {{ options.probe_unpacked }}
 {% endfor -%}
-{% if options.wave_end != 99999999 -%}
+{% if options.wave_end_was_explicit -%}
 run {{ options.wave_end - options.wave_start }}ns
 database -close shm_db
 run
@@ -44,9 +44,9 @@ run {{ options.wave_start }}ns
 {% endif -%}
 database -open -vcd vcd_db -into {{ waves_db|tcl_quote }} -default
 {% for probe in options.probes -%}
-probe -database vcd_db {{ probe }} -all -memories -depth all -vcd -packed {{ options.probe_packed }} -unpacked {{ options.probe_unpacked }}
+probe -database vcd_db {{ probe|tcl_quote }} -all -memories -depth all -vcd -packed {{ options.probe_packed }} -unpacked {{ options.probe_unpacked }}
 {% endfor -%}
-{% if options.wave_end != 99999999 -%}
+{% if options.wave_end_was_explicit -%}
 run {{ options.wave_end - options.wave_start }}ns
 database -close vcd_db
 run

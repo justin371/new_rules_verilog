@@ -9,6 +9,7 @@ verilog_rtl_library(
 
 py_test(
     name = "external_setup_smoke_test",
+    timeout = "short",
     srcs = ["rules_verilog_external_setup_smoke_test.py"],
     data = [":rules_verilog_setup_library"],
     main = "rules_verilog_external_setup_smoke_test.py",
@@ -17,6 +18,7 @@ py_test(
 
 verilog_test(
     name = "external_verilog_test",
+    timeout = "short",
     tool = "@external_verilog_fixture//:verilog_test_tool",
     deps = ["@external_verilog_fixture//:verilog_test_library"],
 )
