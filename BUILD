@@ -53,6 +53,7 @@ BUILDIFIER_EXCLUDE = [
 
 buildifier_test(
     name = "buildifier_diff",
+    timeout = "short",
     diff_command = "diff -u",
     exclude_patterns = BUILDIFIER_EXCLUDE,
     mode = "diff",

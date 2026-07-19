@@ -222,8 +222,9 @@ def add_regression_arguments(parser):
     regression_group.add_argument('--jobs',
                                   type=int,
                                   default=None,
-                                  help=('Maximum concurrent compile/simulation jobs. Defaults to the host CPU count, '
-                                        'adjusted for VCS FGP or Xcelium MCE threads.'))
+                                  help=('Maximum concurrent compile/simulation jobs. By default simmer uses the '
+                                        'LSF/Slurm or process-affinity CPU allocation, applies a conservative '
+                                        'fallback cap, and adjusts for VCS FGP or Xcelium MCE threads.'))
     regression_group.add_argument(
         '--simmer-profile',
         default=False,

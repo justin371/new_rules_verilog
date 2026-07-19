@@ -884,9 +884,19 @@ class JobManagerLaunchTest(unittest.TestCase):
         runner.job = SimpleNamespace(sidecar_process_groups_path=str(sidecar_file))
         runner._process_group_id = 456
 
-        with mock.patch.object(runner, "_linux_process_identity", return_value=(789, 456, "later")), \
+        with mock.patch.object(runner, "_linux_process_identity", return_value=("S", 789, 456, "later")), \
              mock.patch("lib.job_lib.os.killpg") as kill_group:
             runner._signal_sidecar_process_groups(signal.SIGSTOP)
+
+        kill_group.assert_not_called()
+
+    def test_zombie_only_process_group_is_not_running(self):
+        runner = SubprocessJobRunner.__new__(SubprocessJobRunner)
+        runner._process_group_id = 456
+
+        with mock.patch.object(runner, "_process_group_has_live_member", return_value=False), \
+             mock.patch("lib.job_lib.os.killpg") as kill_group:
+            self.assertFalse(runner._process_group_exists())
 
         kill_group.assert_not_called()
 

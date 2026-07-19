@@ -17,6 +17,7 @@ cc_binary(
 
 cc_test(
     name = "dpi_c_test",
+    timeout = "short",
     srcs = ["dpi_test.c"],
     deps = [":dpi_c_lib"],
 )

@@ -17,8 +17,15 @@ class ArgsParserValidationTest(unittest.TestCase):
         self.assert_parse_error(["--tag", "smoke"])
         self.assert_parse_error(["--ntag", "slow"])
 
-    def test_wave_end_must_follow_wave_start_even_at_default_sentinel(self):
-        self.assert_parse_error(["--waves", "--wave-start", "99999999"])
+    def test_default_wave_end_allows_late_wave_start(self):
+        options = parse_args(["--waves", "--wave-start", "100000000"])
+
+        self.assertEqual(99999999, options.wave_end)
+        self.assertFalse(options.wave_end_was_explicit)
+
+    def test_explicit_wave_end_must_follow_wave_start(self):
+        self.assert_parse_error(["--waves", "--wave-start", "20", "--wave-end", "10"])
+        self.assert_parse_error(["--waves", "--wave-start", "100000000", "--wave-end", "99999999"])
 
     def test_uvm_max_quit_count_rejects_negative_values_but_allows_zero(self):
         self.assert_parse_error(["--uvm-max-quit-count", "-1"])

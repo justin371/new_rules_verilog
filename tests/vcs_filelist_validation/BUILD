@@ -90,6 +90,7 @@ verilog_dv_tb(
 verilog_dv_test_cfg(
     name = "dv_cfg_vcs",
     timeout = 17,
+    pre_run = "//tests:vcs_fixture_pre_run",
     simulator = "VCS",
     tags = ["manual"],
     tb = ":dv_tb_vcs",
@@ -97,7 +98,10 @@ verilog_dv_test_cfg(
 
 verilog_dv_test_cfg(
     name = "dv_cfg_vcs_inherited",
-    inherits = [":dv_cfg_vcs"],
+    inherits = [
+        ":dv_cfg_vcs",
+        ":dv_cfg_vcs_abstract",
+    ],
     tags = ["manual"],
 )
 
@@ -138,6 +142,7 @@ verilog_rtl_unit_test(
 
 py_test(
     name = "vcs_filelist_validation_test",
+    timeout = "short",
     srcs = ["validate_vcs_filelist_test.py"],
     data = [
         ":dv_cfg_vcs",
@@ -166,6 +171,7 @@ py_test(
 
 py_test(
     name = "vcs_runtime_contract_test",
+    timeout = "short",
     srcs = ["validate_vcs_runtime_contract_test.py"],
     data = [
         "//bin:check_test.py",

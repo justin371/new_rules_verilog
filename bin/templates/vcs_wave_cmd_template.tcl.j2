@@ -5,7 +5,7 @@ dump -glitch on -fid $wave_fid
 {% set fsdb_hierarchy_depth = 0 if options.wave_depth == 999 else options.wave_depth -%}
 {% for probe in options.probes -%}
 # simmer's sentinel depth 999 maps to UCLI depth 0, meaning all descendants.
-dump -add {{ probe }} -fid $wave_fid -depth {{ fsdb_hierarchy_depth }} -aggregates -fsdb_opt +packedmda+struct+parameter
+dump -add {{ probe|tcl_quote }} -fid $wave_fid -depth {{ fsdb_hierarchy_depth }} -aggregates -fsdb_opt +packedmda+struct+parameter
 {% endfor -%}
 {% if options.wave_start > 0 -%}
 dump -disable -fid $wave_fid
@@ -13,7 +13,7 @@ stop -absolute {{ options.wave_start }}ns -command {dump -enable -fid $wave_fid}
 {% else -%}
 dump -enable -fid $wave_fid
 {% endif -%}
-{% if options.wave_end != 99999999 -%}
+{% if options.wave_end_was_explicit -%}
 stop -absolute {{ options.wave_end }}ns -command {dump -disable -fid $wave_fid; dump -flush $wave_fid} -continue
 {% endif -%}
 run

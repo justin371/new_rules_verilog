@@ -57,35 +57,42 @@ verilog_dv_test_cfg(
 
 concrete_requires_tb_test(
     name = "concrete_requires_tb_test",
+    timeout = "short",
     target_under_test = ":concrete_without_tb",
 )
 
 gumi_override_test(
     name = "gumi_override_test",
+    timeout = "short",
     target_under_test = ":gumi_override_library",
 )
 
 dpi_runfiles_test(
     name = "dpi_runfiles_test",
+    timeout = "short",
     target_under_test = ":dpi_library",
 )
 
 runtime_tool_target_config_test(
     name = "runtime_tool_target_config_test",
+    timeout = "short",
     target_under_test = "//tests/verilog_test_runner:verilog_test_runner_test",
 )
 
 target_analyzes_test(
     name = "abstract_cfg_test",
+    timeout = "short",
     target_under_test = ":abstract_cfg",
 )
 
 target_analyzes_test(
     name = "concrete_cfg_test",
+    timeout = "short",
     target_under_test = ":concrete_cfg",
 )
 
 target_analyzes_test(
     name = "dpi_library_consumer_test",
+    timeout = "short",
     target_under_test = ":dpi_library_consumer",
 )

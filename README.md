@@ -30,6 +30,15 @@ The second load/call initializes the pinned rules_python 0.40 repositories after
 `verilog_dependencies` declares `@rules_python`. Pin a reviewed commit and its
 archive SHA rather than tracking `main` directly.
 
+The rules use the workstation Python 3.12 environment so simulator-side Python
+packages remain available. Ensure `python3.12` is on `PATH`, then add:
+
+```bazelrc
+build --incompatible_use_python_toolchains=false
+build --python_path=python3.12
+build --action_env=PATH
+```
+
 
 Cadence Xcelium needs both `HOME` and `LM_LICENSE_FILE`; add them to your `.bazelrc` file:
 

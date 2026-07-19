@@ -5,7 +5,7 @@ package(default_visibility = ["//visibility:public"])
 py_library(
     name = "base",
     srcs = ["base.py"],
-    deps = [],
+    deps = ["//lib:compile_cache"],
 )
 
 py_library(
@@ -29,6 +29,7 @@ py_library(
         ":vcs_options",
         ":vso",
         "//lib:coverage_data",
+        "//lib:job_lib",
     ],
 )
 
@@ -41,6 +42,7 @@ py_library(
 py_library(
     name = "vso",
     srcs = ["vso.py"],
+    deps = [":base"],
 )
 
 py_library(

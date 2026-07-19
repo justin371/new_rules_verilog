@@ -1,3 +1,4 @@
+import datetime
 import os
 import multiprocessing
 from pathlib import Path
@@ -68,6 +69,19 @@ class SimmerRuntimeHardeningTest(unittest.TestCase):
                 parse_args(arguments)
 
         self.assertEqual(0, parse_args(["--timeout", "0"]).timeout)
+
+    def test_default_scheduler_limit_uses_process_allocation(self):
+        options = SimpleNamespace(gui=False, jobs=None)
+        rcfg = SimpleNamespace(
+            all_vcomp={"//tb:tb": ([SimpleNamespace(target=8)], [])},
+            log=mock.Mock(),
+        )
+        simulator = SimpleNamespace(get_scheduler_threads_per_test=lambda: 2)
+
+        with mock.patch("simmer.job_lib.detect_allocated_cpus", return_value=(4, "unit allocation")):
+            self.assertEqual(2, simmer.get_active_job_limit(options, rcfg, simulator))
+
+        rcfg.log.info.assert_called_once_with("Scheduler CPU allocation: %d (%s)", 4, "unit allocation")
 
     def test_history_persistence_failure_is_fatal(self):
         rcfg = SimpleNamespace(
@@ -423,6 +437,48 @@ class SimmerRuntimeHardeningTest(unittest.TestCase):
 
             self.assertFalse(wave_path.exists())
             self.assertFalse(viewer.exists())
+
+    def test_missing_requested_wave_artifact_fails_test_without_viewer(self):
+        with tempfile.TemporaryDirectory() as job_dir:
+            log_path = Path(job_dir) / "stdout.log"
+            log_path.write_text("simulation completed\n", encoding="utf-8")
+            missing_wave = Path(job_dir) / "waves.fsdb"
+            options = SimpleNamespace(waves=[], wave_type="fsdb")
+            rcfg = SimpleNamespace(
+                log=mock.Mock(),
+                options=options,
+                simmer_results_run={},
+                table_format=lambda *_args, **_kwargs: "result",
+                tidy=False,
+            )
+            simulator = mock.Mock()
+            simulator.get_wave_artifact_path.return_value = str(missing_wave)
+            simulator.should_spawn_test_job.return_value = False
+            test_job = simmer.TestJob.__new__(simmer.TestJob)
+            test_job._jobstatus = simmer.JobStatus.NOT_STARTED
+            test_job._log_path = str(log_path)
+            test_job.error_message = None
+            test_job.iteration = 1
+            test_job.job_dir = job_dir
+            test_job.job_lib = SimpleNamespace(returncode=0, manager=mock.Mock())
+            test_job.job_start_time = datetime.datetime.now()
+            test_job.job_stop_time = None
+            test_job.log = rcfg.log
+            test_job.name = "test"
+            test_job.rcfg = rcfg
+            test_job.simulator = simulator
+            test_job.vcomper = SimpleNamespace(name="tb")
+
+            with mock.patch("simmer.log", rcfg.log), \
+                 mock.patch("simmer.simmer_results.record_test_job"), \
+                 mock.patch("simmer.sim_artifacts.write_executable_script") as write_viewer:
+                test_job.post_run()
+
+            self.assertEqual(simmer.JobStatus.FAILED, test_job.jobstatus)
+            self.assertIn(str(missing_wave), test_job.error_message)
+            simulator.cleanup_test_coverage.assert_called_once_with(test_job)
+            simulator.get_wave_view_command.assert_not_called()
+            write_viewer.assert_not_called()
 
     @unittest.skipUnless(os.name == "posix", "POSIX advisory-lock behavior")
     def test_shared_runtime_lock_serializes_identical_regressions(self):

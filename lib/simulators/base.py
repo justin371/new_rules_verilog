@@ -1,8 +1,55 @@
 # lib/simulators/base.py
 import abc
 import os
+import signal
+import subprocess
+import threading
 
 from lib import compile_cache
+
+POST_PROCESS_TIMEOUT_SECONDS = 12 * 60 * 60
+PROCESS_TERMINATION_GRACE_SECONDS = 5
+
+
+def run_bounded_process(command, timeout_seconds=POST_PROCESS_TIMEOUT_SECONDS, **kwargs):
+    """Run one post-processing process group and reap it on timeout or interruption."""
+    capture_output = kwargs.pop("capture_output", False)
+    if capture_output:
+        kwargs["stdout"] = subprocess.PIPE
+        kwargs["stderr"] = subprocess.PIPE
+    previous_handlers = {}
+
+    def exit_after_cleanup(signum, _frame):
+        raise SystemExit(128 + signum)
+
+    if threading.current_thread() is threading.main_thread():
+        for signum in (signal.SIGHUP, signal.SIGTERM):
+            if signal.getsignal(signum) == signal.SIG_DFL:
+                previous_handlers[signum] = signal.signal(signum, exit_after_cleanup)
+
+    process = None
+    try:
+        process = subprocess.Popen(command, start_new_session=True, **kwargs)
+        stdout, stderr = process.communicate(timeout=timeout_seconds)
+    except BaseException:
+        if process is not None:
+            try:
+                os.killpg(process.pid, signal.SIGTERM)
+            except ProcessLookupError:
+                pass
+            try:
+                process.communicate(timeout=PROCESS_TERMINATION_GRACE_SECONDS)
+            except subprocess.TimeoutExpired:
+                try:
+                    os.killpg(process.pid, signal.SIGKILL)
+                except ProcessLookupError:
+                    pass
+                process.communicate()
+        raise
+    finally:
+        for signum, handler in previous_handlers.items():
+            signal.signal(signum, handler)
+    return subprocess.CompletedProcess(command, process.returncode, stdout, stderr)
 
 
 class ValidationErrorParser:

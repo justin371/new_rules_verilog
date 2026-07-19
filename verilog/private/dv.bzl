@@ -83,8 +83,8 @@ def _verilog_dv_test_cfg_impl(ctx):
     parent_uvm_testnames = [dep[DVTestInfo].uvm_testname for dep in reversed(ctx.attr.inherits) if dep[DVTestInfo].uvm_testname != None]
     parent_tbs = [dep[DVTestInfo].tb for dep in reversed(ctx.attr.inherits) if dep[DVTestInfo].tb != None]
     parent_simulators = [dep[DVTestInfo].simulator for dep in reversed(ctx.attr.inherits) if dep[DVTestInfo].simulator != None]
-    parent_timeouts = [dep[DVTestInfo].timeout for dep in reversed(ctx.attr.inherits) if hasattr(dep[DVTestInfo], "timeout")]
-    parent_pre_run = [dep[DVTestInfo].pre_run for dep in reversed(ctx.attr.inherits) if hasattr(dep[DVTestInfo], "pre_run")]
+    parent_timeouts = [dep[DVTestInfo].timeout for dep in reversed(ctx.attr.inherits) if dep[DVTestInfo].timeout != None]
+    parent_pre_run = [dep[DVTestInfo].pre_run for dep in reversed(ctx.attr.inherits) if dep[DVTestInfo].pre_run != None]
 
     sim_opts = {}
 
@@ -259,7 +259,8 @@ _verilog_dv_test_cfg_rule = rule(
         "pre_run": attr.string(
             doc = "Simmer has the ability to execute a user-specified bazel run command before starting the RTL simulation process.\n" +
                   "This attribute is where the user can define that bazel run command, on a per-test basis.\n" +
-                  "For example, if the use wants to run 'bazel run //foo:bar' before their simulation, set this attribute to '//foo:bar'.",
+                  "For example, if the use wants to run 'bazel run //foo:bar' before their simulation, set this attribute to '//foo:bar'.\n" +
+                  "This attribute is inheritable. See 'inherits' attribute.",
         ),
         "timeout": attr.int(
             default = -1,
@@ -592,6 +593,9 @@ def _verilog_dv_tb_impl(ctx):
         outputs = [ctx.outputs.compile_inputs_digest],
         mnemonic = "VerilogCompileInputDigest",
         progress_message = "Hashing Verilog compile inputs for %{label}",
+        # The configured workstation Python is resolved through PATH by the
+        # rules_python legacy launcher.
+        use_default_shell_env = True,
     )
     tb_options = {
         "compile_inputs": runfiles_relative_short_path(ctx.outputs.compile_inputs),

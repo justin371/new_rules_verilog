@@ -121,7 +121,7 @@ class HalLintLog(object):
 
         # Cadence uses cdata in their xml output, need to avoid lxml parser which strips it out
         soup = bs4.BeautifulSoup(text, "html.parser")
-        messages = soup.findAll(r'message')
+        messages = soup.find_all(r'message')
 
         for message in messages:
             self.issues.append(HalMessage.from_soup(message))
