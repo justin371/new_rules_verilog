@@ -1103,7 +1103,7 @@ class JobManagerLaunchTest(unittest.TestCase):
 
         simulation_summary = next(message for message in log.messages if message.startswith("Simulation Summary"))
         self.assertRegex(simulation_summary, r"\b1\s+0\s+0\s+1\b")
-        self.assertIn(("", "smoke", "0:00:01", "1", "", "", "1", "", ""), trd)
+        self.assertIn(("", "smoke", "0:00:01", "1", "", "", "1", "", "", "//pkg/tests:smoke"), trd)
 
     def test_category_stats_use_full_target_and_preserve_numeric_test_names(self):
         matching = _FakeTimedJob("reset_1", JobStatus.PASSED)

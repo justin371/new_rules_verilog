@@ -214,6 +214,15 @@ run_bounded_process([
         self.assertEqual("unit_tb__VCS__smoke__42__i2",
                          simmer._format_simulation_directory_name("unit_tb", "VCS", "smoke", 42, 2, ""))
 
+    def test_simulation_directory_name_hashes_only_overlong_components(self):
+        suffix = "_i1_report_rerun_20260720_120000_000001_0123456789abcdef"
+        directory_name = simmer._format_simulation_directory_name("unit_tb", "VCS", "t" * 220, 42, 1, suffix)
+
+        self.assertLessEqual(len(directory_name.encode("utf-8")), 255)
+        self.assertTrue(directory_name.endswith(suffix))
+        self.assertEqual(directory_name,
+                         simmer._format_simulation_directory_name("unit_tb", "VCS", "t" * 220, 42, 1, suffix))
+
     def test_vcs_wave_viewer_does_not_force_apex_or_lca_licenses(self):
         options = parse_args(["--simulator", "VCS", "--waves"])
         simulator = VcsSimulator(options, DummyRegressionConfig(), None)
@@ -2462,6 +2471,139 @@ run_bounded_process([
         self.assertEqual("87.50%", coverage["sys_tb"]["vendor_score"])
         self.assertEqual("76.00%", coverage["sys_tb"]["cf"]["Overall"])
 
+    def test_vcs_report_rerun_context_preserves_merged_coverage_baseline(self):
+        options = parse_args([
+            "--simulator",
+            "VCS",
+            "--cm",
+            "line",
+            "--vcs-runner",
+            "site-vcs --",
+        ])
+        rcfg = DummyRegressionConfig()
+        simulator = VcsSimulator(options, rcfg, None)
+        vcomp = SimpleNamespace(
+            name="sys_tb",
+            merged_coverage_dir=os.path.join(rcfg.regression_dir, "sys_tb__MERGED_COV.vdb"),
+            cov_work_dir=os.path.join(rcfg.regression_dir, "sys_tb__COV_WORK_VCS.vdb"),
+        )
+        Path(vcomp.merged_coverage_dir).mkdir()
+        rerun_script = Path(rcfg.regression_dir, "failed", "rerun.sh")
+        rerun_script.parent.mkdir()
+        rerun_script.write_text("#!/usr/bin/env bash\n", encoding="utf-8")
+        rerun_script.chmod(0o755)
+        failed_test = {
+            "bench": "sys_tb",
+            "test": "smoke_test",
+            "target": "//pkg:smoke_test",
+            "seed": 42,
+            "rerun_script": str(rerun_script),
+        }
+        missing_script_failure = dict(
+            failed_test,
+            test="launch_failed",
+            target="//pkg:launch_failed",
+            rerun_script=os.path.join(rcfg.regression_dir, "launch_failed", "rerun.sh"),
+        )
+
+        context = simulator.create_report_rerun_context(
+            {"//pkg:sys_tb": vcomp},
+            "20260719_120000_000001",
+            [failed_test, missing_script_failure],
+        )["sys_tb"]
+
+        self.assertTrue(Path(rcfg.regression_dir, "sys_tb__MERGED_COV.vdb").is_dir())
+        self.assertTrue(Path(context["coverage"]["baseline_db"]).is_dir())
+        self.assertEqual(["site-vcs", "--", "urg"], context["coverage"]["urg_argv"])
+        self.assertEqual([failed_test], context["failed_tests"])
+
+        simulator.discard_report_rerun_context({"sys_tb": context})
+
+        self.assertFalse(Path(context["coverage"]["artifact_dir"]).exists())
+        self.assertTrue(Path(rcfg.regression_dir, "sys_tb__MERGED_COV.vdb").is_dir())
+
+    def test_vcs_report_rerun_context_removes_partial_snapshots_after_copy_failure(self):
+        options = parse_args(["--simulator", "VCS", "--cm", "line"])
+        rcfg = DummyRegressionConfig()
+        simulator = VcsSimulator(options, rcfg, None)
+        report_time = "20260719_120000_000001"
+        vcomp_jobs = {}
+        failed_tests = []
+        for bench in ("first_tb", "second_tb"):
+            merged_coverage_dir = Path(rcfg.regression_dir, "{}__MERGED_COV.vdb".format(bench))
+            merged_coverage_dir.mkdir()
+            rerun_script = Path(rcfg.regression_dir, bench, "rerun.sh")
+            rerun_script.parent.mkdir()
+            rerun_script.write_text("#!/usr/bin/env bash\n", encoding="utf-8")
+            rerun_script.chmod(0o755)
+            vcomp_jobs[bench] = SimpleNamespace(name=bench, merged_coverage_dir=str(merged_coverage_dir))
+            failed_tests.append({
+                "bench": bench,
+                "test": "smoke_test",
+                "target": "//pkg:smoke_test",
+                "seed": 42,
+                "rerun_script": str(rerun_script),
+            })
+
+        real_copytree = shutil.copytree
+
+        for failure in (OSError("copy failed"), KeyboardInterrupt("copy interrupted")):
+            with self.subTest(failure=type(failure).__name__):
+
+                def copytree_with_second_failure(source, destination):
+                    if Path(source).name.startswith("second_tb"):
+                        raise failure
+                    return real_copytree(source, destination)
+
+                with mock.patch("lib.simulators.vcs.shutil.copytree", side_effect=copytree_with_second_failure), \
+                     self.assertRaisesRegex(type(failure), str(failure)):
+                    simulator.create_report_rerun_context(vcomp_jobs, report_time, failed_tests)
+
+                for vcomp_job in vcomp_jobs.values():
+                    self.assertFalse(Path(rcfg.regression_dir, "report_coverage", report_time, vcomp_job.name).exists())
+                    self.assertTrue(Path(vcomp_job.merged_coverage_dir).is_dir())
+
+    def test_vcs_report_rerun_context_is_unavailable_for_dynamic_vso_plan(self):
+        options = parse_args(["--simulator", "VCS", "--cm", "line", "--vso"])
+        simulator = VcsSimulator(options, DummyRegressionConfig(), None)
+
+        context = simulator.create_report_rerun_context(
+            {"//pkg:sys_tb": SimpleNamespace(
+                name="sys_tb",
+                merged_coverage_dir="/does/not/exist",
+            )},
+            "20260719_120000_000001",
+            [{
+                "bench": "sys_tb"
+            }],
+        )
+
+        self.assertEqual({}, context)
+
+    def test_vcs_exports_complete_report_rerun_vdb_snapshot(self):
+        options = parse_args(["--simulator", "VCS", "--cm", "line"])
+        simulator = VcsSimulator(options, DummyRegressionConfig(), None)
+        with tempfile.TemporaryDirectory() as temporary_dir:
+            coverage_root = Path(temporary_dir, "work.vdb")
+            source = coverage_root / "snps" / "coverage" / "db" / "testdata" / "smoke"
+            destination = Path(temporary_dir, "report", "supplement.vdb")
+            source.mkdir(parents=True)
+            (source / "test.info").write_text("coverage", encoding="utf-8")
+            test_job = SimpleNamespace(
+                coverage_db_path=str(source),
+                vcomper=SimpleNamespace(cov_work_dir=str(coverage_root)),
+            )
+
+            with mock.patch.dict(os.environ, {"SIMMER_REPORT_RERUN_COVERAGE_DIR": str(destination)}):
+                simulator.export_report_rerun_coverage(test_job)
+
+            self.assertTrue(source.is_dir())
+            self.assertEqual(
+                "coverage",
+                (destination / "snps" / "coverage" / "db" / "testdata" / "smoke" /
+                 "test.info").read_text(encoding="utf-8"),
+            )
+
     def test_rerun_preserves_original_options_without_forcing_waves(self):
         template = self._read_repo_file("bin/templates/rerun_template.sh.j2")
 
@@ -2488,6 +2630,24 @@ run_bounded_process([
         ])
 
         self.assertEqual(["--timeout", "42", "--simulator", "VCS"], options.reproduce_args)
+
+    def test_rerun_argument_filtering_omits_report_output_controls(self):
+        options = parse_args([
+            "--simulator",
+            "VCS",
+            "--report",
+            "--report-dir",
+            "/tmp/report",
+            "--no-compile",
+        ])
+
+        self.assertEqual(["--simulator", "VCS", "--no-compile"], options.reproduce_args)
+
+    def test_report_rerun_is_a_top_level_action_not_a_reproduced_option(self):
+        options = parse_args(["--rerun-report", "/tmp/report.rerun.json"])
+
+        self.assertEqual("/tmp/report.rerun.json", options.rerun_report)
+        self.assertEqual([], options.reproduce_args)
 
     def test_generated_helper_scripts_are_workspace_and_launcher_portable(self):
         sim_template = self._read_repo_file("bin/templates/sim_template.sh.j2")

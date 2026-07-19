@@ -121,6 +121,17 @@ py_test(
 )
 
 py_test(
+    name = "report_rerun_test",
+    srcs = ["report_rerun_test.py"],
+    data = ["//bin:regression_report_templates"],
+    deps = [
+        "//lib:regression_report",
+        "//lib:report_rerun",
+        "//lib/simulators:vcs",
+    ],
+)
+
+py_test(
     name = "runtime_options_test",
     timeout = "short",
     srcs = ["runtime_options_test.py"],
@@ -162,6 +173,7 @@ py_test(
         "//lib:parser_actions",
         "//lib:regression",
         "//lib:regression_report",
+        "//lib:report_rerun",
         "//lib:runtime_options",
         "//lib:rv_utils",
         "//lib:seed_plan",

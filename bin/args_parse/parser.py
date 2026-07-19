@@ -24,6 +24,13 @@ _RERUN_OMITTED_OPTIONS = {
     '--seed',
     '--global-tag',
     '--global-ntag',
+    '--report-dir',
+    '--rerun-report',
+}
+
+_RERUN_OMITTED_FLAGS = {
+    '--report',
+    '--no-report',
 }
 
 _HELP_WIDTH = 150
@@ -71,6 +78,9 @@ def reproduction_args(argv):
     while index < len(argv):
         argument = argv[index]
         option_name = argument.split('=', 1)[0]
+        if option_name in _RERUN_OMITTED_FLAGS:
+            index += 1
+            continue
         if option_name in _RERUN_OMITTED_OPTIONS:
             index += 1 if '=' in argument else 2
             continue

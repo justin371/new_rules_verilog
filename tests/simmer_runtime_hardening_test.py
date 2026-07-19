@@ -227,7 +227,8 @@ class SimmerRuntimeHardeningTest(unittest.TestCase):
         )
 
     def test_post_processing_interrupt_cleans_once_and_persists_failed_history(self):
-        for interrupted_phase in ("backend", "coverage", "report", "cleanup"):
+        for interrupted_phase in ("backend", "coverage", "report_constructor", "report", "report_maintenance",
+                                  "cleanup"):
             with self.subTest(interrupted_phase=interrupted_phase), tempfile.TemporaryDirectory() as project_dir:
                 run = {
                     "planned_tests": 0,
@@ -244,7 +245,7 @@ class SimmerRuntimeHardeningTest(unittest.TestCase):
                     no_run=False,
                     python_seed=None,
                     quit_count=1,
-                    report=interrupted_phase in ("coverage", "report"),
+                    report=interrupted_phase in ("coverage", "report_constructor", "report", "report_maintenance"),
                     report_dir=None,
                     seed=None,
                     simmer_argv=["simmer"],
@@ -262,9 +263,26 @@ class SimmerRuntimeHardeningTest(unittest.TestCase):
                 simulator.uses_dynamic_test_plan.return_value = False
                 simulator.create_regression_jobs.return_value = []
                 simulator.finalize_regression_workflow.return_value = False
-                simulator.coverage_enabled.return_value = interrupted_phase == "coverage"
+                report_phase = interrupted_phase in ("coverage", "report_constructor", "report", "report_maintenance")
+                simulator.coverage_enabled.return_value = report_phase
+                simulator.report_coverage_enabled.return_value = report_phase
                 manager = mock.Mock(shutdown_incomplete=False, interrupted_jobs=())
                 report = mock.Mock()
+                report.publication_committed = interrupted_phase == "report_maintenance"
+                report_factory = mock.Mock(return_value=report)
+                rerun_context = {}
+                if interrupted_phase in ("report_constructor", "report", "report_maintenance"):
+                    run["tests"] = [{
+                        "bench": "bench",
+                        "test": "test",
+                        "target": "//unit:test",
+                        "seed": 42,
+                        "iteration": 1,
+                        "sim_dir": project_dir,
+                        "status": "FAILED",
+                    }]
+                    rerun_context = {"bench": {"coverage": {"artifact_dir": "snapshot"}}}
+                    simulator.create_report_rerun_context.return_value = rerun_context
                 lifecycle_events = []
                 manager.flush_output_streams.side_effect = lambda: lifecycle_events.append("flush")
 
@@ -279,8 +297,10 @@ class SimmerRuntimeHardeningTest(unittest.TestCase):
                     simulator.finalize_regression_workflow.side_effect = KeyboardInterrupt
                 elif interrupted_phase == "coverage":
                     rcfg._profile_step.side_effect = KeyboardInterrupt
-                elif interrupted_phase == "report":
-                    report.prepare.side_effect = KeyboardInterrupt
+                elif interrupted_phase == "report_constructor":
+                    report_factory.side_effect = KeyboardInterrupt
+                elif interrupted_phase in ("report", "report_maintenance"):
+                    report.run.side_effect = KeyboardInterrupt
 
                 with mock.patch("simmer.os.uname", return_value=("", "test-host"), create=True), \
                      mock.patch("simmer.log", rcfg.log), \
@@ -289,9 +309,11 @@ class SimmerRuntimeHardeningTest(unittest.TestCase):
                      mock.patch("simmer.get_active_job_limit", return_value=1), \
                      mock.patch("simmer.job_lib.JobManager", return_value=manager), \
                      mock.patch("simmer.rv_utils.print_summary", return_value="/tmp/regression.log"), \
-                     mock.patch("simmer.rv_utils.get_report_header", return_value={"project_name": "unit"}), \
+                     mock.patch(
+                         "simmer.rv_utils.get_report_header",
+                         return_value={"project_name": "unit", "time": "20260719_120000_000001"}), \
                      mock.patch("simmer.rv_utils.print_simmer_profile"), \
-                     mock.patch("simmer.regression_report.RegressionReport", return_value=report), \
+                     mock.patch("simmer.regression_report.RegressionReport", report_factory), \
                      mock.patch("simmer.simmer_results.create_run", return_value=run), \
                      mock.patch("simmer.simmer_results.save_run") as save_run, \
                      mock.patch("simmer._IgnoreAdditionalInterrupts", return_value=mock.MagicMock()), \
@@ -308,6 +330,73 @@ class SimmerRuntimeHardeningTest(unittest.TestCase):
                     self.assertLess(lifecycle_events.index("flush"), lifecycle_events.index("cleanup"))
                 self.assertEqual("FAILED", run["status"])
                 save_run.assert_called_once_with(project_dir, run)
+                if interrupted_phase in ("report_constructor", "report"):
+                    simulator.discard_report_rerun_context.assert_called_once_with(rerun_context)
+                else:
+                    simulator.discard_report_rerun_context.assert_not_called()
+
+    def test_xrun_report_preserves_coverage_collection_side_effects(self):
+        with tempfile.TemporaryDirectory() as project_dir:
+            run = {
+                "planned_tests": 0,
+                "tests": [],
+                "compile": [],
+                "launch_failures": [],
+            }
+            options = SimpleNamespace(
+                category_cfg=None,
+                gui=False,
+                idle_print_seconds=60,
+                no_bazel=False,
+                no_compile=False,
+                no_run=False,
+                python_seed=None,
+                quit_count=1,
+                report=True,
+                report_dir=None,
+                seed=None,
+                simmer_argv=["simmer"],
+            )
+            rcfg = SimpleNamespace(
+                all_vcomp={},
+                deferred_messages=[],
+                log=mock.Mock(warn_count=0, error_count=0, handlers=[]),
+                proj_dir=project_dir,
+                regression_dir=project_dir,
+            )
+            rcfg._profile_step = mock.Mock(return_value=False)
+            simulator = mock.Mock()
+            simulator.get_name.return_value = "xrun"
+            simulator.uses_dynamic_test_plan.return_value = False
+            simulator.create_regression_jobs.return_value = []
+            simulator.finalize_regression_workflow.return_value = False
+            simulator.coverage_enabled.return_value = True
+            simulator.report_coverage_enabled.return_value = False
+            simulator.collect_coverage_data.return_value = {"bench": {"total": "90%"}}
+            manager = mock.Mock(shutdown_incomplete=False, interrupted_jobs=())
+            report = mock.Mock()
+
+            with mock.patch("simmer.os.uname", return_value=("", "test-host"), create=True), \
+                 mock.patch("simmer.log", rcfg.log), \
+                 mock.patch("simmer.resolve_run_simulator"), \
+                 mock.patch("simmer.get_simulator", return_value=simulator), \
+                 mock.patch("simmer.get_active_job_limit", return_value=1), \
+                 mock.patch("simmer.job_lib.JobManager", return_value=manager), \
+                 mock.patch("simmer.rv_utils.print_summary", return_value="/tmp/regression.log"), \
+                 mock.patch("simmer.rv_utils.get_report_header", return_value={"project_name": "unit"}), \
+                 mock.patch("simmer.rv_utils.print_simmer_profile"), \
+                 mock.patch("simmer.regression_report.RegressionReport", return_value=report), \
+                 mock.patch("simmer.simmer_results.create_run", return_value=run), \
+                 mock.patch("simmer.simmer_results.finalize_run"), \
+                 mock.patch("simmer.simmer_results.save_run"), \
+                 self.assertRaises(SystemExit) as raised:
+                simmer.main(rcfg, options)
+
+            self.assertEqual(0, raised.exception.code)
+            simulator.collect_coverage_data.assert_called_once_with({})
+            report_header, _trd, report_coverage, _category_stats = report.run.call_args.args[:4]
+            self.assertFalse(report_header["coverage_enabled"])
+            self.assertEqual({}, report_coverage)
 
     def test_noninteractive_interrupt_stops_without_prompting(self):
         rcfg = SimpleNamespace(log=mock.Mock(handlers=[]))
@@ -479,6 +568,42 @@ class SimmerRuntimeHardeningTest(unittest.TestCase):
             simulator.cleanup_test_coverage.assert_called_once_with(test_job)
             simulator.get_wave_view_command.assert_not_called()
             write_viewer.assert_not_called()
+
+    def test_report_rerun_coverage_exports_before_runtime_lock_release(self):
+        with tempfile.TemporaryDirectory() as job_dir:
+            log_path = Path(job_dir) / "stdout.log"
+            log_path.write_text("simulation completed\n", encoding="utf-8")
+            rcfg = SimpleNamespace(
+                log=mock.Mock(),
+                options=SimpleNamespace(waves=None),
+                simmer_results_run={},
+                table_format=lambda *_args, **_kwargs: "result",
+                tidy=False,
+            )
+            events = []
+            simulator = mock.Mock()
+            simulator.export_report_rerun_coverage.side_effect = lambda *_args: events.append("export")
+            simulator.should_spawn_test_job.return_value = False
+            test_job = simmer.TestJob.__new__(simmer.TestJob)
+            test_job._jobstatus = simmer.JobStatus.NOT_STARTED
+            test_job._log_path = str(log_path)
+            test_job.error_message = None
+            test_job.iteration = 1
+            test_job.job_dir = job_dir
+            test_job.job_lib = SimpleNamespace(returncode=0, manager=mock.Mock())
+            test_job.job_start_time = datetime.datetime.now()
+            test_job.job_stop_time = None
+            test_job.log = rcfg.log
+            test_job.name = "test"
+            test_job.rcfg = rcfg
+            test_job.simulator = simulator
+            test_job.vcomper = SimpleNamespace(name="tb")
+            test_job._release_run_directory_lock = lambda: events.append("release")
+
+            with mock.patch("simmer.log", rcfg.log), mock.patch("simmer.simmer_results.record_test_job"):
+                test_job.post_run()
+
+            self.assertEqual(["export", "release"], events)
 
     @unittest.skipUnless(os.name == "posix", "POSIX advisory-lock behavior")
     def test_shared_runtime_lock_serializes_identical_regressions(self):

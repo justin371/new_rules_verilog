@@ -240,6 +240,12 @@ def add_regression_arguments(parser):
         type=int,
         help='Print retained simulation records and exit. With no value show 10; otherwise require a positive count.')
     regression_group.add_argument(
+        '--rerun-report',
+        metavar='MANIFEST',
+        default=None,
+        help=('Rerun failed VCS tests recorded by a regression report manifest, merge successful rerun coverage '
+              'into its preserved baseline, and publish a new revision report.'))
+    regression_group.add_argument(
         '--no-stdout',
         default=False,
         action='store_true',

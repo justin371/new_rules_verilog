@@ -3,6 +3,7 @@ import json
 import os
 import stat
 import logging
+from pathlib import Path
 import platform
 import re
 import shlex
@@ -47,6 +48,31 @@ def detect_allocated_cpus(environment=None):
         affinity_getter=getattr(os, "sched_getaffinity", None),
         host_cpu_count=os.cpu_count(),
     )
+
+
+def merge_report_rerun_coverage(coverage, urg_argv, baseline_db, supplements, artifact_dir, logger):
+    revised_baseline = artifact_dir / "baseline.vdb"
+    report_dir = artifact_dir / "urg_report"
+    command = list(urg_argv) + ["-full64", "-dir", str(baseline_db)]
+    command.extend(str(path) for path in supplements)
+    command.extend(["-dbname", str(revised_baseline), "-flex_merge", "union"])
+    if coverage.get("urg_parallel"):
+        command.append("-parallel")
+    if coverage.get("urg_show_tests"):
+        command.extend(["-show", "tests"])
+    command.extend(["-report", str(report_dir)])
+
+    result = run_bounded_process(command, capture_output=True, text=True)
+    if result.returncode != 0:
+        logger.error("VCS coverage supplement merge failed:\n%s\n%s", result.stdout, result.stderr)
+        raise RuntimeError("VCS coverage supplement merge failed")
+    if not revised_baseline.is_dir():
+        raise RuntimeError("VCS coverage supplement merge did not produce baseline.vdb")
+    metrics = parse_coverage_summary(report_dir / "dashboard.txt")
+    if not metrics:
+        raise RuntimeError("VCS coverage supplement merge did not produce dashboard.txt")
+    shutil.rmtree(artifact_dir / "supplements", ignore_errors=True)
+    return revised_baseline, aggregate_coverage_metrics(metrics)
 
 
 class VcsSimulator(SimulatorInterface):
@@ -190,6 +216,9 @@ class VcsSimulator(SimulatorInterface):
 
     def coverage_enabled(self):
         return bool(self.options.cm)
+
+    def report_coverage_enabled(self) -> bool:
+        return self.coverage_enabled()
 
     def get_compile_template_context(self, vcomp_job):
         vso_workdir = self.vso_workflow.workdir() if self.options.vso_cbv else ''
@@ -580,6 +609,22 @@ class VcsSimulator(SimulatorInterface):
         if path:
             shutil.rmtree(path, ignore_errors=True)
 
+    def export_report_rerun_coverage(self, test_job):
+        destination = os.environ.get("SIMMER_REPORT_RERUN_COVERAGE_DIR")
+        if not destination:
+            return
+        test_data = Path(test_job.coverage_db_path)
+        if not test_data.is_dir():
+            raise FileNotFoundError("Successful VCS report rerun did not produce coverage: {}".format(test_data))
+        source = Path(test_job.vcomper.cov_work_dir)
+        if not source.is_dir():
+            raise FileNotFoundError("Successful VCS report rerun did not produce a VDB: {}".format(source))
+        destination_path = Path(destination)
+        if destination_path.exists():
+            raise FileExistsError("VCS report rerun coverage destination already exists: {}".format(destination_path))
+        destination_path.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copytree(source, destination_path)
+
     def collect_coverage_data(self, vcomp_jobs):
         if not self.options.cm:
             return {vcomp.split(":")[-1]: aggregate_coverage_metrics({}) for vcomp in vcomp_jobs}
@@ -589,6 +634,71 @@ class VcsSimulator(SimulatorInterface):
             metrics = parse_coverage_summary(os.path.join(report_dir, "dashboard.txt")) if report_dir else {}
             coverage[vcomp.split(":")[-1]] = aggregate_coverage_metrics(metrics)
         return coverage
+
+    def create_report_rerun_context(self, vcomp_jobs, report_time, failed_tests):
+        if not self.options.cm or not failed_tests or self.uses_dynamic_test_plan():
+            return {}
+        failed_by_bench = {}
+        for failed_test in failed_tests:
+            rerun_script = failed_test["rerun_script"]
+            if (Path(rerun_script).name != "rerun.sh" or not os.path.isfile(rerun_script)
+                    or not os.access(rerun_script, os.X_OK)):
+                log.warning(
+                    "Skipping report rerun for %s: executable rerun.sh is unavailable at %s",
+                    failed_test["test"],
+                    rerun_script,
+                )
+                continue
+            failed_by_bench.setdefault(failed_test["bench"], []).append(failed_test)
+
+        context = {}
+        created_artifact_dirs = []
+        try:
+            for vcomp_job in vcomp_jobs.values():
+                bench_failures = failed_by_bench.get(vcomp_job.name, [])
+                if not bench_failures:
+                    continue
+                merged_coverage_dir = Path(vcomp_job.merged_coverage_dir)
+                if not merged_coverage_dir.is_dir():
+                    raise FileNotFoundError("VCS merged coverage is unavailable: {}".format(merged_coverage_dir))
+                artifact_dir = Path(self.rcfg.regression_dir, "report_coverage", report_time, vcomp_job.name)
+                if artifact_dir.exists():
+                    raise FileExistsError("VCS report coverage snapshot already exists: {}".format(artifact_dir))
+                artifact_dir.mkdir(parents=True)
+                created_artifact_dirs.append(artifact_dir)
+                baseline_db = artifact_dir / "baseline.vdb"
+                shutil.copytree(merged_coverage_dir, baseline_db)
+                context[vcomp_job.name] = {
+                    "project_dir": self.rcfg.proj_dir,
+                    "regression_dir": self.rcfg.regression_dir,
+                    "coverage": {
+                        "artifact_dir": str(artifact_dir),
+                        "baseline_db": str(baseline_db),
+                        "urg_argv": shlex.split(self.get_tool_runner()) + ["urg"],
+                        "urg_parallel": self.options.vcs_urg_parallel,
+                        "urg_show_tests": self.options.vcs_urg_show_tests,
+                    },
+                    "failed_tests": bench_failures,
+                }
+        except (OSError, ValueError, KeyboardInterrupt):
+            for artifact_dir in created_artifact_dirs:
+                shutil.rmtree(artifact_dir, ignore_errors=True)
+            raise
+        return context
+
+    def discard_report_rerun_context(self, rerun_context):
+        coverage_root = Path(self.rcfg.regression_dir, "report_coverage").resolve()
+        for bench_context in rerun_context.values():
+            artifact_dir = bench_context.get("coverage", {}).get("artifact_dir")
+            if not artifact_dir:
+                continue
+            candidate = Path(artifact_dir).resolve()
+            try:
+                relative_candidate = candidate.relative_to(coverage_root)
+            except ValueError:
+                continue
+            if len(relative_candidate.parts) == 2:
+                shutil.rmtree(candidate, ignore_errors=True)
 
     def get_log_parsing_info(self):
         return {'warning_regex': r"(?i)^(?:\s*(?:Warning|Error)(?:-|\s*:)|.+:\s*(?:warning|error):).*"}
