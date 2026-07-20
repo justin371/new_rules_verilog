@@ -6,7 +6,10 @@ load("@rules_verilog//verilog/private:rtl.bzl", "create_flist_content")
 # buildifier: disable=bzl-visibility
 load("@rules_verilog//verilog/private:verilog.bzl", "ShellInfo", "VerilogInfo")
 
-SynthFlistInfo = provider(fields = {"flist": "Generated synthesis filelist"})
+SynthFlistInfo = provider(
+    "Generated synthesis filelist for compatibility validation.",
+    fields = {"flist": "Generated synthesis filelist"},
+)
 
 def _synth_aspect_impl(target, ctx):
     if VerilogInfo not in target or not hasattr(ctx.rule.attr, "modules"):
