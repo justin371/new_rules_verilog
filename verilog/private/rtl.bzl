@@ -33,7 +33,7 @@ def _resolve_label_default_file(simulator, selected_label, xrun_default_label, x
         return vcs_default_file
     return xrun_default_file
 
-def create_flist_content(ctx, gumi_path, allow_library_discovery, makelib = ""):
+def create_flist_content(ctx, gumi_path, allow_library_discovery, makelib = "", no_synth = False):
     """Create the content of a '.f' file.
 
     Args:
@@ -49,13 +49,16 @@ def create_flist_content(ctx, gumi_path, allow_library_discovery, makelib = ""):
         handle -y correctly when invoked many times. As a workaround for these
         tools, setting allow_library_discovery to false will put all module
         files and library files directly onto the command line.
+      no_synth: When true, omit synthesizable source entries for downstream
+        synthesis aspects. Simulation callers leave this false and retain the
+        complete library.
     Returns:
       List of strings representing flist content.
     """
     flist_content = []
 
     # if using makelib, start here
-    if len(makelib):
+    if len(makelib) and not no_synth:
         flist_content.append("-makelib")
         flist_content.append(makelib)
 
@@ -69,25 +72,26 @@ def create_flist_content(ctx, gumi_path, allow_library_discovery, makelib = ""):
 
     flist_content.append(gumi_path)
 
-    if allow_library_discovery:
-        for d in libdir:
-            if d == "":
-                d = "."
-            flist_content.append("-y {}".format(d))
-    else:
-        flist_content += [runfiles_relative_short_path(f) for f in ctx.files.modules]
-
-    for f in ctx.files.lib_files:
+    if not no_synth:
         if allow_library_discovery:
-            flist_content.append("-v {}".format(runfiles_relative_short_path(f)))
+            for d in libdir:
+                if d == "":
+                    d = "."
+                flist_content.append("-y {}".format(d))
         else:
+            flist_content += [runfiles_relative_short_path(f) for f in ctx.files.modules]
+
+        for f in ctx.files.lib_files:
+            if allow_library_discovery:
+                flist_content.append("-v {}".format(runfiles_relative_short_path(f)))
+            else:
+                flist_content.append(runfiles_relative_short_path(f))
+
+        for f in ctx.files.direct:
             flist_content.append(runfiles_relative_short_path(f))
 
-    for f in ctx.files.direct:
-        flist_content.append(runfiles_relative_short_path(f))
-
     # if using makelib, terminate here
-    if len(makelib):
+    if len(makelib) and not no_synth:
         flist_content.append("-endlib")
 
     flist_content.append("")
