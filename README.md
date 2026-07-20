@@ -50,7 +50,7 @@ test --action_env=LM_LICENSE_FILE
 For Synopsys VCS flows, you can add a named Bazel config in `.bazelrc` and invoke it explicitly. Example:
 
 ```bazelrc
-build:vcs --@rules_verilog//:verilog_rtl_lint_test_command="runmod -t vcs --"
+build:vcs --@rules_verilog//:verilog_rtl_lint_test_command_vcs="runmod vcs -- vcs"
 ```
 
 Then run a VCS-enabled target with:
@@ -59,7 +59,7 @@ Then run a VCS-enabled target with:
 bazel build --config=vcs //tests/vcs_filelist_validation:dv_tb_vcs
 ```
 
-Note: `--config=vcs` only selects the VCS/Verdi wrapper commands. Targets that need VCS-specific behavior must still set `simulator = "VCS"`.
+Note: `--config=vcs` only selects the VCS/Verdi wrapper commands. Targets that need VCS-specific behavior must still set `simulator = "VCS"`. The one-step `verilog_rtl_unit_test` rule is XRUN-only, so there is no `verilog_rtl_unit_test_command_vcs` build setting.
 
 For `simmer` VCS runs, `--simulator VCS` is enough. The VCS, `simv`, and Verdi launcher prefix defaults to `runmod vcs --`.
 
