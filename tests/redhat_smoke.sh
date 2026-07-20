@@ -21,6 +21,7 @@ bazel test \
   --python_path="${python_path}" \
   --test_output=errors \
   //:buildifier_diff //tests/... //examples/dpi:dpi_c_test
+bazel build --config=vcs //examples/apb:test //examples/dpi:test
 bazel run //:buildifier_lint
 ./tests/doc_test.sh
 bash ./tests/external_setup_smoke_test.sh

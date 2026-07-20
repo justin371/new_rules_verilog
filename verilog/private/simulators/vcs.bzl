@@ -1,6 +1,78 @@
 """VCS backend helpers for DV rules."""
 
-load("//verilog/private:verilog.bzl", "VerilogInfo", "flists_to_arguments", "runfiles_relative_short_path")
+load("//verilog/private:verilog.bzl", "ToolEncapsulationInfo", "VerilogInfo", "flists_to_arguments", "get_transitive_srcs", "merge_default_runfiles", "runfiles_relative_short_path")
+
+def _use_vcs_default(selected_file, xrun_default_file, vcs_default_file):
+    if selected_file.short_path == xrun_default_file.short_path:
+        return vcs_default_file
+    return selected_file
+
+def vcs_dv_unit_test_impl(ctx):
+    trans_srcs = get_transitive_srcs([], ctx.attr.deps, VerilogInfo, "transitive_sources")
+    flists = get_transitive_srcs(
+        [],
+        ctx.attr.deps,
+        VerilogInfo,
+        "transitive_vcs_flists",
+        fallback_attr_name = "transitive_flists",
+    )
+    dpi = get_transitive_srcs([], ctx.attr.deps, VerilogInfo, "transitive_dpi")
+    flists_list = flists.to_list()
+    default_sim_opts = _use_vcs_default(
+        ctx.file.default_sim_opts,
+        ctx.file._default_sim_opts_xrun,
+        ctx.file._default_sim_opts_vcs,
+    )
+    unit_test_template = _use_vcs_default(
+        ctx.file.ut_sim_template,
+        ctx.file._ut_sim_template_xrun,
+        ctx.file._ut_sim_template_vcs,
+    )
+
+    compile_args = ctx.actions.declare_file(ctx.label.name + "_compile_args.f")
+    ctx.actions.expand_template(
+        template = ctx.file._compile_args_template_vcs,
+        output = compile_args,
+        substitutions = {
+            "{COMPILE_ARGS}": "\n".join(ctx.attr.sim_args + ctx.attr.compile_args),
+            "{DEFINES}": "",
+            "{FLISTS}": "\n".join(["-file {}".format(runfiles_relative_short_path(f)) for f in flists_list]),
+        },
+    )
+
+    runtime_args = ctx.actions.declare_file(ctx.label.name + "_runtime_args.f")
+    ctx.actions.expand_template(
+        template = default_sim_opts,
+        output = runtime_args,
+        substitutions = {
+            "{DPI_LIBS}": "",
+            "{RUNTIME_ARGS}": "",
+        },
+    )
+
+    simulator_command = ctx.attr._command_override_vcs[ToolEncapsulationInfo].command
+    ctx.actions.expand_template(
+        template = unit_test_template,
+        output = ctx.outputs.out,
+        substitutions = {
+            "{SIMULATOR_COMMAND}": simulator_command,
+            "{COMPILE_ARGS_FILE}": runfiles_relative_short_path(compile_args),
+            "{DEFAULT_SIM_OPTS}": runfiles_relative_short_path(runtime_args),
+            "{DPI_LIBS}": flists_to_arguments(ctx.attr.deps, VerilogInfo, "transitive_dpi", "-sv_lib", "", "vcs"),
+            "{RUN_ARGS}": " ".join(ctx.attr.run_args),
+        },
+        is_executable = True,
+    )
+
+    runfiles = merge_default_runfiles(
+        ctx,
+        files = flists_list + trans_srcs.to_list() + dpi.to_list() + [compile_args, runtime_args],
+        targets = ctx.attr.deps + [ctx.attr.default_sim_opts],
+    )
+    return [DefaultInfo(
+        runfiles = runfiles,
+        executable = ctx.outputs.out,
+    )]
 
 def _sanitize_defines(defines):
     sanitized = {}

@@ -1,0 +1,16 @@
+-full64
+-sverilog
+-licqueue
+-V
+-lca
++libext+.sv+.svh+.v+.vh+.vams+.vp+.svp
+-timescale=1ns/1ps
+-Mupdate
++define+TBV
++define+VCS
++define+TIMESCALE_STEP_FS=1000
++define+TIMESCALE_PREC_FS=1000
+
+{DEFINES}
+{FLISTS}
+{POST_FLIST_ARGS}

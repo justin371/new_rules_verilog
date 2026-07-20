@@ -141,10 +141,26 @@ verilog_dv_unit_test(
     deps = [":unit_test_top"],
 )
 
+verilog_dv_unit_test(
+    name = "dv_unit_vcs",
+    compile_args = ["+define+DV_UNIT_VCS"],
+    run_args = ["+DV_UNIT_RUNTIME"],
+    simulator = "VCS",
+    tags = ["manual"],
+    deps = [":unit_test_top"],
+)
+
 verilog_rtl_unit_test(
     name = "rtl_unit_xrun",
     data = [":runtime_tool"],
     simulator = "XRUN",
+    tags = ["manual"],
+    deps = [":unit_test_top"],
+)
+
+verilog_rtl_unit_test(
+    name = "rtl_unit_vcs",
+    simulator = "VCS",
     tags = ["manual"],
     deps = [":unit_test_top"],
 )
@@ -166,10 +182,12 @@ py_test(
         ":dv_tb_xrun_ccf",
         ":dv_tb_xrun_ccf_compile_args.f",
         ":dv_tb_xrun_ccf_tb_options.py",
+        ":dv_unit_vcs",
         ":dv_unit_xrun",
         ":no_synth_compat",
         ":rtl_lint_vcs",
         ":rtl_lint_vcs_cmds.tcl",
+        ":rtl_unit_vcs",
         ":rtl_unit_xrun",
         ":synth_flist_compat",
         ":unit_test_top",
@@ -202,7 +220,11 @@ py_test(
         "//vendors/cadence:verilog_rtl_unit_test_svunit.sh.template",
         "//vendors/real_intent:verilog_rtl_lint_test.sh.template",
         "//vendors/synopsys:verilog_dv_tb_compile_args.f.template",
+        "//vendors/synopsys:verilog_dv_unit_test.sh.template",
         "//vendors/synopsys:verilog_rtl_lint_test.sh.template",
+        "//vendors/synopsys:verilog_rtl_unit_test.sh.template",
+        "//vendors/synopsys:verilog_rtl_unit_test_compile_args.f.template",
+        "//vendors/synopsys:verilog_rtl_unit_test_waves.tcl.template",
         "//verilog/private:dv.bzl",
         "//verilog/private:rtl.bzl",
         "//verilog/private:simulators/pldm.bzl",

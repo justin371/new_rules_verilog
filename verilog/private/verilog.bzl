@@ -33,6 +33,13 @@ verilog_tool_encapsulation = rule(
     build_setting = config.string(flag = True),
 )
 
+def resolve_unit_test_simulator(explicit_simulator, configured_simulator):
+    """Resolve a one-step unit-test simulator, preserving explicit rule values."""
+    simulator = explicit_simulator or configured_simulator[ToolEncapsulationInfo].command
+    if simulator not in ["XRUN", "VCS"]:
+        fail("unit-test simulator must be one of ['XRUN', 'VCS'], got '{}'".format(simulator))
+    return simulator
+
 def gather_shell_defines(shells):
     defines = {}
     for shell in shells:

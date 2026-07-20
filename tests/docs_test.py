@@ -49,13 +49,14 @@ class DocsTest(unittest.TestCase):
         self.assertNotIn("Lightelligence/rules_verilog", readme)
         self.assertNotIn("LM_LICENESE_FILE", readme)
 
-    def test_vcs_config_uses_declared_lint_setting(self):
+    def test_vcs_config_uses_declared_simulator_settings(self):
         readme = (REPO_ROOT / "README.md").read_text(encoding="utf-8")
-        expected_setting = "verilog_rtl_lint_test_command_vcs"
-        unsupported_setting = "verilog_rtl_unit_test_command_vcs"
-
-        self.assertIn("--@rules_verilog//:{}=".format(expected_setting), readme)
-        self.assertNotIn("--@rules_verilog//:{}=".format(unsupported_setting), readme)
+        for setting in (
+                "verilog_unit_test_simulator",
+                "verilog_dv_unit_test_command_vcs",
+                "verilog_rtl_lint_test_command_vcs",
+                "verilog_rtl_unit_test_command_vcs"):
+            self.assertIn("--@rules_verilog//:{}=".format(setting), readme)
 
 
 if __name__ == "__main__":

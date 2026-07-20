@@ -1,7 +1,7 @@
 # vim: set ft=bzl :
 """Rules to gather and compile RTL."""
 
-load(":verilog.bzl", "CUSTOM_SHELL", "ShellInfo", "ToolEncapsulationInfo", "VerilogInfo", "gather_shell_defines", "get_transitive_srcs", "merge_default_runfiles", "runfiles_relative_short_path")
+load(":verilog.bzl", "CUSTOM_SHELL", "ShellInfo", "ToolEncapsulationInfo", "VerilogInfo", "gather_shell_defines", "get_transitive_srcs", "merge_default_runfiles", "resolve_unit_test_simulator", "runfiles_relative_short_path")
 
 _SHELLS_DOC = """List of verilog_rtl_shell Labels.
 For each Label, a gumi define will be placed on the command line to use this shell instead of the original module.
@@ -382,11 +382,16 @@ def verilog_rtl_shell(
 def _verilog_rtl_unit_test_impl(ctx):
     trans_srcs = get_transitive_srcs([], ctx.attr.shells + ctx.attr.deps, VerilogInfo, "transitive_sources")
     srcs_list = trans_srcs.to_list()
-    flists = get_transitive_srcs([], ctx.attr.shells + ctx.attr.deps, VerilogInfo, "transitive_flists")
+    simulator = resolve_unit_test_simulator(ctx.attr.simulator, ctx.attr._unit_test_simulator)
+    flist_field = "transitive_vcs_flists" if simulator == "VCS" else "transitive_flists"
+    flists = get_transitive_srcs(
+        [],
+        ctx.attr.shells + ctx.attr.deps,
+        VerilogInfo,
+        flist_field,
+        fallback_attr_name = "transitive_flists" if simulator == "VCS" else None,
+    )
     flists_list = flists.to_list()
-    simulator = ctx.attr.simulator
-    if simulator == "VCS":
-        fail("verilog_rtl_unit_test {} does not support simulator = 'VCS'. Use the VCS two-step flow via verilog_dv_tb + simmer instead.".format(ctx.label))
 
     top = ""
     for dep in ctx.attr.deps:
@@ -397,22 +402,41 @@ def _verilog_rtl_unit_test_impl(ctx):
     if top == "":
         fail("verilog_rtl_unit_test {} could not determine the top module from the target's dependencies".format(ctx.label))
 
-    pre_fa = ["    \\"]
+    pre_fa = []
     for key, value in gather_shell_defines(ctx.attr.shells).items():
-        pre_fa.append("  -define {}{} \\".format(key, value))
+        if simulator == "VCS":
+            pre_fa.append("+define+{}{}".format(key, value))
+        else:
+            pre_fa.append("-define {}{}".format(key, value))
 
-    if len(ctx.attr.pre_flist_args):
-        pre_fa.extend(["{} \\".format(pfa) for pfa in ctx.attr.pre_flist_args])
-
-    pre_fa.append("   \\")
+    pre_fa.extend(ctx.attr.pre_flist_args)
+    template_pre_fa = " ".join(pre_fa)
+    if simulator == "XRUN":
+        template_pre_fa = "\n".join(["    \\"] + ["  {} \\".format(arg) for arg in pre_fa] + ["   \\"])
 
     post_fa = " ".join(ctx.attr.post_flist_args)
 
-    ut_sim_template = ctx.file.ut_sim_template
-    ut_sim_waves_template = ctx.file.ut_sim_waves_template
+    ut_sim_template = _resolve_unit_test_default_file(
+        simulator,
+        ctx.file.ut_sim_template,
+        ctx.file._ut_sim_template_xrun,
+        ctx.file._ut_sim_template_vcs,
+    )
+    if simulator == "VCS" and ctx.file.ut_sim_template.short_path == ctx.file._ut_sim_template_svunit_xrun.short_path:
+        fail("verilog_rtl_unit_test {} uses the Xcelium-only SVUnit template; set simulator = 'XRUN' or provide a VCS-compatible custom template".format(ctx.label))
+    ut_sim_waves_template = _resolve_unit_test_default_file(
+        simulator,
+        ctx.file.ut_sim_waves_template,
+        ctx.file._ut_sim_waves_template_xrun,
+        ctx.file._ut_sim_waves_template_vcs,
+    )
     simulator_command = ctx.attr.command_override[ToolEncapsulationInfo].command
+    if simulator == "VCS" and ctx.attr.command_override.label == ctx.attr._command_override_xrun.label:
+        simulator_command = ctx.attr._command_override_vcs[ToolEncapsulationInfo].command
     wave_viewer_command = ctx.attr.wave_viewer_command[ToolEncapsulationInfo].command
-    filelist_flag = "-f"
+    if simulator == "VCS" and ctx.attr.wave_viewer_command.label == ctx.attr._wave_viewer_command_xrun.label:
+        wave_viewer_command = ctx.attr._wave_viewer_command_vcs[ToolEncapsulationInfo].command
+    filelist_flag = "-file" if simulator == "VCS" else "-f"
 
     waves_cmd = ctx.actions.declare_file(ctx.label.name + "_waves.tcl")
     ctx.actions.expand_template(
@@ -423,6 +447,20 @@ def _verilog_rtl_unit_test_impl(ctx):
         },
     )
 
+    compile_args = None
+    if simulator == "VCS":
+        compile_args = ctx.actions.declare_file(ctx.label.name + "_compile_args.f")
+        ctx.actions.expand_template(
+            template = ctx.file._compile_args_template_vcs,
+            output = compile_args,
+            substitutions = {
+                "{DEFINES}": "\n".join(pre_fa),
+                "{FLISTS}": "\n".join(["{} {}".format(filelist_flag, runfiles_relative_short_path(f)) for f in flists_list]),
+                "{POST_FLIST_ARGS}": post_fa,
+                "{TOP_BASE_NAME}": top_base_name,  # buildifier: disable=uninitialized
+            },
+        )
+
     ctx.actions.expand_template(
         template = ut_sim_template,
         output = ctx.outputs.executable,
@@ -431,15 +469,20 @@ def _verilog_rtl_unit_test_impl(ctx):
             "{WAVE_VIEWER_COMMAND}": wave_viewer_command,
             "{FLISTS}": " ".join(["{} {}".format(filelist_flag, runfiles_relative_short_path(f)) for f in flists_list]),
             "{TOP}": top,
-            "{PRE_FLIST_ARGS}": "\n".join(pre_fa),
+            "{PRE_FLIST_ARGS}": template_pre_fa,
             "{POST_FLIST_ARGS}": post_fa,
+            "{COMPILE_ARGS_FILE}": runfiles_relative_short_path(compile_args) if compile_args else "",
             "{WAVES_RENDER_CMD_PATH}": runfiles_relative_short_path(waves_cmd),
         },
+        is_executable = True,
     )
 
+    generated_files = [waves_cmd]
+    if compile_args:
+        generated_files.append(compile_args)
     runfiles = merge_default_runfiles(
         ctx,
-        files = flists_list + srcs_list + ctx.files.data + ctx.files.shells + [waves_cmd],
+        files = flists_list + srcs_list + ctx.files.data + ctx.files.shells + generated_files,
         targets = ctx.attr.shells + ctx.attr.deps + ctx.attr.data,
     )
     return [DefaultInfo(
@@ -457,6 +500,7 @@ verilog_rtl_unit_test = rule(
     To launch the waveform viewer after the test completes, run the following: 'bazel run <target> -- --launch &'.
     To render a database without launching a viewer, run the following: 'bazel run <target> -- --waves'.
     Any other unknown options will be passed directly to the simulator, for example: 'bazel run <target> -- --waves +my_arg=4'.
+    Wave rendering is currently available only with XRUN; VCS wave commands are retained but disabled.
 
     Typically, an additional verilog_rtl_library containing 'unit_test_top.sv'
     is created. This unit_test_top will be dependent on the DUT top, and will
@@ -470,9 +514,8 @@ verilog_rtl_unit_test = rule(
                   "All Labels specified here must provide a VerilogInfo provider.",
         ),
         "simulator": attr.string(
-            default = "XRUN",
-            values = ["XRUN", "VCS"],
-            doc = "Simulator to use for this one-step RTL unit test. Only XRUN is supported; VCS uses verilog_dv_tb + simmer.\n",
+            values = ["", "XRUN", "VCS"],
+            doc = "Simulator to use for this one-step RTL unit test. When omitted, verilog_unit_test_simulator selects XRUN or VCS.\n",
         ),
         "ut_sim_template": attr.label(
             allow_single_file = True,
@@ -494,17 +537,56 @@ verilog_rtl_unit_test = rule(
                   "You must either write your own waves script or use the SVUnit waves template: " +
                   "@rules_verilog//vendors/cadence:verilog_rtl_unit_test_svunit_waves.tcl.template\n",
         ),
+        "_ut_sim_template_xrun": attr.label(
+            allow_single_file = True,
+            default = Label("@rules_verilog//vendors/cadence:verilog_rtl_unit_test.sh.template"),
+        ),
+        "_ut_sim_template_vcs": attr.label(
+            allow_single_file = True,
+            default = Label("@rules_verilog//vendors/synopsys:verilog_rtl_unit_test.sh.template"),
+        ),
+        "_ut_sim_template_svunit_xrun": attr.label(
+            allow_single_file = True,
+            default = Label("@rules_verilog//vendors/cadence:verilog_rtl_unit_test_svunit.sh.template"),
+        ),
+        "_ut_sim_waves_template_xrun": attr.label(
+            allow_single_file = True,
+            default = Label("@rules_verilog//vendors/cadence:verilog_rtl_unit_test_waves.tcl.template"),
+        ),
+        "_ut_sim_waves_template_vcs": attr.label(
+            allow_single_file = True,
+            default = Label("@rules_verilog//vendors/synopsys:verilog_rtl_unit_test_waves.tcl.template"),
+        ),
+        "_compile_args_template_vcs": attr.label(
+            allow_single_file = True,
+            default = Label("@rules_verilog//vendors/synopsys:verilog_rtl_unit_test_compile_args.f.template"),
+        ),
         "command_override": attr.label(
             default = Label("@rules_verilog//:verilog_rtl_unit_test_command"),
             doc = "Allows custom override of simulator command in the event of wrapping via modulefiles.\n" +
                   "Example override in project's .bazelrc:\n" +
                   '  build --@rules_verilog//:verilog_rtl_unit_test_command="runmod -t xrun --"',
         ),
+        "_command_override_xrun": attr.label(
+            default = Label("@rules_verilog//:verilog_rtl_unit_test_command"),
+        ),
+        "_command_override_vcs": attr.label(
+            default = Label("@rules_verilog//:verilog_rtl_unit_test_command_vcs"),
+        ),
         "wave_viewer_command": attr.label(
             default = Label("@rules_verilog//:verilog_rtl_wave_viewer_command"),
             doc = "Allows custom override of waveform viewer command in the event of wrapping via modulefiles.\n" +
                   "Example override in project's .bazelrc:\n" +
                   '  build --@rules_verilog//:verilog_rtl_wave_viewer_command="runmod xrun --"\n',
+        ),
+        "_wave_viewer_command_xrun": attr.label(
+            default = Label("@rules_verilog//:verilog_rtl_wave_viewer_command"),
+        ),
+        "_wave_viewer_command_vcs": attr.label(
+            default = Label("@rules_verilog//:verilog_rtl_wave_viewer_command_vcs"),
+        ),
+        "_unit_test_simulator": attr.label(
+            default = Label("@rules_verilog//:verilog_unit_test_simulator"),
         ),
         "data": attr.label_list(
             allow_files = True,
