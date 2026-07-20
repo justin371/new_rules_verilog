@@ -10,6 +10,7 @@ load(
     "verilog_rtl_lint_test",
     "verilog_rtl_unit_test",
 )
+load(":synth_aspect_compat.bzl", "synth_flist_set")
 
 package(default_visibility = ["//visibility:public"])
 
@@ -35,6 +36,14 @@ verilog_rtl_library(
     name = "no_synth_compat",
     modules = ["unit_test_top.sv"],
     no_synth = True,
+)
+
+synth_flist_set(
+    name = "synth_flist_compat",
+    deps = [
+        ":no_synth_compat",
+        ":unit_test_top",
+    ],
 )
 
 verilog_dv_library(
@@ -162,6 +171,7 @@ py_test(
         ":rtl_lint_vcs",
         ":rtl_lint_vcs_cmds.tcl",
         ":rtl_unit_xrun",
+        ":synth_flist_compat",
         ":unit_test_top",
         ":vcs_partitions",
         "@filelist_external_fixture//:external_rtl",

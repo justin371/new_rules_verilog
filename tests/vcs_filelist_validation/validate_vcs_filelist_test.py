@@ -84,6 +84,13 @@ class VcsFilelistValidationTest(unittest.TestCase):
         filelist = read_runfile("tests/vcs_filelist_validation/no_synth_compat.f")
         self.assertIn("tests/vcs_filelist_validation/unit_test_top.sv", filelist)
 
+    def test_no_synth_is_filtered_by_downstream_synthesis_aspect(self):
+        filtered_filelist = read_runfile("tests/vcs_filelist_validation/synth__no_synth_compat.f")
+        normal_filelist = read_runfile("tests/vcs_filelist_validation/synth__unit_test_top.f")
+
+        self.assertNotIn("tests/vcs_filelist_validation/unit_test_top.sv", filtered_filelist)
+        self.assertIn("tests/vcs_filelist_validation/unit_test_top.sv", normal_filelist)
+
     def test_makelib_is_xrun_only_and_vcs_keeps_the_source_boundary(self):
         xrun_filelist = read_runfile("tests/vcs_filelist_validation/unit_test_top.f")
         vcs_filelist = read_runfile("tests/vcs_filelist_validation/unit_test_top_vcs.f")
