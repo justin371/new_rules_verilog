@@ -4,7 +4,7 @@
 
 - Bazel and CI are pinned to 7.7.1; Python dependencies are explicit Bazel deps.
 - VCS and Xcelium generate and validate separate compile/runtime arguments.
-- DV and RTL one-step unit-test rules remain XRUN-only.
+- DV and RTL one-step unit-test rules support XRUN and VCS; VCS wave dumping remains disabled pending validation.
 - `rerun.sh`, `run_waves.sh` and log-checker lookup are portable across main and external workspaces.
 - VCS coverage uses one `.vdb` path from simulation through URG merge.
 - VCS Partition Compile keeps each writable database under its VCOMP directory

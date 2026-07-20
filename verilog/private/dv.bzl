@@ -3,9 +3,9 @@
 
 load("//deps:gatesim_modes_list.bzl", "GATESIM_MODES")
 load(":simulators/pldm.bzl", "pldm_dv_backend")
-load(":simulators/vcs.bzl", "vcs_dv_backend")
+load(":simulators/vcs.bzl", "vcs_dv_backend", "vcs_dv_unit_test_impl")
 load(":simulators/xcelium.bzl", "xcelium_dv_backend", "xcelium_dv_unit_test_impl")
-load(":verilog.bzl", "VerilogInfo", "gather_shell_defines", "get_transitive_srcs", "merge_default_runfiles", "runfiles_relative_short_path", "verilog_input_inventory_records")
+load(":verilog.bzl", "VerilogInfo", "gather_shell_defines", "get_transitive_srcs", "merge_default_runfiles", "resolve_unit_test_simulator", "runfiles_relative_short_path", "verilog_input_inventory_records")
 
 DVTestInfo = provider("Runtime configuration for a DV test.", fields = {
     "sim_opts": "Simulation :options to carry forward.",
@@ -831,6 +831,12 @@ verilog_dv_tb = rule(
     executable = True,
 )
 
+def _verilog_dv_unit_test_impl(ctx):
+    simulator = resolve_unit_test_simulator(ctx.attr.simulator, ctx.attr._unit_test_simulator)
+    if simulator == "VCS":
+        return vcs_dv_unit_test_impl(ctx)
+    return xcelium_dv_unit_test_impl(ctx)
+
 verilog_dv_unit_test = rule(
     doc = """Compiles and runs a small unit test for DV.
 
@@ -841,7 +847,7 @@ verilog_dv_unit_test = rule(
     For ci testing purposes:
       bazel test //hw/dv/interfaces/apb_pkg:test
     """,
-    implementation = xcelium_dv_unit_test_impl,
+    implementation = _verilog_dv_unit_test_impl,
     attrs = {
         "deps": attr.label_list(
             mandatory = True,
@@ -849,20 +855,39 @@ verilog_dv_unit_test = rule(
                   "Dependency ordering within this label list is not necessary if dependencies are consistently declared in all other rules.",
         ),
         "simulator": attr.string(
-            default = "XRUN",
-            values = ["XRUN", "VCS"],
-            doc = "Simulator to use for this one-step unit test. Only XRUN is supported; VCS uses verilog_dv_tb + simmer.\n",
+            values = ["", "XRUN", "VCS"],
+            doc = "Simulator to use for this one-step unit test. When omitted, verilog_unit_test_simulator selects XRUN or VCS.\n",
         ),
         "ut_sim_template": attr.label(
             allow_single_file = True,
             default = Label("@rules_verilog//vendors/cadence:verilog_dv_unit_test.sh.template"),
             doc = "The template to generate the bash script to run the simulation.\n",
         ),
+        "_ut_sim_template_xrun": attr.label(
+            allow_single_file = True,
+            default = Label("@rules_verilog//vendors/cadence:verilog_dv_unit_test.sh.template"),
+        ),
+        "_ut_sim_template_vcs": attr.label(
+            allow_single_file = True,
+            default = Label("@rules_verilog//vendors/synopsys:verilog_dv_unit_test.sh.template"),
+        ),
         "default_sim_opts": attr.label(
             allow_single_file = True,
             default = "@rules_verilog//vendors/cadence:verilog_dv_unit_test_opts.f",
             doc = "Default simulator options to pass to the simulator.\n",
             # TODO remove this and just make it part of the template?
+        ),
+        "_default_sim_opts_xrun": attr.label(
+            allow_single_file = True,
+            default = Label("@rules_verilog//vendors/cadence:verilog_dv_unit_test_opts.f"),
+        ),
+        "_default_sim_opts_vcs": attr.label(
+            allow_single_file = True,
+            default = Label("@rules_verilog//vendors/synopsys:verilog_dv_default_sim_opts.f"),
+        ),
+        "_compile_args_template_vcs": attr.label(
+            allow_single_file = True,
+            default = Label("@rules_verilog//vendors/synopsys:verilog_dv_tb_compile_args.f.template"),
         ),
         "sim_args": attr.string_list(
             doc = "Deprecated compile arguments. Use compile_args and run_args instead.",
@@ -878,6 +903,12 @@ verilog_dv_unit_test = rule(
             doc = "Allows custom override of simulator command in the event of wrapping via modulefiles.\n" +
                   "Example override in project's .bazelrc:\n" +
                   '  build --@rules_verilog//:verilog_dv_unit_test_command="runmod -t xrun --"',
+        ),
+        "_command_override_vcs": attr.label(
+            default = Label("@rules_verilog//:verilog_dv_unit_test_command_vcs"),
+        ),
+        "_unit_test_simulator": attr.label(
+            default = Label("@rules_verilog//:verilog_unit_test_simulator"),
         ),
     },
     outputs = {"out": "%{name}_run.sh"},

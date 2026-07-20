@@ -116,9 +116,6 @@ def _tb_options(unused_ctx, extra_compile_outputs, xcelium_covfile):
     }
 
 def xcelium_dv_unit_test_impl(ctx):
-    if ctx.attr.simulator == "VCS":
-        fail("verilog_dv_unit_test {} does not support simulator = 'VCS'. Use the VCS two-step flow via verilog_dv_tb + simmer instead.".format(ctx.label))
-
     trans_srcs = get_transitive_srcs([], ctx.attr.deps, VerilogInfo, "transitive_sources")
     flists = get_transitive_srcs([], ctx.attr.deps, VerilogInfo, "transitive_flists")
     dpi = get_transitive_srcs([], ctx.attr.deps, VerilogInfo, "transitive_dpi")

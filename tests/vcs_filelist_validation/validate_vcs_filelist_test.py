@@ -237,15 +237,87 @@ class VcsFilelistValidationTest(unittest.TestCase):
         self.assertEqual(inputs_path, tb_options["msie_primary_inputs"])
         self.assertNotIn("vcs_cm_hier", tb_options)
 
-    def test_unit_test_scripts_use_xcelium(self):
+    def test_unit_test_scripts_select_the_requested_backend(self):
         scripts = {
             "tests/vcs_filelist_validation/dv_unit_xrun_run.sh": ["xrun", "-f"],
             "tests/vcs_filelist_validation/rtl_unit_xrun": ["xrun", "-f", "waves.shm"],
+            "tests/vcs_filelist_validation/dv_unit_vcs_run.sh": ["vcs", "simv", "-file", "-Mdir"],
+            "tests/vcs_filelist_validation/rtl_unit_vcs": ["vcs", "simv", "-file", "-Mdir"],
         }
         for relative_path, needles in scripts.items():
             contents = read_runfile(relative_path)
             for needle in needles:
                 assert_contains(contents, needle, relative_path)
+
+        dv_compile_args = read_runfile("tests/vcs_filelist_validation/dv_unit_vcs_compile_args.f")
+        rtl_compile_args = read_runfile("tests/vcs_filelist_validation/rtl_unit_vcs_compile_args.f")
+        dv_runtime_args = read_runfile("tests/vcs_filelist_validation/dv_unit_vcs_runtime_args.f")
+        self.assertIn("-file tests/vcs_filelist_validation/unit_test_top_vcs.f", dv_compile_args)
+        self.assertIn("+define+DV_UNIT_VCS", dv_compile_args)
+        self.assertIn("-file tests/vcs_filelist_validation/unit_test_top_vcs.f", rtl_compile_args)
+        self.assertNotIn("-top ", rtl_compile_args)
+        self.assertNotIn("-makelib", dv_compile_args)
+        self.assertNotIn("-makelib", rtl_compile_args)
+        self.assertNotIn("{RUNTIME_ARGS}", dv_runtime_args)
+        self.assertNotIn("{DPI_LIBS}", dv_runtime_args)
+
+    def test_generated_vcs_unit_test_scripts_execute_with_tool_stub(self):
+        vcs_stub = """#!/usr/bin/env python3
+import json
+import os
+from pathlib import Path
+import sys
+
+with open(os.environ["TOOL_LOG"], "a", encoding="utf-8") as log_file:
+    log_file.write(json.dumps({"tool": "vcs", "args": sys.argv[1:]}) + "\\n")
+output = Path(sys.argv[sys.argv.index("-o") + 1])
+output.write_text('''#!/usr/bin/env python3
+import json
+import os
+import sys
+with open(os.environ["TOOL_LOG"], "a", encoding="utf-8") as log_file:
+    log_file.write(json.dumps({"tool": "simv", "args": sys.argv[1:]}) + "\\n")
+''', encoding="utf-8")
+output.chmod(0o755)
+"""
+
+        with tempfile.TemporaryDirectory() as temporary_dir:
+            temporary_path = Path(temporary_dir)
+            bin_dir = temporary_path / "bin"
+            bin_dir.mkdir()
+            vcs_path = bin_dir / "vcs"
+            vcs_path.write_text(vcs_stub, encoding="utf-8")
+            vcs_path.chmod(0o755)
+
+            log_path = temporary_path / "vcs.jsonl"
+            environment = dict(os.environ)
+            environment.update({
+                "PATH": "{}{}{}".format(bin_dir, os.pathsep, environment["PATH"]),
+                "TOOL_LOG": str(log_path),
+            })
+            invocations = {
+                "tests/vcs_filelist_validation/dv_unit_vcs_run.sh": ["+DV_USER_RUNTIME"],
+                "tests/vcs_filelist_validation/rtl_unit_vcs": ["+RTL_USER_RUNTIME"],
+            }
+            for relative_path, arguments in invocations.items():
+                subprocess.run(
+                    ["bash", str(find_runfile(relative_path))] + arguments,
+                    cwd=os.environ["TEST_SRCDIR"],
+                    env=environment,
+                    check=True,
+                    capture_output=True,
+                    text=True,
+                )
+
+            records = [json.loads(line) for line in log_path.read_text(encoding="utf-8").splitlines()]
+            compile_records = [record for record in records if record["tool"] == "vcs"]
+            runtime_records = [record for record in records if record["tool"] == "simv"]
+            self.assertEqual(2, len(compile_records))
+            self.assertEqual(2, len(runtime_records))
+            self.assertTrue(all("-file" in record["args"] and "-o" in record["args"] for record in compile_records))
+            self.assertTrue(any("+DV_UNIT_RUNTIME" in record["args"] for record in runtime_records))
+            self.assertTrue(any("+DV_USER_RUNTIME" in record["args"] for record in runtime_records))
+            self.assertTrue(any("+RTL_USER_RUNTIME" in record["args"] for record in runtime_records))
 
     def test_rtl_unit_test_propagates_data_target_runfiles(self):
         self.assertEqual(

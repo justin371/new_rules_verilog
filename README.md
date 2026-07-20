@@ -50,16 +50,24 @@ test --action_env=LM_LICENSE_FILE
 For Synopsys VCS flows, you can add a named Bazel config in `.bazelrc` and invoke it explicitly. Example:
 
 ```bazelrc
+build:vcs --@rules_verilog//:verilog_unit_test_simulator=VCS
+build:vcs --@rules_verilog//:verilog_dv_unit_test_command_vcs="runmod vcs -- vcs"
 build:vcs --@rules_verilog//:verilog_rtl_lint_test_command_vcs="runmod vcs -- vcs"
+build:vcs --@rules_verilog//:verilog_rtl_unit_test_command_vcs="runmod vcs -- vcs"
 ```
 
-Then run a VCS-enabled target with:
+Then run the test suite with VCS selected for one-step unit tests that do not
+set `simulator` explicitly:
 
 ```bash
-bazel build --config=vcs //tests/vcs_filelist_validation:dv_tb_vcs
+bsub -I -q syn bazel test --config=vcs //... --test_tag_filters=-no_ci_gate \
+  --cache_test_results=no --jobs 8 --test_output=all 2>&1
 ```
 
-Note: `--config=vcs` only selects the VCS/Verdi wrapper commands. Targets that need VCS-specific behavior must still set `simulator = "VCS"`. The one-step `verilog_rtl_unit_test` rule is XRUN-only, so there is no `verilog_rtl_unit_test_command_vcs` build setting.
+An explicit `simulator = "XRUN"` or `simulator = "VCS"` on a target takes
+precedence over the config default. VCS one-step unit tests compile with `vcs`
+and then execute the generated `simv`. VCS one-step FSDB dumping is currently
+disabled; the wave commands remain in the Synopsys templates as comments.
 
 For `simmer` VCS runs, `--simulator VCS` is enough. The VCS, `simv`, and Verdi launcher prefix defaults to `runmod vcs --`.
 
@@ -76,8 +84,9 @@ interrupted-history persistence, `pause` to stop active process groups and preve
 to keep running, or `status/logs` to print active job directories and log paths. A paused regression can then be resumed
 or stopped. Non-interactive runs stop immediately so batch jobs and CI never wait for input.
 
-VCS simulations use the two-step `verilog_dv_tb` + `simmer` flow. The one-step
-DV and RTL unit-test rules remain Xcelium-only.
+Large VCS regressions continue to use the reusable two-step
+`verilog_dv_tb` + `simmer` flow. Bazel one-step DV and RTL unit tests support
+both Xcelium and VCS.
 
 ### VCS FSDB wave dumping
 
@@ -137,9 +146,9 @@ queue:
 SIMMER_WAVE_LAUNCHER="bsub -I -q syn" ./run_waves.sh
 ```
 
-### Unit tests with Xcelium
+### Bazel unit tests
 
-Use Xcelium for one-step unit-test targets:
+One-step unit-test targets can select a simulator explicitly:
 
 ```starlark
 verilog_rtl_unit_test(
@@ -162,6 +171,11 @@ Run the Xcelium unit test on the Red Hat workstation:
 ```bash
 bazel test --config=xrun //path/to:counter_test_xrun
 ```
+
+To let `--config=vcs` select VCS instead, omit the target-level `simulator`
+attribute and use the VCS build settings shown above.
+The bundled SVUnit template is Xcelium-only, so SVUnit targets must set
+`simulator = "XRUN"` unless they provide a VCS-compatible custom template.
 
 `runmod` is a site-provided command from a separate repository and is assumed
 to be available on `PATH`.
@@ -413,7 +427,7 @@ These rules were written with the Cadence and Synopsys tools as the underlying c
 
 ### UVM Testbenches
 Use one-step `verilog_dv_unit_test`/`verilog_rtl_unit_test` for small Xcelium
-tests. VCS simulations, including small tests, should use
+or VCS tests. Large VCS simulations should use
 [verilog_dv_tb](docs/defs.md#verilog_dv_tb),
 [verilog_dv_test_cfg](docs/defs.md#verilog_dv_test_cfg), and `simmer` so the
 compiled `simv` can be reused across tests.
