@@ -276,7 +276,7 @@ import json
 import os
 import sys
 with open(os.environ["TOOL_LOG"], "a", encoding="utf-8") as log_file:
-    log_file.write(json.dumps({"tool": "simv", "args": sys.argv[1:]}) + "\\n")
+    log_file.write(json.dumps({"tool": "simv", "args": sys.argv[1:]}) + "\\\\n")
 ''', encoding="utf-8")
 output.chmod(0o755)
 """
@@ -300,14 +300,15 @@ output.chmod(0o755)
                 "tests/vcs_filelist_validation/rtl_unit_vcs": ["+RTL_USER_RUNTIME"],
             }
             for relative_path, arguments in invocations.items():
-                subprocess.run(
+                completed = subprocess.run(
                     ["bash", str(find_runfile(relative_path))] + arguments,
                     cwd=os.environ["TEST_SRCDIR"],
                     env=environment,
-                    check=True,
+                    check=False,
                     capture_output=True,
                     text=True,
                 )
+                self.assertEqual(0, completed.returncode, completed.stderr)
 
             records = [json.loads(line) for line in log_path.read_text(encoding="utf-8").splitlines()]
             compile_records = [record for record in records if record["tool"] == "vcs"]
