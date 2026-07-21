@@ -1625,8 +1625,8 @@ run_bounded_process([
         )
         runner_stub.chmod(0o755)
 
-        template = self._read_repo_file(
-            "vendors/synopsys/verilog_rtl_unit_test_svunit.sh.template").replace("\r\n", "\n")
+        template = self._read_repo_file("vendors/synopsys/verilog_rtl_unit_test_svunit.sh.template").replace(
+            "\r\n", "\n")
         script_text = template.replace("{SIMULATOR_COMMAND}", "")
         script_text = script_text.replace("{SVUNIT_COMPILE_ARGS}", "-c '+define+COMPILE_ARG'")
         script_text = script_text.replace("{SVUNIT_FLISTS}", "-f input.f")
