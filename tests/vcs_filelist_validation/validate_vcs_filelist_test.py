@@ -241,8 +241,10 @@ class VcsFilelistValidationTest(unittest.TestCase):
         scripts = {
             "tests/vcs_filelist_validation/dv_unit_xrun_run.sh": ["xrun", "-f"],
             "tests/vcs_filelist_validation/rtl_unit_xrun": ["xrun", "-f", "waves.shm"],
-            "tests/vcs_filelist_validation/dv_unit_vcs_run.sh": ["vcs", "simv", "-file", "-Mdir"],
-            "tests/vcs_filelist_validation/rtl_unit_vcs": ["vcs", "simv", "-file", "-Mdir"],
+            "tests/vcs_filelist_validation/dv_unit_vcs_run.sh":
+            ["vcs", "simv", "-full64", "-file", "-Mdir", "ERROR: line", "SIMMER_KEEP_TERMINAL"],
+            "tests/vcs_filelist_validation/rtl_unit_vcs":
+            ["vcs", "simv", "-file", "-Mdir", "ERROR: line", "SIMMER_KEEP_TERMINAL"],
         }
         for relative_path, needles in scripts.items():
             contents = read_runfile(relative_path)
@@ -260,6 +262,14 @@ class VcsFilelistValidationTest(unittest.TestCase):
         self.assertNotIn("-makelib", rtl_compile_args)
         self.assertNotIn("{RUNTIME_ARGS}", dv_runtime_args)
         self.assertNotIn("{DPI_LIBS}", dv_runtime_args)
+
+        custom_script = read_runfile("tests/vcs_filelist_validation/dv_unit_vcs_custom_template_run.sh")
+        self.assertNotRegex(custom_script, r"\{[A-Z_]+\}")
+        self.assertIn("-file tests/vcs_filelist_validation/unit_test_top_vcs.f", custom_script)
+        self.assertIn("+define+CUSTOM_LEGACY_ARG", custom_script)
+        self.assertIn("+define+CUSTOM_COMPILE_ARG", custom_script)
+        self.assertIn("+CUSTOM_RUN_ARG", custom_script)
+        self.assertNotIn("{SIMULATOR_RUNNER}", custom_script)
 
     def test_generated_vcs_unit_test_scripts_execute_with_tool_stub(self):
         vcs_stub = """#!/usr/bin/env python3

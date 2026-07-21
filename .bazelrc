@@ -17,6 +17,7 @@ build:vcs --//:verilog_unit_test_simulator=VCS
 build:vcs --//:verilog_dv_unit_test_command_vcs="runmod vcs -- vcs"
 build:vcs --//:verilog_rtl_lint_test_command_vcs="runmod vcs -- vcs"
 build:vcs --//:verilog_rtl_unit_test_command_vcs="runmod vcs -- vcs"
+build:vcs --//:verilog_vcs_unit_test_runner="runmod vcs --"
 # build:vcs --//:verilog_rtl_wave_viewer_command_vcs="runmod vcs -- verdi"
 
 #If true, Bazel tries to load external repositories from the Bzlmod system before looking into the WORKSPACE file

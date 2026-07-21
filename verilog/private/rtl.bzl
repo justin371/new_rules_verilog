@@ -466,6 +466,7 @@ def _verilog_rtl_unit_test_impl(ctx):
         output = ctx.outputs.executable,
         substitutions = {
             "{SIMULATOR_COMMAND}": simulator_command,
+            "{SIMULATOR_RUNNER}": ctx.attr._vcs_unit_test_runner[ToolEncapsulationInfo].command if simulator == "VCS" else "",
             "{WAVE_VIEWER_COMMAND}": wave_viewer_command,
             "{FLISTS}": " ".join(["{} {}".format(filelist_flag, runfiles_relative_short_path(f)) for f in flists_list]),
             "{TOP}": top,
@@ -587,6 +588,9 @@ verilog_rtl_unit_test = rule(
         ),
         "_unit_test_simulator": attr.label(
             default = Label("@rules_verilog//:verilog_unit_test_simulator"),
+        ),
+        "_vcs_unit_test_runner": attr.label(
+            default = Label("@rules_verilog//:verilog_vcs_unit_test_runner"),
         ),
         "data": attr.label_list(
             allow_files = True,

@@ -51,15 +51,21 @@ def vcs_dv_unit_test_impl(ctx):
     )
 
     simulator_command = ctx.attr._command_override_vcs[ToolEncapsulationInfo].command
+    flist_args = " ".join(["-file {}".format(runfiles_relative_short_path(f)) for f in flists_list])
+    compile_arg_values = ctx.attr.sim_args + ctx.attr.compile_args
     ctx.actions.expand_template(
         template = unit_test_template,
         output = ctx.outputs.out,
         substitutions = {
+            "{COMPILE_ARGS}": " ".join(compile_arg_values),
             "{SIMULATOR_COMMAND}": simulator_command,
+            "{SIMULATOR_RUNNER}": ctx.attr._vcs_unit_test_runner[ToolEncapsulationInfo].command,
             "{COMPILE_ARGS_FILE}": runfiles_relative_short_path(compile_args),
-            "{DEFAULT_SIM_OPTS}": runfiles_relative_short_path(runtime_args),
+            "{DEFAULT_SIM_OPTS}": "-f {}".format(runfiles_relative_short_path(runtime_args)),
             "{DPI_LIBS}": flists_to_arguments(ctx.attr.deps, VerilogInfo, "transitive_dpi", "-sv_lib", "", "vcs"),
+            "{FLISTS}": flist_args,
             "{RUN_ARGS}": " ".join(ctx.attr.run_args),
+            "{SIM_ARGS}": " ".join(ctx.attr.sim_args),
         },
         is_executable = True,
     )

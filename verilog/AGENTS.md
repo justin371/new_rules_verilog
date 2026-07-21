@@ -30,7 +30,7 @@ private/simulators/       # action metadata for VCS, Xcelium, and PLDM
 - Preserve stable, sorted file inventories and normalized `external/...` short paths; avoid `../` traversal.
 - Expand `$location` arguments with matching `extra_runfiles` and `ctx.expand_location`.
 - Simulator-specific defaults and validation belong in the matching backend path.
-- VCS simulation is the two-step `verilog_dv_tb` plus `simmer` flow. One-step RTL/DV unit-test rules are XRUN-only; lint supports XRUN and VCS.
+- Large VCS simulation uses the two-step `verilog_dv_tb` plus `simmer` flow; one-step RTL/DV unit tests and lint support XRUN and VCS.
 - Keep PLDM in its independent module, but treat its outputs as Xcelium emulation compatibility data rather than a third runtime backend.
 - Update `docs/defs.md` and docs tests for public exports, attributes, defaults, or descriptions.
 - Keep dependency declarations as providers/depsets and return complete `DefaultInfo` runfiles.

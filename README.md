@@ -54,6 +54,7 @@ build:vcs --@rules_verilog//:verilog_unit_test_simulator=VCS
 build:vcs --@rules_verilog//:verilog_dv_unit_test_command_vcs="runmod vcs -- vcs"
 build:vcs --@rules_verilog//:verilog_rtl_lint_test_command_vcs="runmod vcs -- vcs"
 build:vcs --@rules_verilog//:verilog_rtl_unit_test_command_vcs="runmod vcs -- vcs"
+build:vcs --@rules_verilog//:verilog_vcs_unit_test_runner="runmod vcs --"
 ```
 
 Then run the test suite with VCS selected for one-step unit tests that do not
@@ -66,8 +67,10 @@ bsub -I -q syn bazel test --config=vcs //... --test_tag_filters=-no_ci_gate \
 
 An explicit `simulator = "XRUN"` or `simulator = "VCS"` on a target takes
 precedence over the config default. VCS one-step unit tests compile with `vcs`
-and then execute the generated `simv`. VCS one-step FSDB dumping is currently
-disabled; the wave commands remain in the Synopsys templates as comments.
+and then execute the generated `simv` through `verilog_vcs_unit_test_runner`,
+so the compile and runtime processes share the same tool environment. VCS
+one-step FSDB dumping is currently disabled; the wave commands remain in the
+Synopsys templates as comments.
 
 For `simmer` VCS runs, `--simulator VCS` is enough. The VCS, `simv`, and Verdi launcher prefix defaults to `runmod vcs --`.
 
