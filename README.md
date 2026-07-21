@@ -81,7 +81,9 @@ For RTL lint, legacy `rulefile` values remain associated with Cadence/HAL when
 VCS is selected by `--config=vcs`; rules_verilog uses its built-in VCS policy
 instead. Set `rulefile_vcs` when a target needs project-specific VCS lint
 options. Targets that explicitly set `simulator = "VCS"` may continue using
-`rulefile` for backward compatibility.
+`rulefile` for backward compatibility. The built-in policy explicitly
+suppresses `SV-UIP`, because standalone lint tops intentionally leave their
+external SystemVerilog interface ports unconnected.
 
 For `simmer` VCS runs, `--simulator VCS` is enough. The VCS, `simv`, and Verdi launcher prefix defaults to `runmod vcs --`.
 
