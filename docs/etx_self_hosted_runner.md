@@ -56,8 +56,11 @@ On a push to `codex/v0.3-review-fixes`, the workflow:
      --cache_test_results=no --jobs 8 --test_output=all
    ```
 
-7. uploads the Bazel log, failure summary, metadata, LSF log, and compressed
-   per-target test logs to the GitHub Actions run for 14 days.
+7. retains the Bazel log, failure summary, metadata, LSF log, and compressed
+   per-target test logs on ETX under `.rules_verilog_ci`. A private repository
+   also uploads them to the GitHub Actions run for 14 days; a public repository
+   never uploads licensed logs because simulator diagnostics can contain
+   proprietary source excerpts.
 
 The workflow deliberately does not use the `pull_request` event. This
 repository is public, so untrusted fork pull requests must never execute on an
