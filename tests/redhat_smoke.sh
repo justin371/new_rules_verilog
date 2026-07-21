@@ -25,7 +25,20 @@ bazel build --config=vcs \
   //examples/apb:test \
   //examples/dpi:test \
   //tests/vcs_filelist_validation:rtl_lint_configured_vcs \
+  //tests/vcs_filelist_validation:rtl_lint_configured_vcs_custom_rulefile \
   //tests/vcs_filelist_validation:rtl_lint_explicit_xrun
+configured_lint_args="bazel-bin/tests/vcs_filelist_validation/rtl_lint_configured_vcs_cmds.tcl"
+custom_lint_args="bazel-bin/tests/vcs_filelist_validation/rtl_lint_configured_vcs_custom_rulefile_cmds.tcl"
+grep -F -- "-file vendors/synopsys/verilog_rtl_lint_default_opts.f" "${configured_lint_args}"
+if grep -F -- "legacy_hal_rules.lint" "${configured_lint_args}"; then
+  echo "ERROR: config-selected VCS lint retained the legacy HAL rulefile." >&2
+  exit 1
+fi
+grep -F -- "-file tests/vcs_filelist_validation/custom_vcs_lint_opts.f" "${custom_lint_args}"
+if grep -F -- "legacy_hal_rules.lint" "${custom_lint_args}"; then
+  echo "ERROR: rulefile_vcs did not replace the legacy HAL rulefile." >&2
+  exit 1
+fi
 bazel run //:buildifier_lint
 ./tests/doc_test.sh
 bash ./tests/external_setup_smoke_test.sh

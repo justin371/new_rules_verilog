@@ -80,6 +80,12 @@ For RTL unit tests, put compile/elaboration controls in `pre_flist_args` or
 path also moves legacy non-compiler plusargs from the flist argument attributes
 to the generated `simv` invocation.
 
+For RTL lint, legacy `rulefile` values remain associated with Cadence/HAL when
+VCS is selected by `--config=vcs`; rules_verilog uses its built-in VCS policy
+instead. Set `rulefile_vcs` when a target needs project-specific VCS lint
+options. Targets that explicitly set `simulator = "VCS"` may continue using
+`rulefile` for backward compatibility.
+
 For `simmer` VCS runs, `--simulator VCS` is enough. The VCS, `simv`, and Verdi launcher prefix defaults to `runmod vcs --`.
 
 ```bash

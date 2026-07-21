@@ -144,8 +144,15 @@ class VcsFilelistValidationTest(unittest.TestCase):
             ],
             "tests/vcs_filelist_validation/rtl_lint_vcs_cmds.tcl": [
                 "+define+LINT",
+                "-timescale=1ns/1ps",
                 "-file tests/vcs_filelist_validation/unit_test_top_vcs.f",
                 "-file vendors/synopsys/verilog_rtl_lint_default_opts.f",
+            ],
+            "tests/vcs_filelist_validation/rtl_lint_vcs_custom_rulefile_cmds.tcl": [
+                "-file tests/vcs_filelist_validation/custom_vcs_lint_opts.f",
+            ],
+            "tests/vcs_filelist_validation/rtl_lint_vcs_legacy_rulefile_cmds.tcl": [
+                "-file tests/vcs_filelist_validation/custom_vcs_lint_opts.f",
             ],
             "tests/vcs_filelist_validation/dv_tb_vcs_compile_args.f": [
                 "-file external/filelist_external_fixture/external_rtl.f",

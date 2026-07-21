@@ -62,6 +62,34 @@ verilog_rtl_lint_test(
 
 verilog_rtl_lint_test(
     name = "rtl_lint_configured_vcs",
+    rulefile = ":legacy_hal_rules.lint",
+    tags = ["manual"],
+    top = "unit_test_top",
+    deps = [":unit_test_top"],
+)
+
+verilog_rtl_lint_test(
+    name = "rtl_lint_configured_vcs_custom_rulefile",
+    rulefile = ":legacy_hal_rules.lint",
+    rulefile_vcs = ":custom_vcs_lint_opts.f",
+    tags = ["manual"],
+    top = "unit_test_top",
+    deps = [":unit_test_top"],
+)
+
+verilog_rtl_lint_test(
+    name = "rtl_lint_vcs_custom_rulefile",
+    rulefile_vcs = ":custom_vcs_lint_opts.f",
+    simulator = "VCS",
+    tags = ["manual"],
+    top = "unit_test_top",
+    deps = [":unit_test_top"],
+)
+
+verilog_rtl_lint_test(
+    name = "rtl_lint_vcs_legacy_rulefile",
+    rulefile = ":custom_vcs_lint_opts.f",
+    simulator = "VCS",
     tags = ["manual"],
     top = "unit_test_top",
     deps = [":unit_test_top"],
@@ -240,6 +268,10 @@ py_test(
         ":no_synth_compat",
         ":rtl_lint_vcs",
         ":rtl_lint_vcs_cmds.tcl",
+        ":rtl_lint_vcs_custom_rulefile",
+        ":rtl_lint_vcs_custom_rulefile_cmds.tcl",
+        ":rtl_lint_vcs_legacy_rulefile",
+        ":rtl_lint_vcs_legacy_rulefile_cmds.tcl",
         ":rtl_unit_vcs",
         ":rtl_unit_xrun",
         ":synth_flist_compat",
