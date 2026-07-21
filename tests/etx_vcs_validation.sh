@@ -7,6 +7,7 @@ expected_sha="${EXPECTED_SHA:?EXPECTED_SHA must be the GitHub workflow commit}"
 rules_checkout="${RULES_CHECKOUT:-/u/lwang/rules_verilog}"
 rules_branch="${RULES_BRANCH:-codex/v0.3-review-fixes}"
 project_dir="${PROJECT_DIR:-/nfs/workspace/XinAnRiver/lwang/XinAnRiver}"
+project_branch="${PROJECT_BRANCH:-lw/update_rules_verilog}"
 results_dir="${ETX_RESULTS_DIR:-/nfs/workspace/XinAnRiver/lwang/.rules_verilog_ci/manual-$(date +%Y%m%d-%H%M%S)}"
 lock_file="${ETX_LOCK_FILE:-/u/lwang/.cache/rules_verilog-etx-vcs.lock}"
 
@@ -24,6 +25,15 @@ for command in bsub flock git; do
         exit 127
     }
 done
+
+actual_project_branch="$(git -C "${project_dir}" symbolic-ref --quiet --short HEAD)" || {
+    echo "consumer project is not on a branch: ${project_dir}" >&2
+    exit 5
+}
+if [[ "${actual_project_branch}" != "${project_branch}" ]]; then
+    echo "consumer project branch mismatch: expected ${project_branch}, got ${actual_project_branch}" >&2
+    exit 5
+fi
 
 mkdir -p "$(dirname "${lock_file}")" "${results_dir}"
 exec 9>"${lock_file}"
@@ -58,6 +68,8 @@ printf '%s\n' \
     "workflow commit: ${expected_sha}" \
     "rules checkout: ${rules_checkout}" \
     "consumer project: ${project_dir}" \
+    "consumer branch: ${actual_project_branch}" \
+    "consumer commit: $(git -C "${project_dir}" rev-parse HEAD)" \
     "bsub: $(command -v bsub)" \
     "results: ${results_dir}" >"${results_dir}/submission.txt"
 
@@ -71,7 +83,8 @@ bsub \
     "${rules_checkout}/tests/etx_vcs_job.sh" \
     "${project_dir}" \
     "${results_dir}" \
-    "${expected_sha}"
+    "${expected_sha}" \
+    "${project_branch}"
 lsf_status=$?
 set -e
 
