@@ -1543,6 +1543,15 @@ run_bounded_process([
             self.assertIn('"$@"', template)
         self.assertIn('"${PYTHON:-python3}" ./{LINT_PARSER}', lint_templates[1])
 
+    def test_vcs_lint_template_uses_fresh_compile_workspace(self):
+        template = self._read_repo_file("vendors/synopsys/verilog_rtl_lint_test.sh.template")
+
+        self.assertIn('work_dir="$(mktemp -d ', template)
+        self.assertIn('-Mdir="$work_dir/csrc"', template)
+        self.assertIn('-o "$work_dir/simv"', template)
+        self.assertIn('rm -rf -- "$work_dir"', template)
+        self.assertIn("trap - ERR", template)
+
     def test_vcs_coverage_viewer_messages_do_not_expand_result_paths(self):
         root = Path(tempfile.mkdtemp(prefix="vcs coverage quoting "))
         marker = root / "injected"
