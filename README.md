@@ -72,9 +72,6 @@ so the compile and runtime processes share the same tool environment. VCS
 one-step FSDB dumping is currently disabled; the wave commands remain in the
 Synopsys templates as comments.
 
-Repository maintainers can automate the licensed test command with the
-[ETX self-hosted runner workflow](docs/etx_self_hosted_runner.md).
-
 For RTL unit tests, put compile/elaboration controls in `pre_flist_args` or
 `post_flist_args` and runtime plusargs in `run_args`. The VCS compatibility
 path also moves legacy non-compiler plusargs from the flist argument attributes
