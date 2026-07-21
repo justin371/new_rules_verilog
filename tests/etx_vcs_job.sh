@@ -2,19 +2,32 @@
 
 set -Eeuo pipefail
 
-project_dir="${1:?usage: etx_vcs_job.sh PROJECT_DIR RESULTS_DIR EXPECTED_SHA}"
-results_dir="${2:?usage: etx_vcs_job.sh PROJECT_DIR RESULTS_DIR EXPECTED_SHA}"
-expected_sha="${3:?usage: etx_vcs_job.sh PROJECT_DIR RESULTS_DIR EXPECTED_SHA}"
+project_dir="${1:?usage: etx_vcs_job.sh PROJECT_DIR RESULTS_DIR EXPECTED_SHA PROJECT_BRANCH}"
+results_dir="${2:?usage: etx_vcs_job.sh PROJECT_DIR RESULTS_DIR EXPECTED_SHA PROJECT_BRANCH}"
+expected_sha="${3:?usage: etx_vcs_job.sh PROJECT_DIR RESULTS_DIR EXPECTED_SHA PROJECT_BRANCH}"
+expected_project_branch="${4:?usage: etx_vcs_job.sh PROJECT_DIR RESULTS_DIR EXPECTED_SHA PROJECT_BRANCH}"
 
 mkdir -p "${results_dir}"
 cd "${project_dir}"
 
+actual_project_branch="$(git symbolic-ref --quiet --short HEAD)" || {
+    echo "consumer project is not on a branch: ${project_dir}" >&2
+    exit 5
+}
+if [[ "${actual_project_branch}" != "${expected_project_branch}" ]]; then
+    echo "consumer project branch mismatch: expected ${expected_project_branch}, got ${actual_project_branch}" >&2
+    exit 5
+fi
+
 {
     echo "expected rules_verilog commit: ${expected_sha}"
     echo "project directory: ${project_dir}"
+    echo "project branch: ${actual_project_branch}"
+    echo "project commit: $(git rev-parse HEAD)"
     echo "host: $(hostname)"
     echo "started: $(date --iso-8601=seconds)"
 } >"${results_dir}/metadata.txt"
+git status --short --branch >"${results_dir}/project-status.txt"
 
 set +e
 bazel test \

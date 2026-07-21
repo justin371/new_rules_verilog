@@ -41,6 +41,7 @@ jobs:
           SOURCE_REPO: ${{ github.workspace }}
           RULES_CHECKOUT: /u/lwang/rules_verilog
           PROJECT_DIR: /nfs/workspace/XinAnRiver/lwang/XinAnRiver
+          PROJECT_BRANCH: lw/update_rules_verilog
           RULES_BRANCH: codex/v0.3-review-fixes
         run: ./tests/etx_vcs_validation.sh
 

@@ -47,14 +47,16 @@ On a push to `codex/v0.3-review-fixes`, the workflow:
 2. locks the shared ETX rules checkout to prevent concurrent updates;
 3. refuses to overwrite tracked changes in `/u/lwang/rules_verilog`;
 4. fast-forwards that checkout to the exact workflow commit;
-5. submits the following command through `bsub -K -q syn`:
+5. requires the consumer checkout to remain on `lw/update_rules_verilog` and
+   records its exact commit and status without modifying it;
+6. submits the following command through `bsub -K -q syn`:
 
    ```bash
    bazel test --config=vcs //... --test_tag_filters=-no_ci_gate \
      --cache_test_results=no --jobs 8 --test_output=all
    ```
 
-6. uploads the Bazel log, failure summary, metadata, LSF log, and compressed
+7. uploads the Bazel log, failure summary, metadata, LSF log, and compressed
    per-target test logs to the GitHub Actions run for 14 days.
 
 The workflow deliberately does not use the `pull_request` event. This
