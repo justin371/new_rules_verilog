@@ -2,8 +2,9 @@
 
 The `ETX Licensed VCS` workflow runs the full consumer test suite on the ETX
 network. A self-hosted GitHub Actions runner submits the licensed work to the
-`syn` LSF queue; the compute job sources `env/digital_env.sh` before invoking
-Bazel, which is the non-interactive equivalent of the `ss` alias.
+`syn` LSF queue. Both the submit step and compute job source
+`env/digital_env.sh`, which is the non-interactive equivalent of the `ss`
+alias.
 
 ## One-time runner registration
 

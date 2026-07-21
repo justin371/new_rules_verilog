@@ -10,8 +10,10 @@ mkdir -p "${results_dir}"
 cd "${project_dir}"
 
 # This is the non-interactive equivalent of the ETX `ss` alias.
+set +u
 # shellcheck disable=SC1091
 source env/digital_env.sh
+set -u
 
 {
     echo "expected rules_verilog commit: ${expected_sha}"

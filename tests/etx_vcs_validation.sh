@@ -10,17 +10,25 @@ project_dir="${PROJECT_DIR:-/nfs/workspace/XinAnRiver/lwang/XinAnRiver}"
 results_dir="${ETX_RESULTS_DIR:-/nfs/workspace/XinAnRiver/lwang/.rules_verilog_ci/manual-$(date +%Y%m%d-%H%M%S)}"
 lock_file="${ETX_LOCK_FILE:-/u/lwang/.cache/rules_verilog-etx-vcs.lock}"
 
-for command in bsub flock git; do
-    command -v "${command}" >/dev/null || {
-        echo "required command not found: ${command}" >&2
-        exit 127
-    }
-done
-
 for directory in "${source_repo}" "${rules_checkout}" "${project_dir}"; do
     [[ -d "${directory}" ]] || {
         echo "required directory not found: ${directory}" >&2
         exit 2
+    }
+done
+
+# Load the same ETX environment as the interactive `ss` alias before using
+# LSF. Temporarily disable nounset because the site script is interactive-shell
+# compatible but is not required to be `set -u` clean.
+set +u
+# shellcheck disable=SC1091
+source "${project_dir}/env/digital_env.sh"
+set -u
+
+for command in bsub flock git; do
+    command -v "${command}" >/dev/null || {
+        echo "required command not found after loading the ETX environment: ${command}" >&2
+        exit 127
     }
 done
 
