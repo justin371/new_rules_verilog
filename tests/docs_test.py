@@ -53,8 +53,7 @@ class DocsTest(unittest.TestCase):
         readme = (REPO_ROOT / "README.md").read_text(encoding="utf-8")
         for setting in ("verilog_unit_test_simulator", "verilog_dv_unit_test_command_vcs",
                         "verilog_rtl_lint_test_command_vcs", "verilog_rtl_svunit_test_command_vcs",
-                        "verilog_rtl_unit_test_command_vcs",
-                        "verilog_vcs_unit_test_runner"):
+                        "verilog_rtl_unit_test_command_vcs", "verilog_vcs_unit_test_runner"):
             self.assertIn("--@rules_verilog//:{}=".format(setting), readme)
 
 
