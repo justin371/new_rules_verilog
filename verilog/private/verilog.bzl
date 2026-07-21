@@ -65,6 +65,12 @@ def normalize_vcs_unit_test_compile_args(args):
     Existing consumers commonly attach Xcelium defines and debug controls to
     generic unit-test argument attributes. A VCS-configured default must not
     forward those controls to vcs as source-file operands or unknown options.
+
+    Args:
+      args: Compile argument strings from a one-step unit-test rule.
+
+    Returns:
+      VCS-safe compile argument strings.
     """
     result = []
     pending_flag = None
