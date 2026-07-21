@@ -53,6 +53,7 @@ For Synopsys VCS flows, you can add a named Bazel config in `.bazelrc` and invok
 build:vcs --@rules_verilog//:verilog_unit_test_simulator=VCS
 build:vcs --@rules_verilog//:verilog_dv_unit_test_command_vcs="runmod vcs -- vcs"
 build:vcs --@rules_verilog//:verilog_rtl_lint_test_command_vcs="runmod vcs -- vcs"
+build:vcs --@rules_verilog//:verilog_rtl_svunit_test_command_vcs="runmod vcs --"
 build:vcs --@rules_verilog//:verilog_rtl_unit_test_command_vcs="runmod vcs -- vcs"
 build:vcs --@rules_verilog//:verilog_vcs_unit_test_runner="runmod vcs --"
 ```
@@ -71,6 +72,10 @@ and then execute the generated `simv` through `verilog_vcs_unit_test_runner`,
 so the compile and runtime processes share the same tool environment. VCS
 one-step FSDB dumping is currently disabled; the wave commands remain in the
 Synopsys templates as comments.
+
+The bundled SVUnit template follows the configured simulator. Under VCS it
+uses `runSVUnit -s vcs` through `verilog_rtl_svunit_test_command_vcs`; explicit
+`simulator = "XRUN"` still takes precedence.
 
 For RTL unit tests, put compile/elaboration controls in `pre_flist_args` or
 `post_flist_args` and runtime plusargs in `run_args`. The VCS compatibility
@@ -189,8 +194,8 @@ bazel test --config=xrun //path/to:counter_test_xrun
 To let `--config=vcs` select VCS for RTL/DV unit tests and RTL lint tests,
 omit the target-level `simulator` attribute and use the VCS build settings shown
 above.
-The bundled SVUnit template is Xcelium-only, so SVUnit targets must set
-`simulator = "XRUN"` unless they provide a VCS-compatible custom template.
+The bundled SVUnit template supports Xcelium and VCS. A project-specific custom
+template remains simulator-specific unless it implements both backends.
 
 `runmod` is a site-provided command from a separate repository and is assumed
 to be available on `PATH`.

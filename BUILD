@@ -48,6 +48,11 @@ verilog_tool_encapsulation(
 )
 
 verilog_tool_encapsulation(
+    name = "verilog_rtl_svunit_test_command_vcs",
+    build_setting_default = "",
+)
+
+verilog_tool_encapsulation(
     name = "verilog_rtl_wave_viewer_command",
     build_setting_default = "simvision",
 )

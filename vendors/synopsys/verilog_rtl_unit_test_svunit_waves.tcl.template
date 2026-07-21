@@ -1,0 +1,3 @@
+# VCS one-step SVUnit wave dumping is intentionally disabled.
+# Retain this simulator-specific placeholder so VCS never consumes the
+# Xcelium SVUnit probe commands when templates are selected by configuration.
