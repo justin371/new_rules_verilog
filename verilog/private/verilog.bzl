@@ -34,7 +34,15 @@ verilog_tool_encapsulation = rule(
 )
 
 def resolve_unit_test_simulator(explicit_simulator, configured_simulator):
-    """Resolve a one-step unit-test simulator, preserving explicit rule values."""
+    """Resolve a one-step unit-test simulator, preserving explicit rule values.
+
+    Args:
+      explicit_simulator: Optional simulator set directly on the rule.
+      configured_simulator: Build-setting target providing the configured default.
+
+    Returns:
+      The validated XRUN or VCS simulator name.
+    """
     simulator = explicit_simulator or configured_simulator[ToolEncapsulationInfo].command
     if simulator not in ["XRUN", "VCS"]:
         fail("unit-test simulator must be one of ['XRUN', 'VCS'], got '{}'".format(simulator))
