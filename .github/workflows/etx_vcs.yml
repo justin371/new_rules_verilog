@@ -1,0 +1,52 @@
+name: ETX Licensed VCS
+
+on:
+  push:
+    branches: [codex/v0.3-review-fixes]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: etx-vcs-${{ github.repository }}
+  cancel-in-progress: false
+
+jobs:
+  etx-vcs:
+    name: ETX VCS validation
+    if: >-
+      github.repository == 'justin371/new_rules_verilog' &&
+      github.ref == 'refs/heads/codex/v0.3-review-fixes'
+    runs-on: [self-hosted, linux, x64, etx-vcs]
+    timeout-minutes: 240
+    steps:
+      - name: checkout
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
+        with:
+          fetch-depth: 1
+
+      - name: select-results-directory
+        shell: bash
+        run: |
+          results_dir="/nfs/workspace/XinAnRiver/lwang/.rules_verilog_ci/${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}"
+          echo "ETX_RESULTS_DIR=${results_dir}" >> "${GITHUB_ENV}"
+
+      - name: submit-vcs-validation
+        shell: bash
+        env:
+          EXPECTED_SHA: ${{ github.sha }}
+          SOURCE_REPO: ${{ github.workspace }}
+          RULES_CHECKOUT: /u/lwang/rules_verilog
+          PROJECT_DIR: /nfs/workspace/XinAnRiver/lwang/XinAnRiver
+          RULES_BRANCH: codex/v0.3-review-fixes
+        run: ./tests/etx_vcs_validation.sh
+
+      - name: upload-etx-logs
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: etx-vcs-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ env.ETX_RESULTS_DIR }}
+          if-no-files-found: warn
+          retention-days: 14
