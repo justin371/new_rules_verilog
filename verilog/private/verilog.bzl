@@ -49,7 +49,11 @@ def resolve_unit_test_simulator(explicit_simulator, configured_simulator):
     return simulator
 
 _XRUN_ONLY_UNIT_TEST_FLAGS = [
+    "+rw",
     "-ALLOWREDEFINITION",
+    "-64bit",
+    "-disable_sem2009",
+    "-mess",
     "-sv",
 ]
 
@@ -58,6 +62,76 @@ _XRUN_ONLY_UNIT_TEST_VALUE_FLAGS = [
     "-debug_opts",
     "-input",
 ]
+
+_VCS_COMPILE_PLUSARG_PREFIXES = [
+    "+define+",
+    "+delay_mode_",
+    "+incdir+",
+    "+libext+",
+    "+liborder",
+    "+librescan",
+    "+lint=",
+    "+maxdelays",
+    "+mindelays",
+    "+neg_tchk",
+    "+nospecify",
+    "+notimingcheck",
+    "+optconfigfile+",
+    "+plusarg_ignore",
+    "+plusarg_save",
+    "+pulse_",
+    "+sdfverbose",
+    "+systemverilogext+",
+    "+transport_",
+    "+typdelays",
+    "+v2k",
+    "+vcs+",
+    "+verilog2001ext+",
+    "+warn=",
+]
+
+def _tokenize_unit_test_args(args):
+    """Split legacy command fragments without breaking quoted values.
+
+    Args:
+      args: Unit-test argument strings, which may contain several options.
+
+    Returns:
+      A flat list of argument tokens with quoting retained.
+    """
+    tokens = []
+    for arg in args:
+        current = []
+        quote = ""
+        escaped = False
+        for index in range(len(arg)):
+            char = arg[index]
+            if escaped:
+                current.append(char)
+                escaped = False
+                continue
+            if char == "\\":
+                current.append(char)
+                escaped = True
+                continue
+            if quote:
+                current.append(char)
+                if char == quote:
+                    quote = ""
+                continue
+            if char == "\"" or char == "'":
+                current.append(char)
+                quote = char
+                continue
+            if char in " \t\r\n":
+                if current:
+                    tokens.append("".join(current))
+                    current = []
+                continue
+            current.append(char)
+        if current:
+            tokens.append("".join(current))
+    return tokens
 
 def normalize_vcs_unit_test_compile_args(args):
     """Translate legacy Xcelium one-step compile arguments for VCS.
@@ -74,7 +148,7 @@ def normalize_vcs_unit_test_compile_args(args):
     """
     result = []
     pending_flag = None
-    for arg in args:
+    for arg in _tokenize_unit_test_args(args):
         stripped = arg.strip()
 
         if pending_flag == "-define":
@@ -90,8 +164,8 @@ def normalize_vcs_unit_test_compile_args(args):
         if stripped == "-define":
             pending_flag = stripped
             continue
-        if stripped.startswith("-define "):
-            result.append("+define+{}".format(stripped[len("-define "):].strip()))
+        if stripped.startswith("-define="):
+            result.append("+define+{}".format(stripped[len("-define="):].strip()))
             continue
 
         if stripped in _XRUN_ONLY_UNIT_TEST_FLAGS:
@@ -115,6 +189,28 @@ def normalize_vcs_unit_test_compile_args(args):
         fail("{} in VCS unit-test arguments requires a value".format(pending_flag))
 
     return result
+
+def partition_vcs_unit_test_args(args):
+    """Separate VCS compile arguments from legacy runtime plusargs.
+
+    Args:
+      args: Unit-test arguments accepted by the legacy one-step XRUN flow.
+
+    Returns:
+      A struct with compile_args and runtime_args lists. Known VCS compiler
+      plusargs remain in compile_args; other plusargs are passed to simv.
+    """
+    compile_args = []
+    runtime_args = []
+    for arg in normalize_vcs_unit_test_compile_args(args):
+        if arg.startswith("+") and not any([arg.startswith(prefix) for prefix in _VCS_COMPILE_PLUSARG_PREFIXES]):
+            runtime_args.append(arg)
+        else:
+            compile_args.append(arg)
+    return struct(
+        compile_args = compile_args,
+        runtime_args = runtime_args,
+    )
 
 def gather_shell_defines(shells):
     defines = {}

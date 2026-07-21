@@ -60,6 +60,22 @@ verilog_rtl_lint_test(
     deps = [":unit_test_top"],
 )
 
+verilog_rtl_lint_test(
+    name = "rtl_lint_configured_vcs",
+    tags = ["manual"],
+    top = "unit_test_top",
+    deps = [":unit_test_top"],
+)
+
+verilog_rtl_lint_test(
+    name = "rtl_lint_explicit_xrun",
+    rulefile = "@rules_verilog//vendors/synopsys:verilog_rtl_lint_default_opts.f",
+    simulator = "XRUN",
+    tags = ["manual"],
+    top = "unit_test_top",
+    deps = [":unit_test_top"],
+)
+
 verilog_dv_tb(
     name = "dv_tb_vcs",
     extra_compile_args = [
@@ -173,6 +189,7 @@ verilog_dv_unit_test(
 verilog_rtl_unit_test(
     name = "rtl_unit_xrun",
     data = [":runtime_tool"],
+    run_args = ["+XRUN_DECLARED_RUNTIME"],
     simulator = "XRUN",
     tags = ["manual"],
     deps = [":unit_test_top"],
@@ -182,8 +199,9 @@ verilog_rtl_unit_test(
     name = "rtl_unit_vcs",
     post_flist_args = [
         "-debug_opts verisium_pp",
-        "-sv",
-        "+define+VCS_NATIVE",
+        "-64bit -sv -mess -disable_sem2009",
+        "+define+VCS_NATIVE +warn=noTEST",
+        "+UCIE_SPEED=16GT",
     ],
     pre_flist_args = [
         "-define",
@@ -193,6 +211,7 @@ verilog_rtl_unit_test(
         "-access",
         "+rw",
     ],
+    run_args = ["+RTL_DECLARED_RUNTIME"],
     simulator = "VCS",
     tags = ["manual"],
     deps = [":unit_test_top"],

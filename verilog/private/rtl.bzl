@@ -1,7 +1,7 @@
 # vim: set ft=bzl :
 """Rules to gather and compile RTL."""
 
-load(":verilog.bzl", "CUSTOM_SHELL", "ShellInfo", "ToolEncapsulationInfo", "VerilogInfo", "gather_shell_defines", "get_transitive_srcs", "merge_default_runfiles", "normalize_vcs_unit_test_compile_args", "resolve_unit_test_simulator", "runfiles_relative_short_path")
+load(":verilog.bzl", "CUSTOM_SHELL", "ShellInfo", "ToolEncapsulationInfo", "VerilogInfo", "gather_shell_defines", "get_transitive_srcs", "merge_default_runfiles", "partition_vcs_unit_test_args", "resolve_unit_test_simulator", "runfiles_relative_short_path")
 
 _SHELLS_DOC = """List of verilog_rtl_shell Labels.
 For each Label, a gumi define will be placed on the command line to use this shell instead of the original module.
@@ -411,9 +411,15 @@ def _verilog_rtl_unit_test_impl(ctx):
 
     target_pre_flist_args = ctx.attr.pre_flist_args
     target_post_flist_args = ctx.attr.post_flist_args
+    runtime_args = ctx.attr.run_args
     if simulator == "VCS":
-        target_pre_flist_args = normalize_vcs_unit_test_compile_args(target_pre_flist_args)
-        target_post_flist_args = normalize_vcs_unit_test_compile_args(target_post_flist_args)
+        partitioned_pre_args = partition_vcs_unit_test_args(target_pre_flist_args)
+        partitioned_post_args = partition_vcs_unit_test_args(target_post_flist_args)
+        target_pre_flist_args = partitioned_pre_args.compile_args
+        target_post_flist_args = partitioned_post_args.compile_args
+        runtime_args = partitioned_pre_args.runtime_args + partitioned_post_args.runtime_args + runtime_args
+    else:
+        target_post_flist_args = target_post_flist_args + runtime_args
 
     pre_fa.extend(target_pre_flist_args)
     template_pre_fa = " ".join(pre_fa)
@@ -478,6 +484,7 @@ def _verilog_rtl_unit_test_impl(ctx):
             "{TOP}": top,
             "{PRE_FLIST_ARGS}": template_pre_fa,
             "{POST_FLIST_ARGS}": post_fa,
+            "{RUN_ARGS}": " ".join(runtime_args),
             "{COMPILE_ARGS_FILE}": runfiles_relative_short_path(compile_args) if compile_args else "",
             "{WAVES_RENDER_CMD_PATH}": runfiles_relative_short_path(waves_cmd),
         },
@@ -523,6 +530,9 @@ verilog_rtl_unit_test = rule(
         "simulator": attr.string(
             values = ["", "XRUN", "VCS"],
             doc = "Simulator to use for this one-step RTL unit test. When omitted, verilog_unit_test_simulator selects XRUN or VCS.\n",
+        ),
+        "run_args": attr.string_list(
+            doc = "Additional arguments passed only to simulation runtime. With VCS, legacy runtime plusargs in pre_flist_args or post_flist_args are also passed to simv.\n",
         ),
         "ut_sim_template": attr.label(
             allow_single_file = True,
@@ -609,21 +619,19 @@ verilog_rtl_unit_test = rule(
             doc = "Additional command line arguments to be placed after the simulator binary but before the flist arguments.\n" +
                   "See ut_sim_template attribute for exact layout." +
                   "For defines to have effect, they must be declared in pre_flist_args not post_flist_args. " +
-                  "With VCS, legacy '-define NAME' entries become '+define+NAME'; Xcelium-only debug/wave flags are omitted.",
+                  "With VCS, legacy '-define NAME' entries become '+define+NAME'; Xcelium-only debug/wave flags are omitted, and non-compiler plusargs are passed to simv.",
         ),
         "post_flist_args": attr.string_list(
             doc = "Additional command line arguments to be placed after the flist arguments\n" +
                   "See ut_sim_template attribute for exact layout. " +
-                  "With VCS, legacy '-define NAME' entries become '+define+NAME'; Xcelium-only debug/wave flags are omitted.",
+                  "With VCS, legacy '-define NAME' entries become '+define+NAME'; Xcelium-only debug/wave flags are omitted, and non-compiler plusargs are passed to simv.",
         ),
     },
     test = True,
 )
 
 def _verilog_rtl_lint_test_impl(ctx):
-    simulator = ctx.attr.simulator
-    if simulator not in ["XRUN", "VCS"]:
-        fail("verilog_rtl_lint_test simulator must be one of ['XRUN', 'VCS'], got '{}'".format(simulator))
+    simulator = resolve_unit_test_simulator(ctx.attr.simulator, ctx.attr._unit_test_simulator)
     run_template = _resolve_unit_test_default_file(
         simulator,
         ctx.file.run_template,
@@ -778,9 +786,8 @@ verilog_rtl_lint_test = rule(
                   "All Labels specified here must provide a VerilogInfo provider.",
         ),
         "simulator": attr.string(
-            default = "XRUN",
-            values = ["XRUN", "VCS"],
-            doc = "Simulator launcher to use for this lint test. XRUN uses the built-in Cadence defaults. VCS automatically switches to the built-in Synopsys launcher, lint command file, parser, and default rulefile.\n",
+            values = ["", "XRUN", "VCS"],
+            doc = "Simulator launcher to use for this lint test. When omitted, verilog_unit_test_simulator selects XRUN or VCS. XRUN uses the built-in Cadence defaults. VCS automatically switches to the built-in Synopsys launcher, lint command file, parser, and default rulefile.\n",
         ),
         "run_template": attr.label(
             allow_single_file = True,
@@ -842,6 +849,9 @@ verilog_rtl_lint_test = rule(
         "_command_override_vcs": attr.label(
             default = Label("@rules_verilog//:verilog_rtl_lint_test_command_vcs"),
             doc = "Default command encapsulation for VCS rtl lint tests.",
+        ),
+        "_unit_test_simulator": attr.label(
+            default = Label("@rules_verilog//:verilog_unit_test_simulator"),
         ),
         "_run_template_xrun_default": attr.label(
             default = Label("@rules_verilog//vendors/cadence:verilog_rtl_lint_test.sh.template"),

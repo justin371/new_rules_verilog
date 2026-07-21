@@ -273,16 +273,21 @@ class VcsFilelistValidationTest(unittest.TestCase):
         self.assertIn("-file tests/vcs_filelist_validation/unit_test_top_vcs.f", rtl_compile_args)
         self.assertIn("+define+PWR_AWARE", rtl_compile_args)
         self.assertIn("+define+VCS_NATIVE", rtl_compile_args)
+        self.assertIn("+warn=noTEST", rtl_compile_args)
         self.assertNotIn("-full64", rtl_compile_args)
         self.assertNotIn("-lca", rtl_compile_args)
+        self.assertNotIn("-64bit", rtl_compile_args)
         self.assertNotIn("-define", rtl_compile_args)
         self.assertNotIn("-ALLOWREDEFINITION", rtl_compile_args)
+        self.assertNotIn("-disable_sem2009", rtl_compile_args)
+        self.assertNotIn("-mess", rtl_compile_args)
         self.assertNotIn("ignored_waves.tcl", rtl_compile_args)
         self.assertNotIn("-access", rtl_compile_args)
         self.assertNotIn("+rw", rtl_compile_args)
         self.assertNotIn("-debug_opts", rtl_compile_args)
         self.assertNotIn("verisium_pp", rtl_compile_args)
         self.assertNotIn("-sv\n", rtl_compile_args)
+        self.assertNotIn("+UCIE_SPEED=16GT", rtl_compile_args)
         self.assertNotIn("-top ", rtl_compile_args)
         self.assertNotIn("-makelib", dv_compile_args)
         self.assertNotIn("-makelib", rtl_compile_args)
@@ -354,7 +359,9 @@ output.chmod(0o755)
             self.assertTrue(all("-file" in record["args"] and "-o" in record["args"] for record in compile_records))
             self.assertTrue(any("+DV_UNIT_RUNTIME" in record["args"] for record in runtime_records))
             self.assertTrue(any("+DV_USER_RUNTIME" in record["args"] for record in runtime_records))
-            self.assertTrue(any("+RTL_USER_RUNTIME" in record["args"] for record in runtime_records))
+            rtl_runtime_record = next(record for record in runtime_records if "+RTL_USER_RUNTIME" in record["args"])
+            self.assertIn("+RTL_DECLARED_RUNTIME", rtl_runtime_record["args"])
+            self.assertIn("+UCIE_SPEED=16GT", rtl_runtime_record["args"])
 
     def test_rtl_unit_test_propagates_data_target_runfiles(self):
         self.assertEqual(
@@ -407,6 +414,7 @@ with open(os.environ["TOOL_LOG"], "a", encoding="utf-8") as log_file:
 
             records = [json.loads(line) for line in log_path.read_text(encoding="utf-8").splitlines()]
             self.assertTrue(any(record["tool"] == "runmod" for record in records))
+            self.assertTrue(any("+XRUN_DECLARED_RUNTIME" in record["args"] for record in records))
             for record in records:
                 self.assertFalse(any(not argument.strip() for argument in record["args"]), record)
 
