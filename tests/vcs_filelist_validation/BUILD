@@ -245,6 +245,28 @@ verilog_rtl_unit_test(
     deps = [":unit_test_top"],
 )
 
+verilog_rtl_unit_test(
+    name = "rtl_svunit_vcs",
+    post_flist_args = ["--directory tests/vcs_filelist_validation"],
+    run_args = ["+SVUNIT_RUNTIME_ARG"],
+    simulator = "VCS",
+    tags = ["manual"],
+    ut_sim_template = "@rules_verilog//vendors/cadence:verilog_rtl_unit_test_svunit.sh.template",
+    ut_sim_waves_template = "@rules_verilog//vendors/cadence:verilog_rtl_unit_test_svunit_waves.tcl.template",
+    deps = [":unit_test_top"],
+)
+
+verilog_rtl_unit_test(
+    name = "rtl_svunit_explicit_xrun",
+    command_override = "@rules_verilog//:verilog_rtl_svunit_test_command",
+    post_flist_args = ["--directory tests/vcs_filelist_validation"],
+    simulator = "XRUN",
+    tags = ["manual"],
+    ut_sim_template = "@rules_verilog//vendors/cadence:verilog_rtl_unit_test_svunit.sh.template",
+    ut_sim_waves_template = "@rules_verilog//vendors/cadence:verilog_rtl_unit_test_svunit_waves.tcl.template",
+    deps = [":unit_test_top"],
+)
+
 py_test(
     name = "vcs_filelist_validation_test",
     timeout = "short",
@@ -272,6 +294,8 @@ py_test(
         ":rtl_lint_vcs_custom_rulefile_cmds.tcl",
         ":rtl_lint_vcs_legacy_rulefile",
         ":rtl_lint_vcs_legacy_rulefile_cmds.tcl",
+        ":rtl_svunit_explicit_xrun",
+        ":rtl_svunit_vcs",
         ":rtl_unit_vcs",
         ":rtl_unit_xrun",
         ":synth_flist_compat",
@@ -309,6 +333,8 @@ py_test(
         "//vendors/synopsys:verilog_rtl_lint_test.sh.template",
         "//vendors/synopsys:verilog_rtl_unit_test.sh.template",
         "//vendors/synopsys:verilog_rtl_unit_test_compile_args.f.template",
+        "//vendors/synopsys:verilog_rtl_unit_test_svunit.sh.template",
+        "//vendors/synopsys:verilog_rtl_unit_test_svunit_waves.tcl.template",
         "//vendors/synopsys:verilog_rtl_unit_test_waves.tcl.template",
         "//verilog/private:dv.bzl",
         "//verilog/private:rtl.bzl",

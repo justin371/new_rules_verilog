@@ -1493,6 +1493,9 @@ run_bounded_process([
         vcs_compile_template = self._read_repo_file("bin/templates/vcs_compile_template.sh.j2")
         simulation_template = self._read_repo_file("bin/templates/sim_template.sh.j2")
         svunit_template = self._read_repo_file("vendors/cadence/verilog_rtl_unit_test_svunit.sh.template")
+        vcs_svunit_template = self._read_repo_file("vendors/synopsys/verilog_rtl_unit_test_svunit.sh.template")
+        vcs_svunit_waves_template = self._read_repo_file(
+            "vendors/synopsys/verilog_rtl_unit_test_svunit_waves.tcl.template")
         cdc_template = self._read_repo_file("vendors/cadence/verilog_rtl_cdc_test.sh.template")
         lint_templates = [
             self._read_repo_file("vendors/cadence/verilog_rtl_lint_test.sh.template"),
@@ -1526,6 +1529,14 @@ run_bounded_process([
         self.assertIn("other shell braces are preserved", dv_rule)
         self.assertIn("{POST_FLIST_ARGS} \\", svunit_template)
         self.assertIn('"${remaining_args[@]}"', svunit_template)
+        self.assertIn("set -Eeuo pipefail", vcs_svunit_template)
+        self.assertIn("-s vcs", vcs_svunit_template)
+        self.assertIn("{SVUNIT_COMPILE_ARGS}", vcs_svunit_template)
+        self.assertIn("{SVUNIT_FLISTS}", vcs_svunit_template)
+        self.assertIn("{SVUNIT_RUN_ARGS}", vcs_svunit_template)
+        self.assertNotIn("xcelium", vcs_svunit_template)
+        self.assertIn("wave dumping is intentionally disabled", vcs_svunit_waves_template)
+        self.assertNotIn("database -open", vcs_svunit_waves_template)
         self.assertIn("completed without cdc_run/jg.log", cdc_template)
         for template in lint_templates:
             self.assertIn("set -Eeuo pipefail", template)
@@ -1600,6 +1611,47 @@ run_bounded_process([
                          arguments[wave_index - 1:wave_index + 3])
         self.assertEqual("user argument with spaces", arguments[-1])
         self.assertEqual(["waves.shm"], viewer_args.read_text(encoding="utf-8").splitlines())
+
+    def test_vcs_svunit_uses_vcs_backend_and_preserves_runtime_argv(self):
+        root = Path(tempfile.mkdtemp(prefix="vcs svunit argv contract "))
+        self.addCleanup(shutil.rmtree, root, ignore_errors=True)
+        runner_stub = root / "runSVUnit"
+        runner_args = root / "runner args.txt"
+        runner_stub.write_text(
+            "#!/usr/bin/env bash\nprintf '%s\\n' \"$@\" > {}\nprintf '[testrunner]: PASSED\\n' > run.log\n".format(
+                shlex.quote(runner_args.name)),
+            encoding="utf-8",
+            newline="\n",
+        )
+        runner_stub.chmod(0o755)
+
+        template = self._read_repo_file(
+            "vendors/synopsys/verilog_rtl_unit_test_svunit.sh.template").replace("\r\n", "\n")
+        script_text = template.replace("{SIMULATOR_COMMAND}", "")
+        script_text = script_text.replace("{SVUNIT_COMPILE_ARGS}", "-c '+define+COMPILE_ARG'")
+        script_text = script_text.replace("{SVUNIT_FLISTS}", "-f input.f")
+        script_text = script_text.replace("{POST_FLIST_ARGS}", "--directory .")
+        script_text = script_text.replace("{SVUNIT_RUN_ARGS}", "-r '+RUNTIME_ARG=with space'")
+        script = root / "run vcs svunit.sh"
+        script.write_text(script_text, encoding="utf-8", newline="\n")
+
+        environment = os.environ.copy()
+        environment["PATH"] = "{}{}{}".format(root, os.pathsep, environment["PATH"])
+        subprocess.run(
+            ["bash", script.name, "--waves", "--launch", "user argument with spaces"],
+            cwd=root,
+            env=environment,
+            check=True,
+        )
+
+        arguments = runner_args.read_text(encoding="utf-8").splitlines()
+        self.assertEqual("vcs", arguments[arguments.index("-s") + 1])
+        self.assertEqual("input.f", arguments[arguments.index("-f") + 1])
+        self.assertIn("+define+COMPILE_ARG", arguments)
+        self.assertIn("+RUNTIME_ARG=with space", arguments)
+        self.assertNotIn("--waves", arguments)
+        self.assertNotIn("--launch", arguments)
+        self.assertEqual("user argument with spaces", arguments[-1])
 
     def test_rtl_unit_test_waves_and_launch_preserve_execution_argv(self):
         root = Path(tempfile.mkdtemp(prefix="rtl unit argv contract "))
@@ -2634,7 +2686,9 @@ run_bounded_process([
         self.assertIn("expand_msie_compile_args", xcelium_backend)
         self.assertIn('flist_field = "transitive_vcs_flists" if simulator == "VCS"', rtl_bzl)
         self.assertIn('filelist_flag = "-file" if simulator == "VCS" else "-f"', rtl_bzl)
-        self.assertIn("uses the Xcelium-only SVUnit template", rtl_bzl)
+        self.assertIn("_ut_sim_template_svunit_vcs", rtl_bzl)
+        self.assertIn("_command_override_svunit_vcs", rtl_bzl)
+        self.assertNotIn("uses the Xcelium-only SVUnit template", rtl_bzl)
         self.assertIn('defines.extend(["+define+{}{}', rtl_bzl)
         self.assertNotIn('defines.extend(["+{}{}', rtl_bzl)
         self.assertIn("[_gatesim_target(inherit, corner) for inherit in inherits]", dv_bzl)

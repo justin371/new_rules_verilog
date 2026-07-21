@@ -168,6 +168,13 @@ class VcsFilelistValidationTest(unittest.TestCase):
                 "+UNIFIED_VCS_RUNTIME_ARG",
                 "-f bazel_runfiles_main/tests/vcs_filelist_validation/vcs_partitions.cfg",
             ],
+            "tests/vcs_filelist_validation/rtl_svunit_vcs": [
+                "runSVUnit",
+                "-s vcs",
+                "-f tests/vcs_filelist_validation/unit_test_top_vcs.f",
+                "--directory tests/vcs_filelist_validation",
+                "-r '+SVUNIT_RUNTIME_ARG'",
+            ],
         }
 
         for relative_path, needles in filelist_checks.items():
@@ -184,9 +191,16 @@ class VcsFilelistValidationTest(unittest.TestCase):
 
         lint_script = read_runfile("tests/vcs_filelist_validation/rtl_lint_vcs")
         lint_args = read_runfile("tests/vcs_filelist_validation/rtl_lint_vcs_cmds.tcl")
+        svunit_script = read_runfile("tests/vcs_filelist_validation/rtl_svunit_vcs")
+        xrun_svunit_script = read_runfile("tests/vcs_filelist_validation/rtl_svunit_explicit_xrun")
         self.assertLess(lint_script.index("-full64"), lint_script.index("-file"))
         self.assertNotIn("-full64", lint_args)
         self.assertNotIn("-lca", lint_args)
+        self.assertNotIn("xcelium", svunit_script)
+        self.assertNotIn("runmod -t xrun", svunit_script)
+        self.assertNotIn("-file tests/vcs_filelist_validation/unit_test_top_vcs.f", svunit_script)
+        self.assertIn("-s xcelium", xrun_svunit_script)
+        self.assertNotIn("-s vcs", xrun_svunit_script)
 
         self.assertFalse(runfile_exists("tests/vcs_filelist_validation/dv_tb_vcs_compile_args_pldm_ice.f"))
         self.assertFalse(runfile_exists("tests/vcs_filelist_validation/dv_tb_vcs_compile_args_pldm_sa.f"))

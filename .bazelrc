@@ -16,6 +16,7 @@ build --//:verilog_rtl_lint_test_command="runmod -t xrun --"
 build:vcs --//:verilog_unit_test_simulator=VCS
 build:vcs --//:verilog_dv_unit_test_command_vcs="runmod vcs -- vcs"
 build:vcs --//:verilog_rtl_lint_test_command_vcs="runmod vcs -- vcs"
+build:vcs --//:verilog_rtl_svunit_test_command_vcs="runmod vcs --"
 build:vcs --//:verilog_rtl_unit_test_command_vcs="runmod vcs -- vcs"
 build:vcs --//:verilog_vcs_unit_test_runner="runmod vcs --"
 # build:vcs --//:verilog_rtl_wave_viewer_command_vcs="runmod vcs -- verdi"
