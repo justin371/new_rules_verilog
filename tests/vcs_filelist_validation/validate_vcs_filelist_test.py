@@ -184,9 +184,11 @@ class VcsFilelistValidationTest(unittest.TestCase):
 
         lint_script = read_runfile("tests/vcs_filelist_validation/rtl_lint_vcs")
         lint_args = read_runfile("tests/vcs_filelist_validation/rtl_lint_vcs_cmds.tcl")
+        default_lint_opts = read_runfile("vendors/synopsys/verilog_rtl_lint_default_opts.f")
         self.assertLess(lint_script.index("-full64"), lint_script.index("-file"))
         self.assertNotIn("-full64", lint_args)
         self.assertNotIn("-lca", lint_args)
+        self.assertIn("-suppress=SV-UIP", default_lint_opts)
 
         self.assertFalse(runfile_exists("tests/vcs_filelist_validation/dv_tb_vcs_compile_args_pldm_ice.f"))
         self.assertFalse(runfile_exists("tests/vcs_filelist_validation/dv_tb_vcs_compile_args_pldm_sa.f"))
