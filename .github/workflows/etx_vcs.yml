@@ -46,10 +46,17 @@ jobs:
         run: ./tests/etx_vcs_validation.sh
 
       - name: upload-etx-logs
-        if: always()
+        # Licensed logs can contain proprietary source excerpts. Never publish
+        # them as artifacts from a public repository.
+        if: always() && github.event.repository.private
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: etx-vcs-${{ github.run_id }}-${{ github.run_attempt }}
           path: ${{ env.ETX_RESULTS_DIR }}
           if-no-files-found: warn
           retention-days: 14
+
+      - name: record-etx-log-location
+        if: always()
+        shell: bash
+        run: echo "Full ETX logs retained at ${ETX_RESULTS_DIR}" >> "${GITHUB_STEP_SUMMARY}"
