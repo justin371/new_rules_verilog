@@ -24,7 +24,9 @@ jobs:
       - name: checkout
         uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4.3.1
         with:
-          fetch-depth: 1
+          # The ETX checkout fetches from this local clone and needs the full
+          # ancestry for its enforced fast-forward update.
+          fetch-depth: 0
 
       - name: select-results-directory
         shell: bash
