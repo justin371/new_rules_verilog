@@ -1,0 +1,3 @@
+#!/usr/bin/env bash
+# Contract fixture for custom VCS DV unit-test template substitutions.
+{SIMULATOR_COMMAND} {SIMULATOR_RUNNER} {COMPILE_ARGS_FILE} {DEFAULT_SIM_OPTS} {DPI_LIBS} {FLISTS} {SIM_ARGS} {COMPILE_ARGS} {RUN_ARGS}

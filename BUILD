@@ -62,6 +62,11 @@ verilog_tool_encapsulation(
     build_setting_default = "XRUN",
 )
 
+verilog_tool_encapsulation(
+    name = "verilog_vcs_unit_test_runner",
+    build_setting_default = "",
+)
+
 # Can't get buildifier to report diff warnings and lint warnings in the same rule
 # Throws error:
 #   buildifier: lint mode warn is only compatible with --mode=fix

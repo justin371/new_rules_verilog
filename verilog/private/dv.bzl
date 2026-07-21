@@ -861,7 +861,7 @@ verilog_dv_unit_test = rule(
         "ut_sim_template": attr.label(
             allow_single_file = True,
             default = Label("@rules_verilog//vendors/cadence:verilog_dv_unit_test.sh.template"),
-            doc = "The template to generate the bash script to run the simulation.\n",
+            doc = "The template to generate the bash script to run the simulation. Custom templates selected with VCS must implement the VCS compile-then-simv flow.\n",
         ),
         "_ut_sim_template_xrun": attr.label(
             allow_single_file = True,
@@ -909,6 +909,9 @@ verilog_dv_unit_test = rule(
         ),
         "_unit_test_simulator": attr.label(
             default = Label("@rules_verilog//:verilog_unit_test_simulator"),
+        ),
+        "_vcs_unit_test_runner": attr.label(
+            default = Label("@rules_verilog//:verilog_vcs_unit_test_runner"),
         ),
     },
     outputs = {"out": "%{name}_run.sh"},

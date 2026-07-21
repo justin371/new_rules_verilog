@@ -173,7 +173,7 @@ Compiles and runs a small unit test for DV.
 | <a id="verilog_dv_unit_test-run_args"></a>run_args |  Additional arguments passed only to simulation runtime.   | List of strings | optional | [] |
 | <a id="verilog_dv_unit_test-sim_args"></a>sim_args |  Deprecated compile arguments. Use `compile_args` and `run_args` instead.   | List of strings | optional | [] |
 | <a id="verilog_dv_unit_test-simulator"></a>simulator |  Simulator to use for this one-step unit test. When omitted, `verilog_unit_test_simulator` selects XRUN or VCS.   | String | optional | `""` |
-| <a id="verilog_dv_unit_test-ut_sim_template"></a>ut_sim_template |  The template to generate the bash script to run the simulation.   | <a href="https://bazel.build/docs/build-ref.html#labels">Label</a> | optional | @rules_verilog//vendors/cadence:verilog_dv_unit_test.sh.template |
+| <a id="verilog_dv_unit_test-ut_sim_template"></a>ut_sim_template |  The template to generate the bash script to run the simulation. Custom templates selected with VCS must implement the VCS compile-then-`simv` flow. Existing placeholders including `FLISTS`, `SIM_ARGS`, `COMPILE_ARGS`, and `RUN_ARGS` are available for both simulators.   | <a href="https://bazel.build/docs/build-ref.html#labels">Label</a> | optional | @rules_verilog//vendors/cadence:verilog_dv_unit_test.sh.template |
 
 
 <a id="verilog_rtl_cdc_test"></a>

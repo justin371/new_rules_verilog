@@ -150,6 +150,17 @@ verilog_dv_unit_test(
     deps = [":unit_test_top"],
 )
 
+verilog_dv_unit_test(
+    name = "dv_unit_vcs_custom_template",
+    compile_args = ["+define+CUSTOM_COMPILE_ARG"],
+    run_args = ["+CUSTOM_RUN_ARG"],
+    sim_args = ["+define+CUSTOM_LEGACY_ARG"],
+    simulator = "VCS",
+    tags = ["manual"],
+    ut_sim_template = "custom_vcs_dv_unit_test.sh.template",
+    deps = [":unit_test_top"],
+)
+
 verilog_rtl_unit_test(
     name = "rtl_unit_xrun",
     data = [":runtime_tool"],
@@ -183,6 +194,7 @@ py_test(
         ":dv_tb_xrun_ccf_compile_args.f",
         ":dv_tb_xrun_ccf_tb_options.py",
         ":dv_unit_vcs",
+        ":dv_unit_vcs_custom_template",
         ":dv_unit_xrun",
         ":no_synth_compat",
         ":rtl_lint_vcs",

@@ -52,7 +52,7 @@ deps/         # pinned public and site-local repository declarations
 - Starlark formatting and linting run through root Buildifier targets. Keep BUILD data/deps synchronized with Python modules and templates.
 - Simulator names are uppercase `XRUN` or `VCS`; `SIM_PLATFORM` selects the CLI default and falls back to XRUN. Each DV target still records its simulator.
 - `simmer` accepts one simulator per invocation. Quote selectors containing `*`.
-- VCS simulation uses `verilog_dv_tb` plus `simmer`. The one-step RTL/DV unit-test rules are XRUN-only; RTL lint supports both backends.
+- Large VCS simulation uses `verilog_dv_tb` plus `simmer`; one-step RTL/DV unit tests and RTL lint support XRUN and VCS.
 - Public rule/API changes require direct updates to `docs/defs.md`; docs checks verify anchors and links, not full signature equality.
 - Licensed simulator behavior is validated on Red Hat with Python 3.12. macOS and license-free CI validate generation only.
 

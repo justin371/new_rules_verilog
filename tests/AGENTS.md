@@ -9,7 +9,7 @@ Bazel-driven stdlib `unittest` coverage plus nested workspace fixtures and licen
 ```text
 *_test.py                 # focused Python unit/behavior tests
 external_fixture/         # standalone WORKSPACE consumed as external IP
-vcs_filelist_validation/  # VCS two-step and XRUN one-step generated contracts
+vcs_filelist_validation/  # VCS/XRUN two-step and one-step generated contracts
 redhat_smoke.sh           # Red Hat/Python/Bazel portability gate
 doc_test.sh               # direct documentation consistency checks
 ```
@@ -31,7 +31,7 @@ doc_test.sh               # direct documentation consistency checks
 | Scheduler/process launch | `job_manager_launch_test.py` |
 | Discovery/cache behavior | `regression_discovery_test.py` |
 | Public docs/exports | `docs_test.py`, `doc_test.sh` |
-| VCS two-step and XRUN one-step scripts/filelists | `vcs_filelist_validation/` |
+| VCS/XRUN two-step and one-step scripts/filelists | `vcs_filelist_validation/` |
 | External repository paths | `external_fixture/` plus VCS validation tests |
 
 ## ANTI-PATTERNS
