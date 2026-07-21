@@ -654,10 +654,21 @@ def _verilog_rtl_lint_test_impl(ctx):
     rulefile = None
     if len(ctx.files.rulefile) > 1:
         fail("Only one rulefile allowed, but {} has several rulefiles".format(ctx.label))
-    if len(ctx.files.rulefile) == 1:
+    if len(ctx.files.rulefile_vcs) > 1:
+        fail("Only one VCS rulefile allowed, but {} has several rulefiles".format(ctx.label))
+    if simulator == "VCS":
+        if len(ctx.files.rulefile_vcs) == 1:
+            rulefile = ctx.files.rulefile_vcs[0]
+        elif ctx.attr.simulator == "VCS" and len(ctx.files.rulefile) == 1:
+            # Preserve the pre-rulefile_vcs contract for targets that explicitly
+            # selected VCS and supplied a VCS-compatible rulefile.
+            rulefile = ctx.files.rulefile[0]
+        else:
+            # A legacy rulefile on a config-selected VCS target is a Cadence/HAL
+            # policy file and must not be parsed as a VCS argument file.
+            rulefile = ctx.file._rulefile_vcs_default
+    elif len(ctx.files.rulefile) == 1:
         rulefile = ctx.files.rulefile[0]
-    elif simulator == "VCS":
-        rulefile = ctx.file._rulefile_vcs_default
     else:
         fail("verilog_rtl_lint_test {} requires rulefile when simulator = 'XRUN'".format(ctx.label))
 
@@ -744,6 +755,8 @@ def _verilog_rtl_lint_test_impl(ctx):
     ]
     if ctx.attr.rulefile:
         lint_runfile_targets.append(ctx.attr.rulefile)
+    if ctx.attr.rulefile_vcs:
+        lint_runfile_targets.append(ctx.attr.rulefile_vcs)
     runfiles = merge_default_runfiles(
         ctx,
         files = trans_srcs.to_list() + trans_flists.to_list() + ctx.files.design_info + [rulefile, lint_parser] + ctx.files._lint_parser_lib + [ctx.outputs.command_script],
@@ -803,6 +816,10 @@ verilog_rtl_lint_test = rule(
                   "When omitted and simulator = VCS, rules_verilog uses a built-in Synopsys default lint opts file.\n" +
                   "When simulator = XRUN, a project-specific Cadence/HAL rulefile is still required.\n" +
                   "Example HAL rulefile: https://github.com/freecores/t6507lp/blob/ca7d7ea779082900699310db459a544133fe258a/lint/run/hal.def",
+        ),
+        "rulefile_vcs": attr.label(
+            allow_single_file = True,
+            doc = "Optional VCS-specific lint options file. When simulator selection comes from the global VCS config, the legacy rulefile remains reserved for Cadence/HAL and this attribute overrides the built-in Synopsys defaults. Explicit simulator = 'VCS' targets may continue using rulefile for backward compatibility.",
         ),
         "shells": attr.label_list(
             doc = _SHELLS_DOC,

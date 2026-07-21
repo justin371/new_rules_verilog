@@ -1,0 +1,2 @@
+# Legacy Cadence/HAL syntax must never be parsed by config-selected VCS lint.
+category legacy_rules
