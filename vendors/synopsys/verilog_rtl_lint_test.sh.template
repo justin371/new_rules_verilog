@@ -5,10 +5,25 @@ set -Eeuo pipefail
 
 trap 'rc=$?; printf "ERROR: VCS lint script failed at line %s (exit %s): %s\n" "$LINENO" "$rc" "$BASH_COMMAND" >&2' ERR
 
+_lint_on_exit() {
+  local rc=$?
+  trap - ERR
+  if [[ -n "${work_dir:-}" ]]; then
+    rm -rf -- "$work_dir" || true
+  fi
+  exit "$rc"
+}
+trap _lint_on_exit EXIT
+
+work_root="${TEST_TMPDIR:-${TMPDIR:-/tmp}}"
+work_dir="$(mktemp -d "${work_root%/}/rules_verilog_vcs_lint.XXXXXX")"
+
 mv lint.log lint.log.bak 2> /dev/null || true
 {SIMULATOR_COMMAND} \
   -full64 \
   -l lint.log \
+  -Mdir="$work_dir/csrc" \
+  -o "$work_dir/simv" \
   -file {COMMAND_SCRIPT}
 
 export PYTHONPATH="{LINT_PARSER_LIB}:${PYTHONPATH:-}"
