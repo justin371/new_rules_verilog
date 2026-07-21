@@ -9,12 +9,6 @@ expected_sha="${3:?usage: etx_vcs_job.sh PROJECT_DIR RESULTS_DIR EXPECTED_SHA}"
 mkdir -p "${results_dir}"
 cd "${project_dir}"
 
-# This is the non-interactive equivalent of the ETX `ss` alias.
-set +u
-# shellcheck disable=SC1091
-source env/digital_env.sh
-set -Eeuo pipefail
-
 {
     echo "expected rules_verilog commit: ${expected_sha}"
     echo "project directory: ${project_dir}"

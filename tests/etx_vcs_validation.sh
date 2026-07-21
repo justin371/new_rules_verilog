@@ -17,26 +17,15 @@ for directory in "${source_repo}" "${rules_checkout}" "${project_dir}"; do
     }
 done
 
-mkdir -p "$(dirname "${lock_file}")" "${results_dir}"
-
-# Load the same ETX environment as the interactive `ss` alias before using
-# LSF. Temporarily disable nounset because the site script is interactive-shell
-# compatible but is not required to be `set -u` clean.
-runner_working_dir="${PWD}"
-cd "${project_dir}"
-set +u
-# shellcheck disable=SC1091
-source env/digital_env.sh
-set -Eeuo pipefail
-cd "${runner_working_dir}"
-
 for command in bsub flock git; do
     command -v "${command}" >/dev/null || {
-        echo "required command not found after loading the ETX environment: ${command}" >&2
+        echo "required command not found: ${command}" >&2
+        echo "start the ETX runner from a terminal where 'ss' has completed successfully" >&2
         exit 127
     }
 done
 
+mkdir -p "$(dirname "${lock_file}")" "${results_dir}"
 exec 9>"${lock_file}"
 flock -n 9 || {
     echo "another ETX rules_verilog validation is already running" >&2
@@ -69,6 +58,7 @@ printf '%s\n' \
     "workflow commit: ${expected_sha}" \
     "rules checkout: ${rules_checkout}" \
     "consumer project: ${project_dir}" \
+    "bsub: $(command -v bsub)" \
     "results: ${results_dir}" >"${results_dir}/submission.txt"
 
 job_name="rv-vcs-${GITHUB_RUN_ID:-manual}-${GITHUB_RUN_ATTEMPT:-1}"

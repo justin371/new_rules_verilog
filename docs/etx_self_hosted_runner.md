@@ -2,9 +2,8 @@
 
 The `ETX Licensed VCS` workflow runs the full consumer test suite on the ETX
 network. A self-hosted GitHub Actions runner submits the licensed work to the
-`syn` LSF queue. Both the submit step and compute job source
-`env/digital_env.sh`, which is the non-interactive equivalent of the `ss`
-alias.
+`syn` LSF queue. The runner inherits the same environment as the validated
+interactive flow, and LSF exports that environment to the compute job.
 
 ## One-time runner registration
 
@@ -24,16 +23,21 @@ Configure the runner with the dedicated label used by the workflow:
   --work _work
 ```
 
-For the first validation, keep the ETX terminal open and start the runner in
-the foreground:
+For the first validation, keep the ETX terminal open. Initialize the project
+environment with `ss` before starting the runner in the foreground:
 
 ```bash
+cd /nfs/workspace/XinAnRiver/lwang/XinAnRiver
+ss
+cd /nfs/workspace/XinAnRiver/lwang/actions-runner
 ./run.sh
 ```
 
-The runner itself does not need `ss`; the submitted job sources the project
-environment explicitly. If service installation is permitted later, GitHub's
-generated `svc.sh` commands can replace the foreground process.
+The site `digital_env.sh` loads environment modules intended for an interactive
+login shell, so the workflow does not source it again. If the runner is
+restarted from a new terminal, run `ss` again first. A future service wrapper
+must perform the equivalent environment initialization before launching the
+runner.
 
 ## Validation contract
 
