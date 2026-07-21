@@ -52,7 +52,9 @@ simv="$work_dir/simv"
     -Mdir="$work_dir/csrc" \
     -o "$simv"
 
-{SIMULATOR_RUNNER} "$simv" "${remaining_args[@]}"
+{SIMULATOR_RUNNER} "$simv" \
+    {RUN_ARGS} \
+    "${remaining_args[@]}"
 
 # wave_dir="${TEST_UNDECLARED_OUTPUTS_DIR:-$PWD}"
 # {SIMULATOR_RUNNER} "$simv" "${runtime_wave_args[@]}" "${remaining_args[@]}"
