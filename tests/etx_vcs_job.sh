@@ -13,7 +13,7 @@ cd "${project_dir}"
 set +u
 # shellcheck disable=SC1091
 source env/digital_env.sh
-set -u
+set -Eeuo pipefail
 
 {
     echo "expected rules_verilog commit: ${expected_sha}"
