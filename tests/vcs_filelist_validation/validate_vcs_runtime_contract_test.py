@@ -27,6 +27,7 @@ if str(LIB_DIR) not in sys.path:
 from args_parser import parse_args
 from args_parse.parser import create_parser
 from lint_parser_hal import HalLintLog
+from lint_parser_vcs import VcsLintLog
 import simmer
 from lib.job_lib import Job, JobManager, JobStatus
 from lib.regression import resolve_report_generation
@@ -63,6 +64,30 @@ class DummyVcompJob:
 
 
 class VcsRuntimeContractTest(unittest.TestCase):
+
+    def test_vcs_lint_inline_waiver_accepts_aligned_comments(self):
+        root = Path(tempfile.mkdtemp(dir="."))
+        self.addCleanup(shutil.rmtree, root, ignore_errors=True)
+        source = root / "aligned_waiver.sv"
+        source.write_text(
+            "\n" * 12 + " input tx_clk,    // lint: disable=USEPRT,UI\n",
+            encoding="utf-8",
+        )
+        source_path = source.relative_to(Path.cwd()).as_posix()
+        lint_log = root / "lint.log"
+        lint_log.write_text(
+            "Lint-[UI] Unused input\n"
+            "{}, 13\n"
+            "  Following is an unused input.\n".format(source_path),
+            encoding="utf-8",
+        )
+
+        parsed = VcsLintLog(str(lint_log), "", mock.Mock())
+
+        self.assertEqual(1, len(parsed.warnings))
+        self.assertEqual(source_path, parsed.warnings[0].filename)
+        self.assertEqual("13", parsed.warnings[0].lineno)
+        self.assertTrue(parsed.warnings[0].waived)
 
     def test_bounded_process_kills_group_after_timeout(self):
         process = mock.Mock(pid=123, returncode=-signal.SIGKILL)

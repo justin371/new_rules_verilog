@@ -9,14 +9,14 @@ import sys
 import cmn_logging
 
 
-LINE_WAIVER_REGEXP = re.compile(r"\S\s// lint: disable=(.*)")
+LINE_WAIVER_REGEXP = re.compile(r"\S[ \t]+// lint: disable=(.*)")
 BLOCK_WAIVER_START_REGEXP = re.compile(r"\s*// lint: disable=(.*)")
 BLOCK_WAIVER_END_REGEXP = re.compile(r"\s*// lint: enable=(.*)")
 HEADER_REGEXP = re.compile(r"^(?P<severity>Warning|Error|Fatal|Lint)-\[(?P<errcode>[^\]]+)\]\s*(?P<info>.*)$")
 FILE_LINE_REGEXPS = [
-    re.compile(r'"(?P<filename>[^"]+)",\s*line\s*(?P<lineno>\d+)'),
-    re.compile(r'(?P<filename>[A-Za-z]:[\\/][^,\n]+),\s*line\s*(?P<lineno>\d+)'),
-    re.compile(r'(?P<filename>[/\w.\-\\]+),\s*line\s*(?P<lineno>\d+)'),
+    re.compile(r'"(?P<filename>[^"]+)",\s*(?:line\s*)?(?P<lineno>\d+)'),
+    re.compile(r'(?P<filename>[A-Za-z]:[\\/][^,\n]+),\s*(?:line\s*)?(?P<lineno>\d+)'),
+    re.compile(r'(?P<filename>[/\w.\-\\]+),\s*(?:line\s*)?(?P<lineno>\d+)'),
 ]
 
 

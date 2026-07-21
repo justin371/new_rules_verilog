@@ -346,6 +346,7 @@ py_test(
     deps = [
         "//bin:args_parser_lib",
         "//bin:lint_parser_hal",
+        "//bin:lint_parser_vcs",
         "//lib:cmn_logging",
         "//lib:compile_cache",
         "//lib:job_lib",
