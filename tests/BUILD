@@ -68,7 +68,6 @@ py_test(
         "//:README.md",
         "//docs:defs.md",
         "//docs:eda_workflow_review.md",
-        "//docs:etx_self_hosted_runner.md",
         "//docs:examples/vcs_fsdb_dump.tcl",
         "//docs:simmer_vcs_xcelium.md",
         "//docs:simulator_migration_checklist.md",
