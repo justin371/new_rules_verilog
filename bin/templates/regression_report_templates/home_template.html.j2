@@ -18,6 +18,8 @@
     <span class="section-note">{{ benches|length }} testbench{% if benches|length != 1 %}es{% endif %}</span>
   </div>
   {% if benches %}
+  {% set coverage_benches = benches|selectattr('coverage_enabled')|list %}
+  {% set show_coverage = coverage_benches|length == benches|length %}
   <div class="table-wrap">
     <table>
       <caption>{{ project_name }} latest regression results</caption>
@@ -26,9 +28,11 @@
           <th scope="col">Block</th>
           <th scope="col">Tests</th>
           <th scope="col">Passing</th>
+          {% if show_coverage %}
           <th scope="col">Total Coverage</th>
           <th scope="col">Code Coverage</th>
           <th scope="col">Functional Coverage</th>
+          {% endif %}
           <th scope="col">Failures</th>
           <th scope="col">Last Run</th>
         </tr>
@@ -46,9 +50,11 @@
           <td class="cell-primary"><a href="{{ project_name|urlencode }}/{{ item.bench|urlencode }}/index.html">{{ item.bench }}</a></td>
           <td>{{ item.total|default(0, true) }}</td>
           <td class="{% if passrate >= 99.999 %}heat-good{% elif passrate >= 90 %}heat-warn{% else %}heat-bad{% endif %}">{{ "%.2f"|format(passrate) }}%</td>
+          {% if show_coverage %}
           <td class="{% if not total_available %}heat-neutral{% elif total_coverage >= 90 %}heat-good{% elif total_coverage >= 75 %}heat-warn{% else %}heat-bad{% endif %}">{% if total_available %}{{ "%.2f"|format(total_coverage) }}%{% else %}N/A{% endif %}</td>
           <td class="{% if not code_available %}heat-neutral{% elif code_coverage >= 90 %}heat-good{% elif code_coverage >= 75 %}heat-warn{% else %}heat-bad{% endif %}">{% if code_available %}{{ "%.2f"|format(code_coverage) }}%{% else %}N/A{% endif %}</td>
           <td class="{% if not functional_available %}heat-neutral{% elif functional_coverage >= 90 %}heat-good{% elif functional_coverage >= 75 %}heat-warn{% else %}heat-bad{% endif %}">{% if functional_available %}{{ "%.2f"|format(functional_coverage) }}%{% else %}N/A{% endif %}</td>
+          {% endif %}
           <td class="{% if item.failed|default(0, true)|int > 0 %}heat-bad{% else %}heat-good{% endif %}">{{ item.failed|default(0, true) }}</td>
           <td class="cell-muted">{{ item.timestamp|default("No report", true) }}</td>
         </tr>

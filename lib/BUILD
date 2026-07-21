@@ -54,6 +54,23 @@ py_library(
 )
 
 py_library(
+    name = "report_rerun_manifest",
+    srcs = ["report_rerun_manifest.py"],
+    deps = [":regression_report"],
+)
+
+py_library(
+    name = "report_rerun",
+    srcs = ["report_rerun.py"],
+    deps = [
+        ":regression_report",
+        ":report_rerun_manifest",
+        "//lib/simulators:base",
+        "//lib/simulators:vcs",
+    ],
+)
+
+py_library(
     name = "runtime_options",
     srcs = ["runtime_options.py"],
 )

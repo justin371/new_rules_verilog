@@ -33,6 +33,7 @@ from lib import cmn_logging
 from lib import compile_cache
 from lib import job_lib
 from lib import regression
+from lib import report_rerun
 from lib import rv_utils
 from lib import seed_plan
 from lib import sim_artifacts
@@ -78,6 +79,13 @@ report_jinja2_env = regression_report.create_template_environment(os.path.join(d
 RERUN_TEMPLATE = jinja2_env.get_template('rerun_template.sh.j2')
 RUN_WAVE_TEMPLATE = jinja2_env.get_template('run_waves_template.sh.j2')
 
+_FILESYSTEM_COMPONENT_MAX_BYTES = 255
+
+
+def _utf8_prefix(value, byte_limit):
+    """Return the longest UTF-8-safe prefix within byte_limit bytes."""
+    return value.encode("utf-8")[:byte_limit].decode("utf-8", errors="ignore")
+
 
 def _format_simulation_directory_name(vcomp_name, simulator_name, test_name, seed, iteration, directory_suffix):
     normalized_suffix = directory_suffix.lstrip('_')
@@ -85,7 +93,18 @@ def _format_simulation_directory_name(vcomp_name, simulator_name, test_name, see
     result_name = "%s__%s__%s__%d" % (vcomp_name, simulator_name, test_name, seed)
     if iteration > 1:
         result_name += "__i%d" % iteration
-    return result_name + suffix_component
+    directory_name = result_name + suffix_component
+    encoded_name = directory_name.encode("utf-8")
+    if len(encoded_name) <= _FILESYSTEM_COMPONENT_MAX_BYTES:
+        return directory_name
+
+    # Keep a stable identity and the caller-provided suffix when long test names
+    # would otherwise exceed Linux NAME_MAX.
+    digest_component = "__{}".format(sha1(encoded_name).hexdigest()[:16])
+    suffix_budget = _FILESYSTEM_COMPONENT_MAX_BYTES - len(digest_component.encode("utf-8"))
+    retained_suffix = _utf8_prefix(suffix_component, suffix_budget)
+    prefix_budget = suffix_budget - len(retained_suffix.encode("utf-8"))
+    return _utf8_prefix(result_name, prefix_budget) + digest_component + retained_suffix
 
 
 def get_bazel_bin(project_dir=None):
@@ -754,13 +773,14 @@ class TestJob(Job):
 
         # The first iteration uses the base name; later test@N iterations remain distinct.
         # An optional --dir-suffix is the final component for named reruns and MSIE stages.
+        simulation_directory_suffix = os.environ.get("SIMMER_REPORT_RERUN_DIR_SUFFIX", self.rcfg.options.dir_suffix)
         simulation_directory_name = _format_simulation_directory_name(
             self.vcomper.name,
             self.simulator.get_name(),
             self.name,
             seed,
             self.iteration,
-            self.rcfg.options.dir_suffix,
+            simulation_directory_suffix,
         )
         self.simname, self.job_dir = self._claim_run_directory(simulation_directory_name)
         self._log_path = os.path.join(self.job_dir, self.LOG_NAME)
@@ -1046,6 +1066,8 @@ class TestJob(Job):
 
         if self.jobstatus == JobStatus.FAILED:
             self.simulator.cleanup_test_coverage(self)
+        else:
+            self.simulator.export_report_rerun_coverage(self)
 
         sys.stdout.flush()
         simmer_results.record_test_job(
@@ -1468,7 +1490,9 @@ def main(rcfg, options):
             rv_utils.print_category_summary(category_stats, rcfg.log, rv_utils.LOGGER_INDENT)
 
         report_header = {}
+        report_root = os.path.join(webroot_path, "regression_report")
         if options.report and not unsafe_runtime:
+            report_coverage_enabled = simulator.report_coverage_enabled()
             if simulator.coverage_enabled():
                 coverage_merge_failed = rcfg._profile_step(
                     "coverage_merge",
@@ -1477,22 +1501,41 @@ def main(rcfg, options):
                 )
 
             report_header = rv_utils.get_report_header(rcfg)
-            rrt = regression_report.RegressionReport(rcfg, report_jinja2_env, webroot_path)
-            report_root = os.path.join(webroot_path, "regression_report")
-            project_lock_name = re.sub(r"[^A-Za-z0-9_.-]+", "_", report_header['project_name'])
-            project_lock_path = os.path.join(report_root, ".{}.lock".format(project_lock_name))
-            index_lock_path = os.path.join(report_root, ".index.lock")
-            os.makedirs(report_root, exist_ok=True)
-            rrt.prepare(report_header, trd, simulator.collect_coverage_data(vcomp_jobs), category_stats)
-            with open(project_lock_path, "w") as report_lock:
-                import fcntl
-                fcntl.flock(report_lock, fcntl.LOCK_EX)
-                rrt.render_regression_page()
-            with open(index_lock_path, "w") as report_lock:
-                fcntl.flock(report_lock, fcntl.LOCK_EX)
-                rrt.render_bench_page()
-                rrt.render_home_page()
-                rrt.write_run_launcher(os.environ.get("SIMMER_REPORT_URL"))
+            report_header["coverage_enabled"] = report_coverage_enabled
+            collected_coverage_data = simulator.collect_coverage_data(vcomp_jobs)
+            coverage_data = collected_coverage_data if report_coverage_enabled and not coverage_merge_failed else {}
+            failed_tests = []
+            for test_record in (getattr(rcfg, "simmer_results_run", None) or {}).get("tests", []):
+                if test_record.get("status") != "FAILED" or test_record.get("seed") is None:
+                    continue
+                failed_tests.append({
+                    "bench": test_record["bench"],
+                    "test": test_record["test"],
+                    "target": test_record["target"],
+                    "seed": test_record["seed"],
+                    "iteration": test_record["iteration"],
+                    "rerun_script": os.path.join(test_record["sim_dir"], "rerun.sh"),
+                })
+            rerun_context = {}
+            if report_coverage_enabled and failed_tests and not coverage_merge_failed:
+                rerun_context = simulator.create_report_rerun_context(vcomp_jobs, report_header["time"], failed_tests)
+
+            rrt = None
+            try:
+                rrt = regression_report.RegressionReport(rcfg, report_jinja2_env, webroot_path)
+                rrt.run(
+                    report_header,
+                    trd,
+                    coverage_data,
+                    category_stats,
+                    rerun_context=rerun_context,
+                    report_url=os.environ.get("SIMMER_REPORT_URL"),
+                )
+            except (Exception, KeyboardInterrupt,
+                    SystemExit): # noqa: BROAD_EXCEPT_OK - discard unpublished backend snapshots.
+                if rrt is None or not getattr(rrt, "publication_committed", False):
+                    simulator.discard_report_rerun_context(rerun_context)
+                raise
 
         rv_utils.print_simmer_profile(rcfg, jm)
 
@@ -1605,8 +1648,14 @@ if __name__ == '__main__':
         history_use_color = True if options.use_color else None
         simmer_results.print_history(options.proj_dir, options.history, use_color=history_use_color)
         sys.exit(0)
-    options.simmer_argv = sys.argv[:]
     verbosity = cmn_logging.DEBUG if options.tool_debug else cmn_logging.INFO
     log = cmn_logging.build_logger("sim", level=verbosity, use_color=options.use_color, filehandler="simmer.log")
+    if options.rerun_report is not None:
+        try:
+            sys.exit(report_rerun.run_report_rerun(options.rerun_report, report_jinja2_env, log))
+        except (OSError, RuntimeError, TypeError, ValueError, subprocess.TimeoutExpired) as exc:
+            log.error("Report rerun failed: %s", exc)
+            sys.exit(1)
+    options.simmer_argv = sys.argv[:]
     rcfg = regression.RegressionConfig(options, log)
     main(rcfg, options)

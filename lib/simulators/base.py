@@ -162,13 +162,13 @@ class SimulatorInterface(abc.ABC):
         return False
 
     @abc.abstractmethod
-    def get_log_parsing_info(self):
+    def get_log_parsing_info(self) -> dict[str, str]:
         """Return info needed for parsing logs (e.g., warning patterns)."""
         # Example: return {'warning_regex': r"\*W.*"}
         pass
 
     @abc.abstractmethod
-    def get_gui_command_options(self):
+    def get_gui_command_options(self) -> str:
         """Return simulator-specific options required for GUI mode."""
         pass
 
@@ -207,6 +207,12 @@ class SimulatorInterface(abc.ABC):
         """Return optional backend metrics for persistent simmer results."""
         return {}
 
+    def create_report_rerun_context(self, vcomp_jobs, report_time, failed_tests):
+        return {}
+
+    def discard_report_rerun_context(self, rerun_context):
+        return
+
     def cleanup_shared_runtime_artifacts(self, vcomp_jobs):
         """Clean simulator scratch files created under shared runfiles dirs.
 
@@ -226,6 +232,9 @@ class SimulatorInterface(abc.ABC):
 
     def cleanup_test_coverage(self, test_job):
         """Remove one failed test's simulator-specific coverage database."""
+        return
+
+    def export_report_rerun_coverage(self, test_job):
         return
 
     def get_scheduler_threads_per_test(self):
@@ -260,8 +269,12 @@ class SimulatorInterface(abc.ABC):
         """Return whether a dynamically planned test needs another iteration."""
         return False
 
-    def coverage_enabled(self):
+    def coverage_enabled(self) -> bool:
         """Return whether this backend requested coverage collection."""
+        return False
+
+    def report_coverage_enabled(self) -> bool:
+        """Return whether static reports should display this backend's coverage."""
         return False
 
     def get_compile_template_context(self, vcomp_job):

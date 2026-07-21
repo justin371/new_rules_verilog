@@ -154,7 +154,7 @@ def print_summary(rcfg, vcomp_jobs, jm, trd):
                         str(max_sim_time), str(len(passed)) if passed else "", str(len(skipped)) if skipped else "",
                         str(len(failed)) if failed else "", str(len(icfg.jobs)), "", test_category)
             table_data.append(test_set)
-            trd.append(test_set)
+            trd.append(test_set + (test_target, ) if test_target else test_set)
 
             for j in failed:
                 table_data.append(("", "", "", "", "", "", "", j.log_path if j.log_path else '', ""))

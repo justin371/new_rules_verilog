@@ -252,6 +252,7 @@ py_test(
         "//lib:job_lib",
         "//lib:regression",
         "//lib:regression_report",
+        "//lib:report_rerun",
         "//lib:runtime_options",
         "//lib:seed_plan",
         "//lib:sim_artifacts",

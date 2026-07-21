@@ -119,6 +119,37 @@
       margin-bottom: 22px;
     }
 
+    .page-actions {
+      align-items: center;
+      display: flex;
+      flex-wrap: wrap;
+      gap: 12px;
+    }
+
+    .command-button {
+      background: var(--accent);
+      border: 1px solid var(--accent);
+      border-radius: 5px;
+      color: #ffffff;
+      cursor: pointer;
+      font: inherit;
+      font-size: 0.8125rem;
+      font-weight: 700;
+      min-height: 36px;
+      min-width: 205px;
+      padding: 7px 12px;
+    }
+
+    .command-button:hover {
+      background: var(--accent-hover);
+      border-color: var(--accent-hover);
+    }
+
+    .command-button:focus-visible {
+      outline: 3px solid var(--accent);
+      outline-offset: 2px;
+    }
+
     h1,
     h2,
     h3 {
@@ -267,6 +298,10 @@
       overflow: hidden;
     }
 
+    .metric-strip-compact {
+      grid-template-columns: repeat(5, minmax(110px, 1fr));
+    }
+
     .metric {
       border-right: 1px solid var(--line);
       min-height: 86px;
@@ -377,8 +412,8 @@
         border-bottom: 1px solid var(--line);
       }
 
-      .metric:last-child {
-        grid-column: span 2;
+      .metric-strip-compact .metric:last-child {
+        grid-column: span 4;
       }
 
       .metadata {
@@ -418,6 +453,10 @@
         min-height: 78px;
       }
 
+      .metric-strip-compact .metric:last-child {
+        grid-column: span 2;
+      }
+
       .metadata {
         grid-template-columns: 1fr 1fr;
       }
@@ -443,5 +482,6 @@
     {% block content %}{% endblock %}
   </main>
   <footer>Regression Dashboard</footer>
+  {% block scripts %}{% endblock %}
 </body>
 </html>

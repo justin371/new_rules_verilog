@@ -48,6 +48,7 @@ py_binary(
         "//lib:parser_actions",
         "//lib:regression",
         "//lib:regression_report",
+        "//lib:report_rerun",
         "//lib:runtime_options",
         "//lib:rv_utils",
         "//lib:seed_plan",
