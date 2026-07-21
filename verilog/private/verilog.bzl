@@ -48,6 +48,68 @@ def resolve_unit_test_simulator(explicit_simulator, configured_simulator):
         fail("unit-test simulator must be one of ['XRUN', 'VCS'], got '{}'".format(simulator))
     return simulator
 
+_XRUN_ONLY_UNIT_TEST_FLAGS = [
+    "-ALLOWREDEFINITION",
+    "-sv",
+]
+
+_XRUN_ONLY_UNIT_TEST_VALUE_FLAGS = [
+    "-access",
+    "-debug_opts",
+    "-input",
+]
+
+def normalize_vcs_unit_test_compile_args(args):
+    """Translate legacy Xcelium one-step compile arguments for VCS.
+
+    Existing consumers commonly attach Xcelium defines and debug controls to
+    generic unit-test argument attributes. A VCS-configured default must not
+    forward those controls to vcs as source-file operands or unknown options.
+    """
+    result = []
+    pending_flag = None
+    for arg in args:
+        stripped = arg.strip()
+
+        if pending_flag == "-define":
+            if not stripped:
+                fail("-define in VCS unit-test arguments requires a non-empty value")
+            result.append("+define+{}".format(stripped))
+            pending_flag = None
+            continue
+        if pending_flag:
+            pending_flag = None
+            continue
+
+        if stripped == "-define":
+            pending_flag = stripped
+            continue
+        if stripped.startswith("-define "):
+            result.append("+define+{}".format(stripped[len("-define "):].strip()))
+            continue
+
+        if stripped in _XRUN_ONLY_UNIT_TEST_FLAGS:
+            continue
+
+        consumed_xrun_value = False
+        for flag in _XRUN_ONLY_UNIT_TEST_VALUE_FLAGS:
+            if stripped == flag:
+                pending_flag = flag
+                consumed_xrun_value = True
+                break
+            if stripped.startswith(flag + " ") or stripped.startswith(flag + "="):
+                consumed_xrun_value = True
+                break
+        if consumed_xrun_value:
+            continue
+
+        result.append(arg)
+
+    if pending_flag:
+        fail("{} in VCS unit-test arguments requires a value".format(pending_flag))
+
+    return result
+
 def gather_shell_defines(shells):
     defines = {}
     for shell in shells:

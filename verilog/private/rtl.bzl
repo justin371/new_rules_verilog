@@ -1,7 +1,7 @@
 # vim: set ft=bzl :
 """Rules to gather and compile RTL."""
 
-load(":verilog.bzl", "CUSTOM_SHELL", "ShellInfo", "ToolEncapsulationInfo", "VerilogInfo", "gather_shell_defines", "get_transitive_srcs", "merge_default_runfiles", "resolve_unit_test_simulator", "runfiles_relative_short_path")
+load(":verilog.bzl", "CUSTOM_SHELL", "ShellInfo", "ToolEncapsulationInfo", "VerilogInfo", "gather_shell_defines", "get_transitive_srcs", "merge_default_runfiles", "normalize_vcs_unit_test_compile_args", "resolve_unit_test_simulator", "runfiles_relative_short_path")
 
 _SHELLS_DOC = """List of verilog_rtl_shell Labels.
 For each Label, a gumi define will be placed on the command line to use this shell instead of the original module.
@@ -409,12 +409,18 @@ def _verilog_rtl_unit_test_impl(ctx):
         else:
             pre_fa.append("-define {}{}".format(key, value))
 
-    pre_fa.extend(ctx.attr.pre_flist_args)
+    target_pre_flist_args = ctx.attr.pre_flist_args
+    target_post_flist_args = ctx.attr.post_flist_args
+    if simulator == "VCS":
+        target_pre_flist_args = normalize_vcs_unit_test_compile_args(target_pre_flist_args)
+        target_post_flist_args = normalize_vcs_unit_test_compile_args(target_post_flist_args)
+
+    pre_fa.extend(target_pre_flist_args)
     template_pre_fa = " ".join(pre_fa)
     if simulator == "XRUN":
         template_pre_fa = "\n".join(["    \\"] + ["  {} \\".format(arg) for arg in pre_fa] + ["   \\"])
 
-    post_fa = " ".join(ctx.attr.post_flist_args)
+    post_fa = " ".join(target_post_flist_args)
 
     ut_sim_template = _resolve_unit_test_default_file(
         simulator,
@@ -602,11 +608,13 @@ verilog_rtl_unit_test = rule(
         "pre_flist_args": attr.string_list(
             doc = "Additional command line arguments to be placed after the simulator binary but before the flist arguments.\n" +
                   "See ut_sim_template attribute for exact layout." +
-                  "For defines to have effect, they must be declared in pre_flist_args not post_flist_args.",
+                  "For defines to have effect, they must be declared in pre_flist_args not post_flist_args. " +
+                  "With VCS, legacy '-define NAME' entries become '+define+NAME'; Xcelium-only debug/wave flags are omitted.",
         ),
         "post_flist_args": attr.string_list(
             doc = "Additional command line arguments to be placed after the flist arguments\n" +
-                  "See ut_sim_template attribute for exact layout.",
+                  "See ut_sim_template attribute for exact layout. " +
+                  "With VCS, legacy '-define NAME' entries become '+define+NAME'; Xcelium-only debug/wave flags are omitted.",
         ),
     },
     test = True,

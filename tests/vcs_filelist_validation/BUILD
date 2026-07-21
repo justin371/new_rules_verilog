@@ -143,8 +143,17 @@ verilog_dv_unit_test(
 
 verilog_dv_unit_test(
     name = "dv_unit_vcs",
-    compile_args = ["+define+DV_UNIT_VCS"],
+    compile_args = [
+        "-access +rw",
+        "+define+DV_UNIT_VCS",
+    ],
     run_args = ["+DV_UNIT_RUNTIME"],
+    sim_args = [
+        "-define DV_LEGACY_VCS",
+        "-sv",
+        "-input",
+        "ignored_dv_waves.tcl",
+    ],
     simulator = "VCS",
     tags = ["manual"],
     deps = [":unit_test_top"],
@@ -154,7 +163,7 @@ verilog_dv_unit_test(
     name = "dv_unit_vcs_custom_template",
     compile_args = ["+define+CUSTOM_COMPILE_ARG"],
     run_args = ["+CUSTOM_RUN_ARG"],
-    sim_args = ["+define+CUSTOM_LEGACY_ARG"],
+    sim_args = ["-define CUSTOM_LEGACY_ARG"],
     simulator = "VCS",
     tags = ["manual"],
     ut_sim_template = "custom_vcs_dv_unit_test.sh.template",
@@ -171,6 +180,19 @@ verilog_rtl_unit_test(
 
 verilog_rtl_unit_test(
     name = "rtl_unit_vcs",
+    post_flist_args = [
+        "-debug_opts verisium_pp",
+        "-sv",
+        "+define+VCS_NATIVE",
+    ],
+    pre_flist_args = [
+        "-define",
+        "PWR_AWARE",
+        "-ALLOWREDEFINITION",
+        "-input ignored_waves.tcl",
+        "-access",
+        "+rw",
+    ],
     simulator = "VCS",
     tags = ["manual"],
     deps = [":unit_test_top"],
