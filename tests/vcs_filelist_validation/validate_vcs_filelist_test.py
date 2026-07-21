@@ -175,6 +175,12 @@ class VcsFilelistValidationTest(unittest.TestCase):
             for needle in needles:
                 assert_contains(contents, needle, relative_path)
 
+        lint_script = read_runfile("tests/vcs_filelist_validation/rtl_lint_vcs")
+        lint_args = read_runfile("tests/vcs_filelist_validation/rtl_lint_vcs_cmds.tcl")
+        self.assertLess(lint_script.index("-full64"), lint_script.index("-file"))
+        self.assertNotIn("-full64", lint_args)
+        self.assertNotIn("-lca", lint_args)
+
         self.assertFalse(runfile_exists("tests/vcs_filelist_validation/dv_tb_vcs_compile_args_pldm_ice.f"))
         self.assertFalse(runfile_exists("tests/vcs_filelist_validation/dv_tb_vcs_compile_args_pldm_sa.f"))
 
@@ -244,7 +250,7 @@ class VcsFilelistValidationTest(unittest.TestCase):
             "tests/vcs_filelist_validation/dv_unit_vcs_run.sh":
             ["vcs", "simv", "-full64", "-file", "-Mdir", "ERROR: line", "SIMMER_KEEP_TERMINAL"],
             "tests/vcs_filelist_validation/rtl_unit_vcs":
-            ["vcs", "simv", "-file", "-Mdir", "ERROR: line", "SIMMER_KEEP_TERMINAL"],
+            ["vcs", "simv", "-full64", "-file", "-Mdir", "ERROR: line", "SIMMER_KEEP_TERMINAL"],
         }
         for relative_path, needles in scripts.items():
             contents = read_runfile(relative_path)
@@ -254,9 +260,29 @@ class VcsFilelistValidationTest(unittest.TestCase):
         dv_compile_args = read_runfile("tests/vcs_filelist_validation/dv_unit_vcs_compile_args.f")
         rtl_compile_args = read_runfile("tests/vcs_filelist_validation/rtl_unit_vcs_compile_args.f")
         dv_runtime_args = read_runfile("tests/vcs_filelist_validation/dv_unit_vcs_runtime_args.f")
+        rtl_script = read_runfile("tests/vcs_filelist_validation/rtl_unit_vcs")
+        self.assertLess(rtl_script.index("-full64"), rtl_script.index("-file"))
         self.assertIn("-file tests/vcs_filelist_validation/unit_test_top_vcs.f", dv_compile_args)
         self.assertIn("+define+DV_UNIT_VCS", dv_compile_args)
+        self.assertIn("+define+DV_LEGACY_VCS", dv_compile_args)
+        self.assertNotIn("-define", dv_compile_args)
+        self.assertNotIn("-access", dv_compile_args)
+        self.assertNotIn("+rw", dv_compile_args)
+        self.assertNotIn("-sv\n", dv_compile_args)
+        self.assertNotIn("ignored_dv_waves.tcl", dv_compile_args)
         self.assertIn("-file tests/vcs_filelist_validation/unit_test_top_vcs.f", rtl_compile_args)
+        self.assertIn("+define+PWR_AWARE", rtl_compile_args)
+        self.assertIn("+define+VCS_NATIVE", rtl_compile_args)
+        self.assertNotIn("-full64", rtl_compile_args)
+        self.assertNotIn("-lca", rtl_compile_args)
+        self.assertNotIn("-define", rtl_compile_args)
+        self.assertNotIn("-ALLOWREDEFINITION", rtl_compile_args)
+        self.assertNotIn("ignored_waves.tcl", rtl_compile_args)
+        self.assertNotIn("-access", rtl_compile_args)
+        self.assertNotIn("+rw", rtl_compile_args)
+        self.assertNotIn("-debug_opts", rtl_compile_args)
+        self.assertNotIn("verisium_pp", rtl_compile_args)
+        self.assertNotIn("-sv\n", rtl_compile_args)
         self.assertNotIn("-top ", rtl_compile_args)
         self.assertNotIn("-makelib", dv_compile_args)
         self.assertNotIn("-makelib", rtl_compile_args)

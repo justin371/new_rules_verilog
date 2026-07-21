@@ -1,6 +1,6 @@
 """VCS backend helpers for DV rules."""
 
-load("//verilog/private:verilog.bzl", "ToolEncapsulationInfo", "VerilogInfo", "flists_to_arguments", "get_transitive_srcs", "merge_default_runfiles", "runfiles_relative_short_path")
+load("//verilog/private:verilog.bzl", "ToolEncapsulationInfo", "VerilogInfo", "flists_to_arguments", "get_transitive_srcs", "merge_default_runfiles", "normalize_vcs_unit_test_compile_args", "runfiles_relative_short_path")
 
 def _use_vcs_default(selected_file, xrun_default_file, vcs_default_file):
     if selected_file.short_path == xrun_default_file.short_path:
@@ -28,13 +28,15 @@ def vcs_dv_unit_test_impl(ctx):
         ctx.file._ut_sim_template_xrun,
         ctx.file._ut_sim_template_vcs,
     )
+    sim_arg_values = normalize_vcs_unit_test_compile_args(ctx.attr.sim_args)
+    compile_arg_values = sim_arg_values + normalize_vcs_unit_test_compile_args(ctx.attr.compile_args)
 
     compile_args = ctx.actions.declare_file(ctx.label.name + "_compile_args.f")
     ctx.actions.expand_template(
         template = ctx.file._compile_args_template_vcs,
         output = compile_args,
         substitutions = {
-            "{COMPILE_ARGS}": "\n".join(ctx.attr.sim_args + ctx.attr.compile_args),
+            "{COMPILE_ARGS}": "\n".join(compile_arg_values),
             "{DEFINES}": "",
             "{FLISTS}": "\n".join(["-file {}".format(runfiles_relative_short_path(f)) for f in flists_list]),
         },
@@ -52,7 +54,6 @@ def vcs_dv_unit_test_impl(ctx):
 
     simulator_command = ctx.attr._command_override_vcs[ToolEncapsulationInfo].command
     flist_args = " ".join(["-file {}".format(runfiles_relative_short_path(f)) for f in flists_list])
-    compile_arg_values = ctx.attr.sim_args + ctx.attr.compile_args
     ctx.actions.expand_template(
         template = unit_test_template,
         output = ctx.outputs.out,
@@ -65,7 +66,7 @@ def vcs_dv_unit_test_impl(ctx):
             "{DPI_LIBS}": flists_to_arguments(ctx.attr.deps, VerilogInfo, "transitive_dpi", "-sv_lib", "", "vcs"),
             "{FLISTS}": flist_args,
             "{RUN_ARGS}": " ".join(ctx.attr.run_args),
-            "{SIM_ARGS}": " ".join(ctx.attr.sim_args),
+            "{SIM_ARGS}": " ".join(sim_arg_values),
         },
         is_executable = True,
     )
