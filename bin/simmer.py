@@ -256,6 +256,29 @@ def get_active_job_limit(options, rcfg, simulator):
     return max(1, min(total_tests, requested_jobs))
 
 
+def describe_vcs_compile_reuse_miss(miss_reason):
+    """Return a user-facing explanation for a non-reusable VCS build.
+
+    A fingerprint mismatch is the normal, safe response to changed compile
+    inputs.  It should not be described as a failed cache or a scratch build:
+    VCS still receives the existing VCOMP directory and can reuse its
+    incremental artifacts.  Missing metadata or artifacts need a distinct
+    message because no prior output is available to reuse.
+    """
+    reason = miss_reason or ""
+    prefix = "Compile build fingerprint mismatch"
+    if reason.startswith(prefix):
+        changed = re.search(r"\(changed: ([^)]+)\)", reason)
+        if changed is not None:
+            return "Compile inputs changed ({})".format(changed.group(1))
+        return "Compile inputs changed"
+    if "requires an existing elaborated executable" in reason:
+        return "Reusable VCS compile artifacts are missing or incomplete"
+    if reason.startswith("--no-compile requires "):
+        return "No reusable VCS compile fingerprint exists"
+    return "Reusable VCS compile state is unavailable"
+
+
 # The jobs of the verification compilation and elaboration stages
 class VCompJob(Job):
     # All found vcomp names to prevent collisions
@@ -466,7 +489,12 @@ class VCompJob(Job):
                 lambda: self.simulator.validate_reusable_compile_artifacts(self),
             )
             if not self.compile_cache_hit:
-                log.info("VCS compile cache miss for %s: %s", self, miss_reason)
+                log.info(
+                    "%s; invoking incremental VCS compile for %s",
+                    describe_vcs_compile_reuse_miss(miss_reason),
+                    self,
+                )
+                log.debug("VCS compile reuse unavailable for %s: %s", self, miss_reason)
                 self.main_cmdline = shlex.join(["bash", vcomp_sh_path])
             else:
                 self.main_cmdline = "echo \"Bypassing {} due to VCS compile cache hit\"".format(self)

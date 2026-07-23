@@ -44,6 +44,24 @@ class _FatalLog:
 
 class SimmerRuntimeHardeningTest(unittest.TestCase):
 
+    def test_vcs_compile_reuse_miss_messages_explain_incremental_behavior(self):
+        self.assertEqual(
+            "Compile inputs changed (compile_inputs_sha256, compile_script_sha256)",
+            simmer.describe_vcs_compile_reuse_miss(
+                "Compile build fingerprint mismatch in /tmp/vcomp "
+                "(changed: compile_inputs_sha256, compile_script_sha256). Recompile this testbench."),
+        )
+        self.assertEqual(
+            "No reusable VCS compile fingerprint exists",
+            simmer.describe_vcs_compile_reuse_miss(
+                "--no-compile requires /tmp/vcomp/.compile_fingerprint.json. Recompile this testbench first."),
+        )
+        self.assertEqual(
+            "Reusable VCS compile artifacts are missing or incomplete",
+            simmer.describe_vcs_compile_reuse_miss(
+                "VCS --no-compile requires an existing elaborated executable at '/tmp/vcomp/simv'"),
+        )
+
     def test_get_bazel_bin_fallback_runs_from_project_directory(self):
         completed = SimpleNamespace(returncode=0, stdout="/output/bazel-bin\n", stderr="")
         with mock.patch("simmer.os.path.isdir", return_value=False), \
