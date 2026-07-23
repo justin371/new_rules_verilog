@@ -203,6 +203,12 @@ class VcsSimulator(SimulatorInterface):
 
     def get_compile_fingerprint_inputs(self, vcomp_job):
         inputs = super().get_compile_fingerprint_inputs(vcomp_job)
+        # The rendered VCS command and its resolved tool identity own compiler
+        # selection.  Interactive shell setup is not a compile input: PATH and
+        # module variables routinely contain editors, user utilities, and
+        # module ordering that can change without changing the VCS tool.
+        for key in ("LOADEDMODULES", "MODULEPATH", "PATH"):
+            inputs["environment"].pop(key, None)
         if self.options.vcs_cm_hier:
             inputs["extra_input_paths"].append(self.options.vcs_cm_hier)
         xprop_config = getattr(vcomp_job, "vcs_xprop_config_path", None)
