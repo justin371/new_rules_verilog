@@ -703,6 +703,38 @@ run_bounded_process([
             self.assertEqual("xrun release = 25.03-s001", xrun_inputs["environment"]["XCELIUM_TOOL_ID"])
             self.assertNotIn("LM_LICENSE_FILE", xrun_inputs["environment"])
 
+    def test_vcs_compile_fingerprint_ignores_interactive_shell_noise(self):
+        options = parse_args(["--simulator", "VCS"])
+        simulator = VcsSimulator(options, DummyRegressionConfig(), None)
+        simulator._vcs_tool_identity = "VCS X-2025.06-SP2-4"
+        stable_environment = {
+            "VCS_HOME": "/tools/vcs/X-2025.06-SP2-4",
+            "VSO_HOME": "/tools/vso/X-2025.06-SP2-4",
+        }
+        first_session = dict(
+            stable_environment,
+            PATH="/tools/vcs/bin:/home/user/bin:/usr/bin",
+            LOADEDMODULES="vcs/2025.06:gvim/9.1:python/3.12",
+            MODULEPATH="/site/modulefiles:/user/modulefiles",
+        )
+        second_session = dict(
+            stable_environment,
+            PATH="/home/user/.local/bin:/tools/vcs/bin:/usr/bin",
+            LOADEDMODULES="vs_code/1.123:python/3.12:vcs/2025.06",
+            MODULEPATH="/user/modulefiles:/site/modulefiles",
+        )
+
+        with mock.patch.dict(os.environ, first_session, clear=False):
+            first_inputs = simulator.get_compile_fingerprint_inputs(DummyVcompJob())
+        with mock.patch.dict(os.environ, second_session, clear=False):
+            second_inputs = simulator.get_compile_fingerprint_inputs(DummyVcompJob())
+
+        self.assertEqual(first_inputs["environment"], second_inputs["environment"])
+        self.assertEqual(
+            dict(stable_environment, VCS_TOOL_ID="VCS X-2025.06-SP2-4"),
+            first_inputs["environment"],
+        )
+
     def test_shell_templates_quote_runtime_paths(self):
         for template_path in (
                 "bin/templates/sim_template.sh.j2",

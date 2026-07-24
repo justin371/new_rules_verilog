@@ -130,8 +130,10 @@ Run `simmer -h` for all options. MSIE stages must use the same target,
 The default VCS flow automatically reuses unchanged builds:
 
 1. First run builds `<tb>__VCS_VCOMP/simv`.
-2. Later runs compare source content, runfiles, compile arguments, tool identity,
-   environment and required artifacts against the saved fingerprint.
+2. Later runs compare source content, runfiles, compile arguments, the resolved
+   VCS/VSO tool identity and locations, and required artifacts against the saved
+   fingerprint. Interactive shell `PATH`, `LOADEDMODULES` and `MODULEPATH` noise
+   does not invalidate VCS reuse.
 3. A match bypasses VCS. A miss compiles with Partition Compile by default.
 
 The normal command performs this automatic hit-or-compile decision:
@@ -152,8 +154,9 @@ simmer -t <bench>:<test> --simulator VCS --no-compile --no-bazel
 
 `--no-compile` validates a fingerprint of tracked/untracked source state,
 runfile content, the rendered compile script, compile arguments, external
-compile configuration files and the selected tool environment. It fails before
-simulation when the existing compile output does not match the current inputs.
+compile configuration files and the resolved VCS/VSO tool identity and
+locations. It fails before simulation when the existing compile output does not
+match the current inputs.
 
 Use `--recompile` to force a clean VCS compile. It takes precedence over the
 default automatic cache for that invocation.
