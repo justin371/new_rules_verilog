@@ -436,6 +436,14 @@ class RegressionDiscoveryTest(unittest.TestCase):
         self.assertEqual(["bazel", "query"], commands[0][:2])
         self.assertEqual(["bazel", "cquery"], commands[1][:2])
         self.assertEqual(["bazel", "build"], commands[2][:2])
+        self.assertIn("//benches/soc_tb:soc_tb", commands[2])
+        self.assertEqual(
+            {
+                "//benches/soc_tb:soc_tb",
+                "//benches/soc_tb/tests:dma_single_transfer",
+            },
+            config.discovery_prebuilt_targets,
+        )
         self.assertEqual(
             {"//benches/soc_tb/tests:dma_single_transfer": ["smoke"]},
             config.tests_to_tags,

@@ -1350,7 +1350,13 @@ def main(rcfg, options):
         vcomper = VCompJob(rcfg, vcomp, simulator)
         vcomp_jobs[vcomp] = vcomper
 
-        btbj = job_lib.BazelTBJob(rcfg, vcomp, vcomper, additional_targets=test_list.keys())
+        btbj = job_lib.BazelTBJob(
+            rcfg,
+            vcomp,
+            vcomper,
+            additional_targets=test_list.keys(),
+            prebuilt_targets=getattr(rcfg, "discovery_prebuilt_targets", ()),
+        )
         btbj_jobs.append(btbj)
 
         tests = []

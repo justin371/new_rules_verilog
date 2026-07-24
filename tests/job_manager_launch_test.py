@@ -263,6 +263,21 @@ class JobManagerLaunchTest(unittest.TestCase):
 
         self.assertEqual("bazel build //pkg:tb //pkg/tests:first //pkg/tests:second", job.main_cmdline)
 
+    def test_bazel_tb_job_skips_targets_built_during_discovery(self):
+        log = _Logger()
+        rcfg = SimpleNamespace(options=SimpleNamespace(timeout=1, no_compile=False, no_bazel=False), log=log)
+        vcomper = SimpleNamespace(job_dir="vcomp_dir", add_dependency=lambda _job: None)
+
+        job = BazelTBJob(
+            rcfg,
+            "//pkg:tb",
+            vcomper,
+            additional_targets=["//pkg/tests:first", "//pkg/tests:second"],
+            prebuilt_targets=["//pkg:tb", "//pkg/tests:first"],
+        )
+
+        self.assertEqual("bazel build //pkg/tests:second", job.main_cmdline)
+
     def test_no_compile_still_builds_test_configs(self):
         log = _Logger()
         rcfg = SimpleNamespace(options=SimpleNamespace(timeout=1, no_compile=True, no_bazel=False), log=log)

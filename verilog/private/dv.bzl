@@ -981,4 +981,5 @@ def _verilog_dv_test_cfg_info_aspect_impl(target, ctx):
 verilog_dv_test_cfg_info_aspect = aspect(
     doc = """Gather information about the tb and tags related to a verilog_dv_test_config for use in simmer.""",
     implementation = _verilog_dv_test_cfg_info_aspect_impl,
+    required_providers = [[DVTestInfo]],
 )
