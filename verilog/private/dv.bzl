@@ -781,7 +781,9 @@ verilog_dv_tb = rule(
             doc = (
                 "Dependencies whose transitive VCS filelists form one frozen vlogan -incr_vlogan analysis group. " +
                 "Each selected dependency must already be reachable through deps or shells. The remaining " +
-                "filelists form one project analysis group so legacy cross-file macro state is preserved."
+                "filelists form one project analysis group. Preprocessor macros do not cross analysis groups, so " +
+                "the boundary must be self-contained and downstream sources must import compiled packages instead " +
+                "of depending on macro or include-guard side effects from the frozen group."
             ),
         ),
         "vcs_elab_args": attr.string_list(

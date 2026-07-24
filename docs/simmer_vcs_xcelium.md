@@ -229,6 +229,12 @@ This mode preserves every required VIP. It changes the compile staging:
 Select only dependencies that are already reachable through the testbench
 `deps` or `shells`. Prefer a frozen vendor package target rather than a broad
 environment target that also owns frequently edited project sources.
+Preprocessor macro state does not cross the two `vlogan` commands. The
+selected boundary must therefore be self-contained: downstream sources should
+`import` compiled packages and must not rely on include guards or other macros
+defined as side effects of compiling the frozen group. If the existing
+filelists depend on such global macro state, refactor that boundary before
+enabling this mode; grouping those filelists changes compile semantics.
 
 The persistent analysis library is `<tb>__VCS_VCOMP/vlogan_work`.
 GUI-specific UVM recorder defines use the sibling `vlogan_work_gui` so switching

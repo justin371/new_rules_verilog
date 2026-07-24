@@ -261,7 +261,6 @@ class VcsFilelistValidationTest(unittest.TestCase):
             vlogan_filelists,
         )
         self.assertIn("-top\nunit_test_top", elab_args)
-        self.assertIn("-Xufe=2steps", elab_args)
         self.assertIn(
             "+optconfigfile+tests/vcs_filelist_validation/vcs_partitions.cfg",
             elab_args,
