@@ -1,0 +1,27 @@
+name: ETX UVMF Verible Probe
+
+on:
+  pull_request:
+    branches: [main]
+
+jobs:
+  probe:
+    if: github.head_ref == 'codex/etx-uvmf-verible'
+    runs-on: self-hosted
+    timeout-minutes: 10
+    steps:
+      - name: Inspect ETX validation environment
+        shell: bash
+        run: |
+          set -euo pipefail
+          target=/nfs/workspace/XinAnRiver/lwang/XinAnRiver
+          echo "host=$(hostname)"
+          echo "user=$(id -un)"
+          echo "target=${target}"
+          test -d "${target}"
+          command -v verible-verilog-format
+          test -f "${target}/ci/verible-format/.verible-verilog-format.yaml"
+          git -C "${target}" status --short --branch
+          printf 'PROJ_DIR=%s\n' "${PROJ_DIR:-}"
+          printf 'UVMF_HOME=%s\n' "${UVMF_HOME:-}"
+          find "${target}/hw/dv" -maxdepth 6 -type f -name 'run_uvmf.sh' -print | head -20
