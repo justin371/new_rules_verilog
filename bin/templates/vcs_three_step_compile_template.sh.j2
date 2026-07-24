@@ -22,7 +22,7 @@ while IFS= read -r vlogan_arg || [[ -n "${vlogan_arg}" ]]; do
 done < {{ vcs_vlogan_args|shell_quote }}
 
 vcs_home="$(
-  {{ vcs_runner }} sh -c 'printf "%s\n" "$VCS_HOME"' |
+  {{ vcs_runner }} printenv VCS_HOME |
     tail -n 1
 )"
 uvm_sources=("${vcs_home%/}/etc/uvm-1.2/uvm_pkg.sv")

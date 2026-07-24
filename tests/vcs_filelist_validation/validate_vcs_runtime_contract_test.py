@@ -2249,7 +2249,7 @@ run_bounded_process([
         stub = root / "vcs_stub.sh"
         stub.write_text(
             "#!/usr/bin/env bash\n"
-            "if [[ \"${{1:-}}\" == sh ]]; then\n"
+            "if [[ \"${{1:-}}\" == printenv && \"${{2:-}}\" == VCS_HOME ]]; then\n"
             "  printf '%s\\n' {}\n"
             "  exit 0\n"
             "fi\n"
