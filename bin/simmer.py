@@ -566,12 +566,17 @@ class VCompJob(Job):
                     first_unwaived_warning = None
                     warnings_found = 0
                     warning_regex = re.compile(base_warning_pattern)
+                    ignored_warning_lines = self.simulator.get_ignored_compile_warning_line_numbers(self.log_path)
 
                     with open(self.log_path, 'r', encoding='utf-8', errors='ignore') as logp:
-                        for warning_line in logp:
+                        for line_number, warning_line in enumerate(logp, start=1):
                             if not warning_regex.search(warning_line):
                                 continue
                             warnings_found += 1
+                            if line_number in ignored_warning_lines:
+                                log.debug("Ignoring benign compile warning at line %d: %s", line_number,
+                                          warning_line.strip())
+                                continue
                             warning_line_stripped = warning_line.strip()
                             if warning_line_stripped and not any(
                                     waiver.search(warning_line_stripped) for waiver in warning_waivers):

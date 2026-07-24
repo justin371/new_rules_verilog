@@ -239,14 +239,14 @@ run_bounded_process([
         self.assertEqual("unit_tb__VCS__smoke__42__i2",
                          simmer._format_simulation_directory_name("unit_tb", "VCS", "smoke", 42, 2, ""))
 
-    def test_vcs_wave_viewer_does_not_force_apex_or_lca_licenses(self):
+    def test_vcs_wave_viewer_uses_apex_without_lca(self):
         options = parse_args(["--simulator", "VCS", "--waves"])
         simulator = VcsSimulator(options, DummyRegressionConfig(), None)
 
         command = simulator.get_wave_view_command("/tmp/waves.fsdb")
 
-        self.assertEqual(["runmod", "vcs", "--", "verdi", "-ssf", "/tmp/waves.fsdb"], command.splitlines())
-        self.assertNotIn("-apex", command)
+        self.assertEqual(["runmod", "vcs", "--", "verdi", "-apex", "-ssf", "/tmp/waves.fsdb"], command.splitlines())
+        self.assertIn("-apex", command)
         self.assertNotIn("-lca", command)
 
         with tempfile.TemporaryDirectory() as job_dir:
@@ -254,7 +254,7 @@ run_bounded_process([
             command = simulator.get_wave_view_command("/tmp/waves.fsdb", job_dir)
 
         self.assertNotIn("-smlog", command.splitlines())
-        self.assertNotIn("-apex", command)
+        self.assertIn("-apex", command)
         self.assertNotIn("-lca", command)
 
         smartlog = VcsSimulator(
@@ -274,7 +274,7 @@ run_bounded_process([
         xcelium = XceliumSimulator(parse_args(["--simulator", "XRUN", "--waves"]), DummyRegressionConfig(), None)
 
         self.assertEqual(
-            ["runmod", "vcs", "--", "verdi", "-ssf", wave_path],
+            ["runmod", "vcs", "--", "verdi", "-apex", "-ssf", wave_path],
             vcs.get_wave_view_command(wave_path).splitlines(),
         )
         self.assertEqual(
@@ -879,7 +879,9 @@ run_bounded_process([
             )
 
         waves = render("waves", waves=[])
-        self.assertIn("-debug_access+pp", waves)
+        self.assertIn("-debug_access", waves)
+        self.assertNotIn("-debug_access+pp", waves)
+        self.assertNotIn("+vpi", waves)
         self.assertNotIn("-debug_access+all+designer+simctrl", waves)
         self.assertNotIn("+define+UVM_VERDI_COMPWAVE", waves)
         self.assertNotIn("+define+UVM_VCS_RECORD", waves)
@@ -890,6 +892,7 @@ run_bounded_process([
 
         gui = render("gui", gui=True)
         self.assertIn("-debug_access+all+reverse", gui)
+        self.assertIn("+vpi", gui)
         self.assertIn("+define+UVM_VERDI_COMPWAVE", gui)
         self.assertIn("+define+UVM_VCS_RECORD", gui)
         self.assertNotIn(" -sml ", " ".join(gui.split()))
@@ -2523,8 +2526,9 @@ run_bounded_process([
 
         with mock.patch.object(simmer, "log", mock.Mock()), \
              mock.patch.object(simulator, "record_compile_artifacts"), \
-             mock.patch.object(simmer.compile_cache, "write_compile_fingerprint"):
+             mock.patch.object(simmer.compile_cache, "write_compile_fingerprint") as write_fingerprint:
             vcomp.post_run()
+        vcomp.write_compile_fingerprint = write_fingerprint
         return vcomp
 
     def test_vcs_unwaived_compile_warning_blocks_simulation(self):
@@ -2557,6 +2561,35 @@ run_bounded_process([
         )
 
         self.assertEqual(JobStatus.PASSED, vcomp.jobstatus)
+
+    def test_vcs_tiny_make_clock_skew_allows_compile_fingerprint(self):
+        vcomp = self._run_vcs_compile_post_run(
+            "make[1]: Warning: File 'filelist.hsopt.objs' has modification time 0.0061 s in the future\n"
+            "make[1]: warning:  Clock skew detected.  Your build may be incomplete.",
+            [],
+        )
+
+        self.assertEqual(JobStatus.PASSED, vcomp.jobstatus)
+        vcomp.write_compile_fingerprint.assert_called_once_with(vcomp.job_dir, vcomp.compile_fingerprint)
+
+    def test_vcs_material_make_clock_skew_still_fails(self):
+        vcomp = self._run_vcs_compile_post_run(
+            "make[1]: Warning: File 'filelist.hsopt.objs' has modification time 0.1 s in the future\n"
+            "make[1]: warning:  Clock skew detected.  Your build may be incomplete.",
+            [],
+        )
+
+        self.assertEqual(JobStatus.FAILED, vcomp.jobstatus)
+        vcomp.write_compile_fingerprint.assert_not_called()
+
+    def test_vcs_unexplained_make_clock_skew_still_fails(self):
+        vcomp = self._run_vcs_compile_post_run(
+            "make[1]: warning:  Clock skew detected.  Your build may be incomplete.",
+            [],
+        )
+
+        self.assertEqual(JobStatus.FAILED, vcomp.jobstatus)
+        vcomp.write_compile_fingerprint.assert_not_called()
 
     def test_xcelium_warning_format_remains_compatible_with_tb_waivers(self):
         options = parse_args(["-t", "unit:test", "--simulator", "XRUN"])

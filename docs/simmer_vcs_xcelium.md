@@ -158,6 +158,12 @@ compile configuration files and the resolved VCS/VSO tool identity and
 locations. It fails before simulation when the existing compile output does not
 match the current inputs.
 
+VCS compile logs can contain a GNU make future-mtime warning when an NFS
+timestamp is less than 100 ms ahead of the execution host. Simmer treats that
+specific small skew and its paired clock-skew summary as benign. A larger skew
+or a clock-skew summary without a small future-mtime detail still fails the
+compile and prevents fingerprint reuse.
+
 Use `--recompile` to force a clean VCS compile. It takes precedence over the
 default automatic cache for that invocation.
 
@@ -411,22 +417,17 @@ simmer -t <bench>:<test> --simulator VCS --smartlog
 simmer -t <bench>:<test> --simulator VCS --vcs-xprop F
 ```
 
-VCS `--waves` is the lightweight signal-dump mode. It compiles with `-kdb`,
-`-debug_access+pp`, and VPI, but does not explicitly enable SmartLog or add
-UVM transaction-recording defines. VCS cannot combine SmartLog's `-sml` with
+VCS `--waves` is the lightweight signal-dump mode. It compiles with `-kdb`
+and the base `-debug_access`, but does not enable VPI, SmartLog, or UVM
+transaction-recording defines. VCS cannot combine SmartLog's `-sml` with
 `-fastpartcomp=jN`; use `--smartlog --no-vcs-partcomp` when Verdi log/source
 correlation is needed. `--gui` remains the full interactive-debug mode: it
 enables full reverse-debug access and explicitly adds
 `UVM_VERDI_COMPWAVE` and `UVM_VCS_RECORD`, but does not implicitly enable
 SmartLog.
 
-The installed VCS `-ntb_opts uvm-1.2` and Verdi FSDB integration can still
-automatically add `UVM_VCS_RECORD` and matching recorder sources during
-`--waves`; this behavior was observed with VCS X-2025.06-SP2-4 even though
-the generated simmer command did not request them. The mode split controls
-the flags owned by rules_verilog but does not suppress vendor-side option
-expansion. rules_verilog does not hardcode a version-specific VCS
-installation path for `uvm_custom_install_vcs_recorder.sv`.
+The signal-only mode avoids the callback, driver, class, and VPI capabilities
+used for transaction-aware debug. GUI mode keeps VPI and UVM recording.
 
 `--xprop` remains a compatibility spelling for VCS. Use `--vcs-xprop` in new
 VCS commands so simulator-specific controls stay grouped in `simmer -h`.
@@ -444,9 +445,9 @@ simmer -t <bench>:<test> --simulator VCS \
 ```
 
 Successful wave runs create an executable `run_waves.sh` beside `waves.fsdb`.
-It launches the standard Verdi FSDB viewer with `verdi -ssf`; it does not force
-the Apex/VERDI-ULTRA or LCA feature tiers. Sites using LSF can provide a
-launcher without editing the generated script:
+It launches the Verdi FSDB viewer with `verdi -apex -ssf`; it does not add
+`-lca`. Sites using LSF can provide a launcher without editing the generated
+script:
 
 ```bash
 SIMMER_WAVE_LAUNCHER="bsub -I -q syn" ./run_waves.sh
