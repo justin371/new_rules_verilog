@@ -127,6 +127,7 @@ verilog_dv_tb(
 
 verilog_dv_tb(
     name = "dv_tb_vcs_three_step",
+    extra_runfiles = [":vcs_partitions"],
     simulator = "VCS",
     vcs_elab_args = [
         "-top",
@@ -137,7 +138,6 @@ verilog_dv_tb(
     vcs_vlogan_args = [
         "+define+THREE_STEP_ANALYSIS",
     ],
-    extra_runfiles = [":vcs_partitions"],
     deps = [":unit_test_top"],
 )
 
