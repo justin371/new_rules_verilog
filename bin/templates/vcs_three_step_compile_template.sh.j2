@@ -28,7 +28,7 @@ while IFS= read -r vcs_flist || [[ -n "${vcs_flist}" ]]; do
     -incr_vlogan \
     {{ vcs_incr_vlogan_ignore_env }} \
     "${vlogan_args[@]}" \
-    -f "${vcs_flist}" \
+    -file "${vcs_flist}" \
     {% for define in additional_defines -%}
       {{ ('+define+' ~ define)|shell_quote }} \
     {% endfor -%}

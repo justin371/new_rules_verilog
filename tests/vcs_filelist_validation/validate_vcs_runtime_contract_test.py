@@ -2303,6 +2303,7 @@ run_bounded_process([
         self.assertIn("-incr_vlogan", first_analysis)
         self.assertIn("-vts_ignore_env=HOSTNAME,LSB_JOBID", first_analysis)
         self.assertIn("-sverilog", first_analysis)
+        self.assertIn("-file", first_analysis)
         self.assertIn("vip.f", first_analysis)
         self.assertIn("project.f", second_analysis)
         self.assertIn("+define+PROJECT_DEFINE", first_analysis)
