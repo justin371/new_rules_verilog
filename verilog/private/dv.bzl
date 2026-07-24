@@ -763,8 +763,8 @@ verilog_dv_tb = rule(
         "vcs_three_step": attr.bool(
             default = False,
             doc = (
-                "Use VCS three-step analysis/elaboration. Each Bazel library filelist is analyzed by a separate " +
-                "vlogan -incr_vlogan command so unchanged libraries such as frozen VIP can skip source parsing. " +
+                "Use VCS three-step analysis/elaboration. Dependencies selected by vcs_vlogan_precompile_deps " +
+                "form one frozen vlogan -incr_vlogan group, and remaining filelists form one project group. " +
                 "When enabled, extra_compile_args must be empty; put analysis options in vcs_vlogan_args and " +
                 "elaboration options in vcs_elab_args."
             ),
@@ -774,6 +774,14 @@ verilog_dv_tb = rule(
                 "Additional VCS analysis options used only by vlogan in vcs_three_step mode. Put preprocessor " +
                 "defines and other source-analysis options here, with one command-line argument per list item. " +
                 "Files referenced with $(location) must also be listed in extra_runfiles."
+            ),
+        ),
+        "vcs_vlogan_precompile_deps": attr.label_list(
+            providers = [VerilogInfo],
+            doc = (
+                "Dependencies whose transitive VCS filelists form one frozen vlogan -incr_vlogan analysis group. " +
+                "Each selected dependency must already be reachable through deps or shells. The remaining " +
+                "filelists form one project analysis group so legacy cross-file macro state is preserved."
             ),
         ),
         "vcs_elab_args": attr.string_list(

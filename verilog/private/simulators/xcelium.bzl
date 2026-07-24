@@ -5,7 +5,12 @@ load("//verilog/private:verilog.bzl", "ToolEncapsulationInfo", "VerilogInfo", "f
 def _validate_tb(ctx, has_msie_primary, has_msie_extras):
     if ctx.file.vcs_cm_hier:
         fail("verilog_dv_tb {} vcs_cm_hier cannot be used with Xcelium".format(ctx.label))
-    if ctx.attr.vcs_three_step or ctx.attr.vcs_vlogan_args or ctx.attr.vcs_elab_args:
+    if (
+        ctx.attr.vcs_three_step or
+        ctx.attr.vcs_vlogan_args or
+        ctx.attr.vcs_elab_args or
+        ctx.attr.vcs_vlogan_precompile_deps
+    ):
         fail("verilog_dv_tb {} VCS three-step attributes cannot be used with Xcelium".format(ctx.label))
     if not has_msie_primary and has_msie_extras:
         fail("verilog_dv_tb {} MSIE extra compile arguments require MSIE dependencies".format(ctx.label))

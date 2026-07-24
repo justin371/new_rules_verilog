@@ -225,10 +225,11 @@ workflow](docs/simmer_vcs_xcelium.md#vcs-partition-compile).
 When a real project source edit still makes the VCS two-step frontend parse
 large frozen VIP filelists, opt the testbench into
 `verilog_dv_tb(vcs_three_step = True, ...)`. The three-step flow runs one
-`vlogan -incr_vlogan` command per Bazel library boundary, so unchanged VIP
-libraries can skip analysis while the existing Partition Compile flow handles
-incremental elaboration. Analysis and elaboration arguments must be split
-between `vcs_vlogan_args` and `vcs_elab_args`; see the
+`vlogan -incr_vlogan` command for the dependencies selected by
+`vcs_vlogan_precompile_deps` and another for the remaining project filelists.
+The frozen group can skip analysis after a project edit while preserving
+cross-file macro state inside each group. Analysis and elaboration arguments
+must be split between `vcs_vlogan_args` and `vcs_elab_args`; see the
 [three-step incremental analysis
 workflow](docs/simmer_vcs_xcelium.md#vcs-three-step-incremental-analysis).
 

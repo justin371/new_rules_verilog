@@ -252,8 +252,14 @@ class VcsFilelistValidationTest(unittest.TestCase):
         self.assertIn("+define+THREE_STEP_ANALYSIS", vlogan_args)
         self.assertIn("+define+TBV", vlogan_args)
         self.assertNotIn("-top", vlogan_args)
-        self.assertIn("external/filelist_external_fixture/external_rtl.f", vlogan_filelists)
-        self.assertIn("tests/vcs_filelist_validation/unit_test_top_vcs.f", vlogan_filelists)
+        self.assertIn(
+            "precompile\texternal/filelist_external_fixture/external_rtl.f",
+            vlogan_filelists,
+        )
+        self.assertIn(
+            "project\ttests/vcs_filelist_validation/unit_test_top_vcs.f",
+            vlogan_filelists,
+        )
         self.assertIn("-top\nunit_test_top", elab_args)
         self.assertIn(
             "+optconfigfile+tests/vcs_filelist_validation/vcs_partitions.cfg",

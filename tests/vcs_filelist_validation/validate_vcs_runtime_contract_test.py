@@ -2239,7 +2239,11 @@ run_bounded_process([
         first_flist.write_text("+incdir+vip/includes\nvip.sv\n", encoding="utf-8", newline="\n")
         second_flist.write_text("+incdir+project/includes\nproject.sv\n", encoding="utf-8", newline="\n")
         filelists = runfiles / "filelists.txt"
-        filelists.write_text("vip.f\nproject.f\n", encoding="utf-8", newline="\n")
+        filelists.write_text(
+            "precompile\tvip.f\nproject\tproject.f\n",
+            encoding="utf-8",
+            newline="\n",
+        )
         vcs_home = root / "vcs home"
         uvm_pkg = vcs_home / "etc" / "uvm-1.2" / "uvm_pkg.sv"
         uvm_pkg.parent.mkdir(parents=True)

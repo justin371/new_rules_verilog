@@ -22,12 +22,27 @@ while IFS= read -r vlogan_arg || [[ -n "${vlogan_arg}" ]]; do
 done < {{ vcs_vlogan_args|shell_quote }}
 
 vlogan_include_args=()
-while IFS= read -r vcs_flist || [[ -n "${vcs_flist}" ]]; do
-  [[ -z "${vcs_flist}" ]] && continue
+vlogan_precompile_file_args=()
+vlogan_project_file_args=()
+while IFS=$'\t' read -r vcs_group vcs_flist || [[ -n "${vcs_group}${vcs_flist}" ]]; do
+  [[ -z "${vcs_group}" || -z "${vcs_flist}" ]] && continue
   while IFS= read -r flist_line || [[ -n "${flist_line}" ]]; do
     [[ "${flist_line}" == +incdir+* ]] &&
       vlogan_include_args+=("${flist_line}")
   done < "${vcs_flist}"
+  case "${vcs_group}" in
+    precompile)
+      vlogan_precompile_file_args+=(-file "${vcs_flist}")
+      ;;
+    project)
+      vlogan_project_file_args+=(-file "${vcs_flist}")
+      ;;
+    *)
+      printf 'ERROR: unknown VCS analysis group %s for %s\n' \
+        "${vcs_group}" "${vcs_flist}" >&2
+      exit 2
+      ;;
+  esac
 done < {{ vcs_vlogan_filelists|shell_quote }}
 
 vcs_home="$(
@@ -60,15 +75,20 @@ done
   "${uvm_sources[@]}" \
   2>&1 | tee -a {{ (VCOMP_DIR ~ '/cmp.log')|shell_quote }}
 
-while IFS= read -r vcs_flist || [[ -n "${vcs_flist}" ]]; do
-  [[ -z "${vcs_flist}" ]] && continue
+run_vlogan_group() {
+  local group_name="$1"
+  shift
+  (($# > 0)) || return 0
+  printf 'VCS incremental analysis group: %s (%s filelists)\n' \
+    "${group_name}" "$(($# / 2))" |
+    tee -a {{ (VCOMP_DIR ~ '/cmp.log')|shell_quote }}
   {{ vcs_runner }} vlogan \
     -full64 \
     -incr_vlogan \
     {{ vcs_incr_vlogan_ignore_env }} \
     "${vlogan_args[@]}" \
     "${vlogan_include_args[@]}" \
-    -file "${vcs_flist}" \
+    "$@" \
     {% for define in additional_defines -%}
       {{ ('+define+' ~ define)|shell_quote }} \
     {% endfor -%}
@@ -77,7 +97,10 @@ while IFS= read -r vcs_flist || [[ -n "${vcs_flist}" ]]; do
       +define+UVM_VCS_RECORD \
     {% endif -%}
     2>&1 | tee -a {{ (VCOMP_DIR ~ '/cmp.log')|shell_quote }}
-done < {{ vcs_vlogan_filelists|shell_quote }}
+}
+
+run_vlogan_group precompile "${vlogan_precompile_file_args[@]}"
+run_vlogan_group project "${vlogan_project_file_args[@]}"
 
 {{ vcs_runner }} vcs \
   -full64 \

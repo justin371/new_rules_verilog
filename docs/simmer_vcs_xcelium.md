@@ -200,6 +200,9 @@ verilog_dv_tb(
         "+define+SVT_PCIE_ENABLE_GEN5",
         "+define+SVT_ETHERNET",
     ],
+    vcs_vlogan_precompile_deps = [
+        "@vip_vcs_svt_pkg//:pkg",
+    ],
     vcs_elab_args = [
         "-top",
         "hdl_top",
@@ -213,17 +216,19 @@ verilog_dv_tb(
 
 This mode preserves every required VIP. It changes the compile staging:
 
-1. Each Bazel library filelist is analyzed by its own
-   `vlogan -incr_vlogan` command, in dependency order.
-2. An unchanged command exits without parsing its sources. A changed source or
-   imported package reruns only the affected library commands.
-3. `vcs` elaborates the analyzed design using the existing Partition Compile
+1. The transitive filelists selected by `vcs_vlogan_precompile_deps` are
+   analyzed together by one `vlogan -incr_vlogan` command.
+2. All remaining filelists are analyzed together by a second command. Keeping
+   each group intact preserves legacy preprocessor macros shared across
+   consecutive filelists.
+3. After a project-only source edit, the unchanged frozen group exits without
+   parsing its sources while the project group is reanalyzed.
+4. `vcs` elaborates the analyzed design using the existing Partition Compile
    configuration and generates `simv`.
 
-Keep each frozen VIP package in a separate `verilog_dv_library` or
-`verilog_rtl_library`. Combining all VIP sources with frequently edited project
-code in one library makes that complete `vlogan` command rerun after a project
-edit.
+Select only dependencies that are already reachable through the testbench
+`deps` or `shells`. Prefer a frozen vendor package target rather than a broad
+environment target that also owns frequently edited project sources.
 
 The persistent analysis library is `<tb>__VCS_VCOMP/vlogan_work`.
 GUI-specific UVM recorder defines use the sibling `vlogan_work_gui` so switching

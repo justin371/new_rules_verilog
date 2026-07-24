@@ -138,6 +138,7 @@ verilog_dv_tb(
     vcs_vlogan_args = [
         "+define+THREE_STEP_ANALYSIS",
     ],
+    vcs_vlogan_precompile_deps = ["@filelist_external_fixture//:external_rtl"],
     deps = [":unit_test_top"],
 )
 

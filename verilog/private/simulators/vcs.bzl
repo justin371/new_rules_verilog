@@ -125,7 +125,11 @@ def _validate_tb(ctx, has_msie_primary, has_msie_extras):
                 "source through vcs_vlogan_args and select its top through vcs_elab_args"
             ).format(ctx.label),
         )
-    if not ctx.attr.vcs_three_step and (ctx.attr.vcs_vlogan_args or ctx.attr.vcs_elab_args):
+    if not ctx.attr.vcs_three_step and (
+        ctx.attr.vcs_vlogan_args or
+        ctx.attr.vcs_elab_args or
+        ctx.attr.vcs_vlogan_precompile_deps
+    ):
         fail(
             "verilog_dv_tb {} vcs_vlogan_args and vcs_elab_args require vcs_three_step = True".format(ctx.label),
         )
@@ -171,6 +175,27 @@ def _extra_compile_outputs(ctx, defines, selected_compile_args, compile_config):
             "transitive_vcs_flists",
             fallback_attr_name = "transitive_flists",
         ).to_list()
+        precompile_flists = get_transitive_srcs(
+            [],
+            ctx.attr.vcs_vlogan_precompile_deps,
+            VerilogInfo,
+            "transitive_vcs_flists",
+            fallback_attr_name = "transitive_flists",
+        ).to_list()
+        precompile_paths = {flist.path: True for flist in precompile_flists}
+        all_flist_paths = {flist.path: True for flist in flists}
+        missing_precompile_flists = [
+            flist.path
+            for flist in precompile_flists
+            if flist.path not in all_flist_paths
+        ]
+        if missing_precompile_flists:
+            fail(
+                (
+                    "verilog_dv_tb {} vcs_vlogan_precompile_deps must select dependencies already present in " +
+                    "deps or shells; missing filelists: {}"
+                ).format(ctx.label, ", ".join(missing_precompile_flists)),
+            )
         ctx.actions.expand_template(
             template = ctx.file._vlogan_args_template_vcs,
             output = vlogan_args_file,
@@ -184,7 +209,13 @@ def _extra_compile_outputs(ctx, defines, selected_compile_args, compile_config):
         )
         ctx.actions.write(
             output = vlogan_filelists,
-            content = "\n".join([runfiles_relative_short_path(flist) for flist in flists]) + "\n",
+            content = "\n".join([
+                "{}\t{}".format(
+                    "precompile" if flist.path in precompile_paths else "project",
+                    runfiles_relative_short_path(flist),
+                )
+                for flist in flists
+            ]) + "\n",
         )
         ctx.actions.expand_template(
             template = ctx.file._elab_args_template_vcs,
