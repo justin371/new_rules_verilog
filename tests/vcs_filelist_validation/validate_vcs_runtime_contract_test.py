@@ -2240,13 +2240,22 @@ run_bounded_process([
         second_flist.write_text("project.sv\n", encoding="utf-8")
         filelists = runfiles / "filelists.txt"
         filelists.write_text("vip.f\nproject.f\n", encoding="utf-8")
+        vcs_home = root / "vcs home"
+        uvm_pkg = vcs_home / "etc" / "uvm-1.2" / "uvm_pkg.sv"
+        uvm_pkg.parent.mkdir(parents=True)
+        uvm_pkg.touch()
 
         captured = root / "calls.txt"
         stub = root / "vcs_stub.sh"
         stub.write_text(
             "#!/usr/bin/env bash\n"
+            "if [[ \"${{1:-}}\" == sh ]]; then\n"
+            "  printf '%s\\n' {}\n"
+            "  exit 0\n"
+            "fi\n"
             "printf '<CALL>\\n' >> {}\n"
             "printf '%s\\n' \"$@\" >> {}\n".format(
+                shlex.quote(shell_path(vcs_home)),
                 shlex.quote(shell_path(captured)),
                 shlex.quote(shell_path(captured)),
             ),
@@ -2294,10 +2303,14 @@ run_bounded_process([
         subprocess.run(["bash", script.name], cwd=root, check=True)
 
         calls = captured.read_text(encoding="utf-8").split("<CALL>\n")[1:]
-        self.assertEqual(3, len(calls))
-        first_analysis = calls[0].splitlines()
-        second_analysis = calls[1].splitlines()
-        elaboration = calls[2].splitlines()
+        self.assertEqual(4, len(calls))
+        uvm_analysis = calls[0].splitlines()
+        first_analysis = calls[1].splitlines()
+        second_analysis = calls[2].splitlines()
+        elaboration = calls[3].splitlines()
+        self.assertEqual("vlogan", uvm_analysis[0])
+        self.assertIn(shell_path(uvm_pkg), uvm_analysis)
+        self.assertNotIn("-file", uvm_analysis)
         self.assertEqual("vlogan", first_analysis[0])
         self.assertEqual("vlogan", second_analysis[0])
         self.assertIn("-incr_vlogan", first_analysis)

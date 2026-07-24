@@ -21,6 +21,36 @@ while IFS= read -r vlogan_arg || [[ -n "${vlogan_arg}" ]]; do
   vlogan_args+=("${vlogan_arg}")
 done < {{ vcs_vlogan_args|shell_quote }}
 
+vcs_home="$(
+  {{ vcs_runner }} sh -c 'printf "%s\n" "$VCS_HOME"' |
+    tail -n 1
+)"
+uvm_sources=("${vcs_home%/}/etc/uvm-1.2/uvm_pkg.sv")
+{% if debug_mode == "gui" -%}
+  uvm_sources+=("${vcs_home%/}/etc/uvm-1.2/vcs/uvm_custom_install_vcs_recorder.sv")
+{% endif -%}
+for uvm_source in "${uvm_sources[@]}"; do
+  [[ -f "${uvm_source}" ]] || {
+    printf 'ERROR: VCS UVM source does not exist: %s\n' "${uvm_source}" >&2
+    exit 2
+  }
+done
+
+{{ vcs_runner }} vlogan \
+  -full64 \
+  -incr_vlogan \
+  {{ vcs_incr_vlogan_ignore_env }} \
+  "${vlogan_args[@]}" \
+  {% for define in additional_defines -%}
+    {{ ('+define+' ~ define)|shell_quote }} \
+  {% endfor -%}
+  {% if debug_mode == "gui" -%}
+    +define+UVM_VERDI_COMPWAVE \
+    +define+UVM_VCS_RECORD \
+  {% endif -%}
+  "${uvm_sources[@]}" \
+  2>&1 | tee -a {{ (VCOMP_DIR ~ '/cmp.log')|shell_quote }}
+
 while IFS= read -r vcs_flist || [[ -n "${vcs_flist}" ]]; do
   [[ -z "${vcs_flist}" ]] && continue
   {{ vcs_runner }} vlogan \
