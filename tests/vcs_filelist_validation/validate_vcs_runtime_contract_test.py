@@ -2213,6 +2213,142 @@ run_bounded_process([
         self.assertEqual("../coverage database", arguments[arguments.index("-cm_dir") + 1])
         self.assertNotIn("-p1800_macro_expansion", arguments)
 
+    def test_vcs_three_step_template_analyzes_each_library_incrementally(self):
+        root = Path(tempfile.mkdtemp(prefix="vcs three step "))
+        self.addCleanup(shutil.rmtree, root, ignore_errors=True)
+
+        def shell_path(path):
+            if os.name == "nt":
+                drive, tail = os.path.splitdrive(os.path.abspath(path))
+                return "/mnt/{}/{}".format(
+                    drive.rstrip(":").lower(),
+                    tail.lstrip("\\/").replace("\\", "/"),
+                )
+            return str(path)
+
+        runfiles = root / "runfiles"
+        vcomp_dir = root / "vcomp"
+        runfiles.mkdir()
+        vcomp_dir.mkdir()
+        vlogan_args = runfiles / "vlogan_args.f"
+        vlogan_args.write_text("-sverilog\n", encoding="utf-8")
+        elab_args = runfiles / "elab_args.f"
+        elab_args.write_text("-top\nunit_test_top\n", encoding="utf-8")
+        first_flist = runfiles / "vip.f"
+        second_flist = runfiles / "project.f"
+        first_flist.write_text("vip.sv\n", encoding="utf-8")
+        second_flist.write_text("project.sv\n", encoding="utf-8")
+        filelists = runfiles / "filelists.txt"
+        filelists.write_text("vip.f\nproject.f\n", encoding="utf-8")
+
+        captured = root / "calls.txt"
+        stub = root / "vcs_stub.sh"
+        stub.write_text(
+            "#!/usr/bin/env bash\n"
+            "printf '<CALL>\\n' >> {}\n"
+            "printf '%s\\n' \"$@\" >> {}\n".format(
+                shlex.quote(shell_path(captured)),
+                shlex.quote(shell_path(captured)),
+            ),
+            encoding="utf-8",
+            newline="\n",
+        )
+        stub.chmod(0o755)
+
+        environment = jinja2.Environment(undefined=jinja2.StrictUndefined)
+        environment.filters["shell_quote"] = shlex.quote
+        template = environment.from_string(
+            self._read_repo_file("bin/templates/vcs_three_step_compile_template.sh.j2").replace("\r\n", "\n"))
+        rendered = template.render(
+            VCOMP_DIR=shell_path(vcomp_dir),
+            additional_defines=["PROJECT_DEFINE"],
+            bazel_runfiles_main=shell_path(runfiles),
+            cov_opts="",
+            debug_mode="default",
+            options=SimpleNamespace(
+                dtl=False,
+                fgp=None,
+                gui=False,
+                smartlog=False,
+                vcs_profile=False,
+                vso=False,
+                vso_cbv=False,
+                vso_ccex=False,
+                waves=None,
+                xprop_was_explicit=False,
+            ),
+            partcomp_opts="-partcomp -fastpartcomp=j2",
+            vcs_analysis_work_dir=shell_path(vcomp_dir / "vlogan_work"),
+            vcs_elab_args=shell_path(elab_args),
+            vcs_incr_vlogan_ignore_env="-vts_ignore_env=HOSTNAME,LSB_JOBID",
+            vcs_runner=shlex.quote(shell_path(stub)),
+            vcs_setup_file=shell_path(vcomp_dir / "synopsys_sim.setup"),
+            vcs_vlogan_args=shell_path(vlogan_args),
+            vcs_vlogan_filelists=shell_path(filelists),
+            vso_build_name="",
+            vso_workdir="",
+            xprop_cmd=None,
+        )
+        script = root / "compile.sh"
+        script.write_text(rendered, encoding="utf-8", newline="\n")
+        subprocess.run(["bash", script.name], cwd=root, check=True)
+
+        calls = captured.read_text(encoding="utf-8").split("<CALL>\n")[1:]
+        self.assertEqual(3, len(calls))
+        first_analysis = calls[0].splitlines()
+        second_analysis = calls[1].splitlines()
+        elaboration = calls[2].splitlines()
+        self.assertEqual("vlogan", first_analysis[0])
+        self.assertEqual("vlogan", second_analysis[0])
+        self.assertIn("-incr_vlogan", first_analysis)
+        self.assertIn("-vts_ignore_env=HOSTNAME,LSB_JOBID", first_analysis)
+        self.assertIn("vip.f", first_analysis)
+        self.assertIn("project.f", second_analysis)
+        self.assertIn("+define+PROJECT_DEFINE", first_analysis)
+        self.assertEqual("vcs", elaboration[0])
+        self.assertIn("-partcomp", elaboration)
+        self.assertIn("-fastpartcomp=j2", elaboration)
+        self.assertIn(shell_path(elab_args), elaboration)
+        setup = (vcomp_dir / "synopsys_sim.setup").read_text(encoding="utf-8")
+        self.assertIn("DEFAULT : {}".format(shell_path(vcomp_dir / "vlogan_work")), setup)
+
+    def test_vcs_three_step_resolves_generated_inputs_and_runtime_setup(self):
+        root = Path(tempfile.mkdtemp(prefix="vcs_three_step_inputs_"))
+        self.addCleanup(shutil.rmtree, root, ignore_errors=True)
+        for name in ("vlogan_args.f", "vlogan_filelists.txt", "elab_args.f"):
+            (root / name).touch()
+        options = parse_args(["--simulator", "VCS"])
+        simulator = VcsSimulator(options, DummyRegressionConfig(), None)
+        vcomp = SimpleNamespace(
+            bazel_runfiles_main=str(root),
+            job_dir=str(root / "vcomp"),
+            tb_options={
+                "vcs_three_step": True,
+                "vcs_vlogan_args": "vlogan_args.f",
+                "vcs_vlogan_filelists": "vlogan_filelists.txt",
+                "vcs_elab_args": "elab_args.f",
+            },
+        )
+
+        simulator.prepare_compile_job(vcomp)
+
+        self.assertTrue(vcomp.vcs_three_step)
+        self.assertEqual(str(root / "vlogan_args.f"), vcomp.vcs_vlogan_args)
+        self.assertEqual(str(root / "vlogan_filelists.txt"), vcomp.vcs_vlogan_filelists)
+        self.assertEqual(str(root / "elab_args.f"), vcomp.vcs_elab_args)
+        test_job = SimpleNamespace(vcomper=vcomp)
+        self.assertEqual(
+            ["export SYNOPSYS_SIM_SETUP={}".format(shlex.quote(str(root / "vcomp" / "synopsys_sim.setup")))],
+            simulator.get_pre_sim_commands(test_job),
+        )
+
+        custom_file = root / "custom.f"
+        custom_file.touch()
+        options_with_file = parse_args(["--simulator", "VCS", "--file", str(custom_file)])
+        simulator_with_file = VcsSimulator(options_with_file, DummyRegressionConfig(), None)
+        with self.assertRaisesRegex(ValueError, "does not accept --file"):
+            simulator_with_file.prepare_compile_job(vcomp)
+
     def test_reusable_compile_artifacts_require_backend_elaboration_outputs(self):
         options = parse_args(["-t", "unit:test", "--simulator", "VCS"])
         simulator = VcsSimulator(options, DummyRegressionConfig(), None)

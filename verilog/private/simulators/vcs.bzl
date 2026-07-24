@@ -111,6 +111,24 @@ def _validate_tb(ctx, has_msie_primary, has_msie_extras):
         fail("verilog_dv_tb {} xcelium_covfile cannot be used with VCS".format(ctx.label))
     if has_msie_primary or has_msie_extras:
         fail("verilog_dv_tb {} MSIE attributes are Xcelium-only".format(ctx.label))
+    if ctx.attr.vcs_three_step and ctx.attr.extra_compile_args:
+        fail(
+            (
+                "verilog_dv_tb {} vcs_three_step requires analysis and elaboration options to be split between " +
+                "vcs_vlogan_args and vcs_elab_args; extra_compile_args must be empty"
+            ).format(ctx.label),
+        )
+    if ctx.attr.vcs_three_step and ctx.attr.verilog_config:
+        fail(
+            (
+                "verilog_dv_tb {} vcs_three_step does not yet support verilog_config; analyze the configuration " +
+                "source through vcs_vlogan_args and select its top through vcs_elab_args"
+            ).format(ctx.label),
+        )
+    if not ctx.attr.vcs_three_step and (ctx.attr.vcs_vlogan_args or ctx.attr.vcs_elab_args):
+        fail(
+            "verilog_dv_tb {} vcs_vlogan_args and vcs_elab_args require vcs_three_step = True".format(ctx.label),
+        )
 
 def _materialize_library_flist(ctx, source_lines, default_flist):
     if not ctx.attr.makelib:
@@ -142,11 +160,64 @@ def _compile_config(ctx, defines, compile_args):
     )
 
 def _extra_compile_outputs(ctx, defines, selected_compile_args, compile_config):
+    if ctx.attr.vcs_three_step:
+        vlogan_args_file = ctx.actions.declare_file(ctx.label.name + "_vlogan_args.f")
+        vlogan_filelists = ctx.actions.declare_file(ctx.label.name + "_vlogan_filelists.txt")
+        elab_args_file = ctx.actions.declare_file(ctx.label.name + "_elab_args.f")
+        flists = get_transitive_srcs(
+            [],
+            ctx.attr.shells + ctx.attr.deps,
+            VerilogInfo,
+            "transitive_vcs_flists",
+            fallback_attr_name = "transitive_flists",
+        ).to_list()
+        ctx.actions.expand_template(
+            template = ctx.file._vlogan_args_template_vcs,
+            output = vlogan_args_file,
+            substitutions = {
+                "{DEFINES}": "\n".join(["+define+{}{}".format(key, value) for key, value in _sanitize_defines(defines).items()]),
+                "{VLOGAN_ARGS}": ctx.expand_location(
+                    "\n".join(ctx.attr.vcs_vlogan_args),
+                    targets = ctx.attr.extra_runfiles,
+                ),
+            },
+        )
+        ctx.actions.write(
+            output = vlogan_filelists,
+            content = "\n".join([runfiles_relative_short_path(flist) for flist in flists]) + "\n",
+        )
+        ctx.actions.expand_template(
+            template = ctx.file._elab_args_template_vcs,
+            output = elab_args_file,
+            substitutions = {
+                "{ELAB_ARGS}": ctx.expand_location(
+                    "\n".join(ctx.attr.vcs_elab_args),
+                    targets = ctx.attr.extra_runfiles,
+                ),
+            },
+        )
+        return struct(
+            generated_outputs = [
+                vlogan_args_file,
+                vlogan_filelists,
+                elab_args_file,
+            ],
+            incremental_compile_args = None,
+            primary_compile_args = None,
+            primary_inputs = None,
+            vcs_elab_args = elab_args_file,
+            vcs_vlogan_args = vlogan_args_file,
+            vcs_vlogan_filelists = vlogan_filelists,
+        )
+
     return struct(
         generated_outputs = [],
         incremental_compile_args = None,
         primary_compile_args = None,
         primary_inputs = None,
+        vcs_elab_args = None,
+        vcs_vlogan_args = None,
+        vcs_vlogan_filelists = None,
     )
 
 def _runtime_config(ctx):
@@ -163,10 +234,18 @@ def _runtime_config(ctx):
         template = ctx.file._default_sim_opts_vcs,
     )
 
-def _tb_options(ctx, unused_extra_compile_outputs, unused_xcelium_covfile):
-    return {
+def _tb_options(ctx, extra_compile_outputs, unused_xcelium_covfile):
+    options = {
         "vcs_cm_hier": runfiles_relative_short_path(ctx.file.vcs_cm_hier) if ctx.file.vcs_cm_hier else "",
+        "vcs_three_step": ctx.attr.vcs_three_step,
     }
+    if ctx.attr.vcs_three_step:
+        options.update({
+            "vcs_elab_args": runfiles_relative_short_path(extra_compile_outputs.vcs_elab_args),
+            "vcs_vlogan_args": runfiles_relative_short_path(extra_compile_outputs.vcs_vlogan_args),
+            "vcs_vlogan_filelists": runfiles_relative_short_path(extra_compile_outputs.vcs_vlogan_filelists),
+        })
+    return options
 
 vcs_dv_backend = struct(
     compile_config = _compile_config,

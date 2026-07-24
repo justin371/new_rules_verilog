@@ -183,6 +183,75 @@ or packages in a VCS optconfig file as described below. A `makelib` string is
 not sufficient to generate that config because one library may contain several
 cells and packages.
 
+### VCS three-step incremental analysis
+
+Partition Compile reuses elaborated partitions, but the default VCS two-step
+flow still sends the complete source filelist through one compiler frontend
+when any real compile input changes. For a testbench dominated by frozen
+third-party VIP, enable the three-step flow on its `verilog_dv_tb` target:
+
+```python
+verilog_dv_tb(
+    name = "sys_tb",
+    simulator = "VCS",
+    deps = top_deps,
+    vcs_three_step = True,
+    vcs_vlogan_args = [
+        "+define+SVT_PCIE_ENABLE_GEN5",
+        "+define+SVT_ETHERNET",
+    ],
+    vcs_elab_args = [
+        "-top",
+        "hdl_top",
+        "-top",
+        "hvl_top",
+        "+optconfigfile+$(location :vcs_partitions)",
+    ],
+    extra_runfiles = [":vcs_partitions"],
+)
+```
+
+This mode preserves every required VIP. It changes the compile staging:
+
+1. Each Bazel library filelist is analyzed by its own
+   `vlogan -incr_vlogan` command, in dependency order.
+2. An unchanged command exits without parsing its sources. A changed source or
+   imported package reruns only the affected library commands.
+3. `vcs` elaborates the analyzed design using the existing Partition Compile
+   configuration and generates `simv`.
+
+Keep each frozen VIP package in a separate `verilog_dv_library` or
+`verilog_rtl_library`. Combining all VIP sources with frequently edited project
+code in one library makes that complete `vlogan` command rerun after a project
+edit.
+
+The persistent analysis library is `<tb>__VCS_VCOMP/vlogan_work`.
+GUI-specific UVM recorder defines use the sibling `vlogan_work_gui` so switching
+GUI mode does not invalidate the batch analysis database. Simmer ignores only
+volatile LSF host/job variables during VCS incremental-environment checks;
+tool, source, define and stable environment changes remain compile inputs.
+`--recompile` removes the analysis library along with the rest of the VCOMP
+directory.
+
+Analysis and elaboration options must be unambiguous in this flow:
+
+- put `+define`, `+incdir`, source-language and warning options in
+  `vcs_vlogan_args`;
+- put `-top`, `+optconfigfile`, partition-related design selection and other
+  elaboration options in `vcs_elab_args`;
+- keep runtime plusargs in `extra_runtime_args`.
+
+`extra_compile_args`, simmer `--file`, and `verilog_config` are intentionally
+rejected for a three-step target until their mixed analysis/elaboration meaning
+is split explicitly. The default two-step flow remains unchanged for all
+existing targets.
+
+An exact automatic fingerprint hit still bypasses VCS entirely. The
+three-step benefit appears after a real project source change: simmer invokes
+the compile flow, unchanged VIP analysis commands exit quickly, and only the
+changed project libraries and dependent libraries are parsed before incremental
+elaboration.
+
 ### VCS Partition Compile
 
 VCS X-2025.06-SP2-4 uses Partition Compile by default. Simmer applies standard

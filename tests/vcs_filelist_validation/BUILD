@@ -126,6 +126,22 @@ verilog_dv_tb(
 )
 
 verilog_dv_tb(
+    name = "dv_tb_vcs_three_step",
+    simulator = "VCS",
+    vcs_elab_args = [
+        "-top",
+        "unit_test_top",
+        "+optconfigfile+$(location :vcs_partitions)",
+    ],
+    vcs_three_step = True,
+    vcs_vlogan_args = [
+        "+define+THREE_STEP_ANALYSIS",
+    ],
+    extra_runfiles = [":vcs_partitions"],
+    deps = [":unit_test_top"],
+)
+
+verilog_dv_tb(
     name = "dv_tb_xrun_ccf",
     ccf = ["coverage.ccf"],
     msie_incremental_deps = ["@filelist_external_fixture//:external_rtl"],
@@ -281,6 +297,7 @@ py_test(
         ":dv_tb_vcs_compile_args.f",
         ":dv_tb_vcs_runtime_args.f",
         ":dv_tb_vcs_tb_options.py",
+        ":dv_tb_vcs_three_step",
         ":dv_tb_xrun_ccf",
         ":dv_tb_xrun_ccf_compile_args.f",
         ":dv_tb_xrun_ccf_tb_options.py",

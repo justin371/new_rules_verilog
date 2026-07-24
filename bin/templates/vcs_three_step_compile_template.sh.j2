@@ -1,0 +1,85 @@
+#!/usr/bin/env bash
+set -Eeuo pipefail
+
+trap 'rc=$?; printf "ERROR: VCS three-step compile failed at line %s (exit %s): %s\n" "$LINENO" "$rc" "$BASH_COMMAND" >&2' ERR
+
+mkdir -p \
+  {{ (VCOMP_DIR ~ '/csrc')|shell_quote }} \
+  {{ vcs_analysis_work_dir|shell_quote }}
+
+printf 'WORK > DEFAULT\nDEFAULT : %s\n' \
+  {{ vcs_analysis_work_dir|shell_quote }} \
+  > {{ vcs_setup_file|shell_quote }}
+
+export SYNOPSYS_SIM_SETUP={{ vcs_setup_file|shell_quote }}
+: > {{ (VCOMP_DIR ~ '/cmp.log')|shell_quote }}
+cd {{ bazel_runfiles_main|shell_quote }}
+
+while IFS= read -r vcs_flist || [[ -n "${vcs_flist}" ]]; do
+  [[ -z "${vcs_flist}" ]] && continue
+  {{ vcs_runner }} vlogan \
+    -full64 \
+    -incr_vlogan \
+    {{ vcs_incr_vlogan_ignore_env }} \
+    -f {{ vcs_vlogan_args|shell_quote }} \
+    -f "${vcs_flist}" \
+    {% for define in additional_defines -%}
+      {{ ('+define+' ~ define)|shell_quote }} \
+    {% endfor -%}
+    {% if debug_mode == "gui" -%}
+      +define+UVM_VERDI_COMPWAVE \
+      +define+UVM_VCS_RECORD \
+    {% endif -%}
+    2>&1 | tee -a {{ (VCOMP_DIR ~ '/cmp.log')|shell_quote }}
+done < {{ vcs_vlogan_filelists|shell_quote }}
+
+{{ vcs_runner }} vcs \
+  -full64 \
+  -Mdir={{ (VCOMP_DIR ~ '/csrc')|shell_quote }} \
+  -Mlib={{ (VCOMP_DIR ~ '/csrc')|shell_quote }} \
+  {% if options.fgp is not none -%}
+    -fgp \
+  {% endif -%}
+  {% if options.vcs_profile -%}
+    -pcmakeprof -reportstats \
+  {% endif -%}
+  {% if partcomp_opts -%}
+    {{ partcomp_opts }} \
+  {% endif -%}
+  {% if options.dtl -%}
+    -enable_dynamic_tb \
+  {% endif -%}
+  {% if options.vso -%}
+    -vso cso \
+    -vso_opts buildname={{ vso_build_name|shell_quote }} \
+    {% if options.vso_cbv -%}
+      -vso_opts workdir={{ vso_workdir|shell_quote }} \
+    {% endif -%}
+  {% elif options.vso_ccex -%}
+    -vso ccex \
+  {% endif -%}
+  -file {{ vcs_elab_args|shell_quote }} \
+  {% if debug_mode == "waves" -%}
+    {% if options.dtl -%}
+      -kdb=common_elab \
+    {% else -%}
+      -kdb \
+    {% endif -%}
+    -debug_access \
+  {% endif -%}
+  {% if debug_mode == "gui" -%}
+    -kdb \
+    -debug_access+all+reverse \
+    +vpi \
+  {% endif -%}
+  {% if options.xprop_was_explicit and xprop_cmd -%}
+    {{ xprop_cmd }} \
+  {% endif -%}
+  {% if cov_opts -%}
+    {{ cov_opts }} \
+  {% endif -%}
+  {% if options.smartlog -%}
+    -sml \
+  {% endif -%}
+  -o {{ (VCOMP_DIR ~ '/simv')|shell_quote }} \
+  2>&1 | tee -a {{ (VCOMP_DIR ~ '/cmp.log')|shell_quote }}

@@ -240,6 +240,30 @@ class VcsFilelistValidationTest(unittest.TestCase):
             expected_digest.update(b"\0")
         self.assertEqual(expected_digest.hexdigest(), compile_inputs_digest)
 
+    def test_vcs_three_step_separates_analysis_filelists_from_elaboration(self):
+        options_path = "tests/vcs_filelist_validation/dv_tb_vcs_three_step_tb_options.py"
+        options = ast.literal_eval(read_runfile(options_path))
+        vlogan_args = read_runfile(options["vcs_vlogan_args"])
+        vlogan_filelists = read_runfile(options["vcs_vlogan_filelists"])
+        elab_args = read_runfile(options["vcs_elab_args"])
+        compile_inputs = read_runfile(options["compile_inputs"])
+
+        self.assertTrue(options["vcs_three_step"])
+        self.assertIn("+define+THREE_STEP_ANALYSIS", vlogan_args)
+        self.assertIn("+define+TBV", vlogan_args)
+        self.assertNotIn("-top", vlogan_args)
+        self.assertIn("external/filelist_external_fixture/external_rtl.f", vlogan_filelists)
+        self.assertIn("tests/vcs_filelist_validation/unit_test_top_vcs.f", vlogan_filelists)
+        self.assertIn("-top\nunit_test_top", elab_args)
+        self.assertIn(
+            "+optconfigfile+tests/vcs_filelist_validation/vcs_partitions.cfg",
+            elab_args,
+        )
+        self.assertNotIn("unit_test_top_vcs.f", elab_args)
+        self.assertIn("runfile\t{}".format(options["vcs_vlogan_args"]), compile_inputs)
+        self.assertIn("runfile\t{}".format(options["vcs_vlogan_filelists"]), compile_inputs)
+        self.assertIn("runfile\t{}".format(options["vcs_elab_args"]), compile_inputs)
+
     def test_xcelium_msie_filelists_are_bazel_generated_and_partitioned(self):
         primary_path = "tests/vcs_filelist_validation/dv_tb_xrun_ccf_msie_primary_compile_args.f"
         incremental_path = "tests/vcs_filelist_validation/dv_tb_xrun_ccf_msie_incremental_compile_args.f"
