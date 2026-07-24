@@ -228,11 +228,11 @@ class VcsSimulator(SimulatorInterface):
         return self.options.fgp if self.options.fgp is not None else 1
 
     def use_smartlog(self):
-        return self.options.smartlog or self.options.waves is not None or self.options.gui
+        return self.options.smartlog
 
     def get_wave_view_command(self, wave_file_path, job_dir=None):
         argv = shlex.split(self.get_tool_runner()) + ["verdi", "-ssf", wave_file_path]
-        if job_dir is not None:
+        if job_dir is not None and self.use_smartlog():
             smartlog_path = os.path.join(job_dir, "stdout.log")
             if os.path.exists(smartlog_path):
                 argv.extend(["-smlog", smartlog_path])
