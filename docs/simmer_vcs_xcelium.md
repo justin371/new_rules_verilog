@@ -412,15 +412,21 @@ simmer -t <bench>:<test> --simulator VCS --vcs-xprop F
 ```
 
 VCS `--waves` is the lightweight signal-dump mode. It compiles with `-kdb`,
-`-debug_access+pp`, and VPI, but does not enable SmartLog or UVM transaction
-recording. VCS cannot combine SmartLog's `-sml` with
+`-debug_access+pp`, and VPI, but does not explicitly enable SmartLog or add
+UVM transaction-recording defines. VCS cannot combine SmartLog's `-sml` with
 `-fastpartcomp=jN`; use `--smartlog --no-vcs-partcomp` when Verdi log/source
 correlation is needed. `--gui` remains the full interactive-debug mode: it
-enables full reverse-debug access, `UVM_VERDI_COMPWAVE`, and
-`UVM_VCS_RECORD`, but does not implicitly enable SmartLog. The installed VCS
-`-ntb_opts uvm-1.2` flow supplies its matching
-`uvm_custom_install_vcs_recorder.sv`; rules_verilog does not hardcode a
-version-specific VCS installation path.
+enables full reverse-debug access and explicitly adds
+`UVM_VERDI_COMPWAVE` and `UVM_VCS_RECORD`, but does not implicitly enable
+SmartLog.
+
+The installed VCS `-ntb_opts uvm-1.2` and Verdi FSDB integration can still
+automatically add `UVM_VCS_RECORD` and matching recorder sources during
+`--waves`; this behavior was observed with VCS X-2025.06-SP2-4 even though
+the generated simmer command did not request them. The mode split controls
+the flags owned by rules_verilog but does not suppress vendor-side option
+expansion. rules_verilog does not hardcode a version-specific VCS
+installation path for `uvm_custom_install_vcs_recorder.sv`.
 
 `--xprop` remains a compatibility spelling for VCS. Use `--vcs-xprop` in new
 VCS commands so simulator-specific controls stay grouped in `simmer -h`.
