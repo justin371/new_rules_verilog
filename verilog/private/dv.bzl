@@ -772,8 +772,8 @@ verilog_dv_tb = rule(
         "vcs_vlogan_args": attr.string_list(
             doc = (
                 "Additional VCS analysis options used only by vlogan in vcs_three_step mode. Put preprocessor " +
-                "defines and other source-analysis options here. Files referenced with $(location) must also be " +
-                "listed in extra_runfiles."
+                "defines and other source-analysis options here, with one command-line argument per list item. " +
+                "Files referenced with $(location) must also be listed in extra_runfiles."
             ),
         ),
         "vcs_elab_args": attr.string_list(

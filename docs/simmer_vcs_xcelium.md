@@ -236,7 +236,7 @@ directory.
 Analysis and elaboration options must be unambiguous in this flow:
 
 - put `+define`, `+incdir`, source-language and warning options in
-  `vcs_vlogan_args`;
+  `vcs_vlogan_args`, using one command-line argument per list item;
 - put `-top`, `+optconfigfile`, partition-related design selection and other
   elaboration options in `vcs_elab_args`;
 - keep runtime plusargs in `extra_runtime_args`.
