@@ -70,6 +70,10 @@ def validate_vcs_runtime_options(options, parser):
     if not options.vcs_partcomp and partcomp_detail_switches:
         parser.error("VCS Partition Compile details cannot be combined with '--no-vcs-partcomp'. "
                      "Stopping before Bazel starts.")
+    if options.smartlog and options.vcs_partcomp:
+        parser.error("VCS SmartLog '-sml' is incompatible with Partition Compile '-fastpartcomp=jN'. "
+                     "Use '--smartlog --no-vcs-partcomp' so VCS does not silently ignore SmartLog. "
+                     "Stopping before Bazel starts.")
     if options.vcs_partcomp_sharedlib is not None:
         sharedlib = os.path.abspath(options.vcs_partcomp_sharedlib)
         if not os.path.isdir(sharedlib):

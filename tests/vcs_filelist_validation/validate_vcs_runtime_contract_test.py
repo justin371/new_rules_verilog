@@ -818,28 +818,32 @@ run_bounded_process([
         self.assertIn("/tmp/vcomp with spaces/simv", shlex.split(command))
         self.assertIn("+LABEL=" + value, shlex.split(command))
 
-    def test_vcs_smartlog_is_explicit_for_waves_and_implicit_for_gui(self):
+    def test_vcs_smartlog_is_explicit_for_waves_and_gui(self):
         default_options = parse_args(["-t", "unit:test", "--simulator", "VCS"])
-        smartlog_options = parse_args(["-t", "unit:test", "--simulator", "VCS", "--smartlog"])
+        smartlog_options, smartlog = self._validated(
+            ["-t", "unit:test", "--simulator", "VCS", "--smartlog", "--no-vcs-partcomp"])
         waves_options = parse_args(["-t", "unit:test", "--simulator", "VCS", "--waves"])
         gui_options = parse_args(["-t", "unit:test", "--simulator", "VCS", "--gui"])
 
         default = VcsSimulator(default_options, DummyRegressionConfig(), None)
-        smartlog = VcsSimulator(smartlog_options, DummyRegressionConfig(), None)
         waves = VcsSimulator(waves_options, DummyRegressionConfig(), None)
         gui = VcsSimulator(gui_options, DummyRegressionConfig(), None)
 
+        self.assertFalse(smartlog_options.vcs_partcomp)
         self.assertFalse(default.use_smartlog())
         self.assertTrue(smartlog.use_smartlog())
         self.assertFalse(waves.use_smartlog())
-        self.assertTrue(gui.use_smartlog())
+        self.assertFalse(gui.use_smartlog())
 
         def simulation_command(simulator):
             return simulator.get_sim_command(None, "", "/tmp/vcomp", "/tmp/stdout.log")
 
         self.assertNotIn(" -sml ", simulation_command(waves))
         self.assertIn(" -sml ", simulation_command(smartlog))
-        self.assertIn(" -sml ", simulation_command(gui))
+        self.assertNotIn(" -sml ", simulation_command(gui))
+
+        with self.assertRaisesRegex(ValueError, "SmartLog.*incompatible"):
+            self._validated(["-t", "unit:test", "--simulator", "VCS", "--smartlog"])
 
     def test_vcs_compile_template_separates_light_waves_from_full_gui_debug(self):
         environment = jinja2.Environment(undefined=jinja2.StrictUndefined)
@@ -888,7 +892,7 @@ run_bounded_process([
         self.assertIn("-debug_access+all+reverse", gui)
         self.assertIn("+define+UVM_VERDI_COMPWAVE", gui)
         self.assertIn("+define+UVM_VCS_RECORD", gui)
-        self.assertIn(" -sml ", " ".join(gui.split()))
+        self.assertNotIn(" -sml ", " ".join(gui.split()))
 
     def test_vcs_partition_compile_and_cache_are_enabled_by_default(self):
         options = parse_args(["-t", "unit:test", "--simulator", "VCS"])

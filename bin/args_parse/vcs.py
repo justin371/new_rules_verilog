@@ -162,8 +162,8 @@ def add_vcs_arguments(parser):
                       default=False,
                       action='store_true',
                       help=('Enable VCS SmartLog (-sml) for compile and simulation. Use for Verdi log correlation; '
-                            'wave capture does not enable it automatically. Leave disabled in throughput regressions '
-                            'unless the debug metadata is needed.'))
+                            'wave capture and GUI mode do not enable it automatically. VCS cannot combine -sml with '
+                            '-fastpartcomp=jN, so pass --no-vcs-partcomp when enabling SmartLog.'))
     gvcs.add_argument('--vcs-runner',
                       type=str,
                       default=None,
