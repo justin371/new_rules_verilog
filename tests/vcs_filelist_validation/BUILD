@@ -335,6 +335,7 @@ py_test(
         "//bin:templates/sim_template.sh.j2",
         "//bin:templates/vcs_compile_template.sh.j2",
         "//bin:templates/vcs_cov_merge_template.sh.j2",
+        "//bin:templates/vcs_three_step_compile_template.sh.j2",
         "//bin:templates/vcs_wave_cmd_template.tcl.j2",
         "//bin:templates/xrun_compile_template.sh.j2",
         "//bin:templates/xrun_wave_cmd_template.tcl.j2",
