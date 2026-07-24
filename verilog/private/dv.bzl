@@ -964,6 +964,11 @@ verilog_dv_unit_test = rule(
 )
 
 def _verilog_dv_test_cfg_info_aspect_impl(target, ctx):
+    # Bazel applies command-line aspects to explicitly requested top-level
+    # targets even when required_providers does not match.
+    if DVTestInfo not in target:
+        return []
+
     if target[DVTestInfo].tb == None:
         return []
 
