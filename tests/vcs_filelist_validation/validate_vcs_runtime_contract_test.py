@@ -2231,15 +2231,15 @@ run_bounded_process([
         runfiles.mkdir()
         vcomp_dir.mkdir()
         vlogan_args = runfiles / "vlogan_args.f"
-        vlogan_args.write_text("-sverilog\n", encoding="utf-8")
+        vlogan_args.write_text("-sverilog\n", encoding="utf-8", newline="\n")
         elab_args = runfiles / "elab_args.f"
-        elab_args.write_text("-top\nunit_test_top\n", encoding="utf-8")
+        elab_args.write_text("-top\nunit_test_top\n", encoding="utf-8", newline="\n")
         first_flist = runfiles / "vip.f"
         second_flist = runfiles / "project.f"
-        first_flist.write_text("vip.sv\n", encoding="utf-8")
-        second_flist.write_text("project.sv\n", encoding="utf-8")
+        first_flist.write_text("+incdir+vip/includes\nvip.sv\n", encoding="utf-8", newline="\n")
+        second_flist.write_text("+incdir+project/includes\nproject.sv\n", encoding="utf-8", newline="\n")
         filelists = runfiles / "filelists.txt"
-        filelists.write_text("vip.f\nproject.f\n", encoding="utf-8")
+        filelists.write_text("vip.f\nproject.f\n", encoding="utf-8", newline="\n")
         vcs_home = root / "vcs home"
         uvm_pkg = vcs_home / "etc" / "uvm-1.2" / "uvm_pkg.sv"
         uvm_pkg.parent.mkdir(parents=True)
@@ -2316,6 +2316,10 @@ run_bounded_process([
         self.assertIn("-incr_vlogan", first_analysis)
         self.assertIn("-vts_ignore_env=HOSTNAME,LSB_JOBID", first_analysis)
         self.assertIn("-sverilog", first_analysis)
+        self.assertIn("+incdir+vip/includes", first_analysis)
+        self.assertIn("+incdir+project/includes", first_analysis)
+        self.assertIn("+incdir+vip/includes", second_analysis)
+        self.assertIn("+incdir+project/includes", second_analysis)
         self.assertIn("-file", first_analysis)
         self.assertIn("vip.f", first_analysis)
         self.assertIn("project.f", second_analysis)

@@ -21,6 +21,15 @@ while IFS= read -r vlogan_arg || [[ -n "${vlogan_arg}" ]]; do
   vlogan_args+=("${vlogan_arg}")
 done < {{ vcs_vlogan_args|shell_quote }}
 
+vlogan_include_args=()
+while IFS= read -r vcs_flist || [[ -n "${vcs_flist}" ]]; do
+  [[ -z "${vcs_flist}" ]] && continue
+  while IFS= read -r flist_line || [[ -n "${flist_line}" ]]; do
+    [[ "${flist_line}" == +incdir+* ]] &&
+      vlogan_include_args+=("${flist_line}")
+  done < "${vcs_flist}"
+done < {{ vcs_vlogan_filelists|shell_quote }}
+
 vcs_home="$(
   {{ vcs_runner }} printenv VCS_HOME |
     tail -n 1
@@ -58,6 +67,7 @@ while IFS= read -r vcs_flist || [[ -n "${vcs_flist}" ]]; do
     -incr_vlogan \
     {{ vcs_incr_vlogan_ignore_env }} \
     "${vlogan_args[@]}" \
+    "${vlogan_include_args[@]}" \
     -file "${vcs_flist}" \
     {% for define in additional_defines -%}
       {{ ('+define+' ~ define)|shell_quote }} \
