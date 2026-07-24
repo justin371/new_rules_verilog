@@ -47,14 +47,16 @@ cd {{ bazel_runfiles_main|shell_quote }}
     {% else -%}
       -kdb \
     {% endif -%}
-    -debug_access+all+designer+simctrl \
+    -debug_access+pp \
     +vpi \
-    +define+UVM_VERDI_COMPWAVE \
   {% endif -%}
   {% if debug_mode == "gui" -%}
     -kdb \
     -debug_access+all+reverse \
     +vpi \
+    {# The active VCS -ntb_opts UVM flow supplies its matching custom recorder source. -#}
+    +define+UVM_VERDI_COMPWAVE \
+    +define+UVM_VCS_RECORD \
   {% endif -%}
   {% if options.xprop_was_explicit and xprop_cmd -%}
     {{ xprop_cmd }} \
@@ -62,7 +64,7 @@ cd {{ bazel_runfiles_main|shell_quote }}
   {% if cov_opts -%}
     {{ cov_opts }} \
   {% endif -%}
-  {% if options.smartlog or options.waves is not none or options.gui -%}
+  {% if options.smartlog or options.gui -%}
     -sml \
   {% endif -%}
   -l {{ (VCOMP_DIR ~ '/cmp.log')|shell_quote }} \

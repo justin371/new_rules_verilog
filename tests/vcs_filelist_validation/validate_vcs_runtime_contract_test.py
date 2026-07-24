@@ -253,9 +253,20 @@ run_bounded_process([
             Path(job_dir, "stdout.log").touch()
             command = simulator.get_wave_view_command("/tmp/waves.fsdb", job_dir)
 
-        self.assertIn("-smlog", command.splitlines())
+        self.assertNotIn("-smlog", command.splitlines())
         self.assertNotIn("-apex", command)
         self.assertNotIn("-lca", command)
+
+        smartlog = VcsSimulator(
+            parse_args(["--simulator", "VCS", "--waves", "--smartlog"]),
+            DummyRegressionConfig(),
+            None,
+        )
+        with tempfile.TemporaryDirectory() as job_dir:
+            Path(job_dir, "stdout.log").touch()
+            command = smartlog.get_wave_view_command("/tmp/waves.fsdb", job_dir)
+
+        self.assertIn("-smlog", command.splitlines())
 
     def test_wave_viewer_commands_preserve_argv_boundaries(self):
         wave_path = "/tmp/waves with spaces;$(not-executed).fsdb"
@@ -807,14 +818,77 @@ run_bounded_process([
         self.assertIn("/tmp/vcomp with spaces/simv", shlex.split(command))
         self.assertIn("+LABEL=" + value, shlex.split(command))
 
-    def test_vcs_smartlog_is_debug_only_by_default(self):
+    def test_vcs_smartlog_is_explicit_for_waves_and_implicit_for_gui(self):
         default_options = parse_args(["-t", "unit:test", "--simulator", "VCS"])
         smartlog_options = parse_args(["-t", "unit:test", "--simulator", "VCS", "--smartlog"])
         waves_options = parse_args(["-t", "unit:test", "--simulator", "VCS", "--waves"])
+        gui_options = parse_args(["-t", "unit:test", "--simulator", "VCS", "--gui"])
 
-        self.assertFalse(VcsSimulator(default_options, DummyRegressionConfig(), None).use_smartlog())
-        self.assertTrue(VcsSimulator(smartlog_options, DummyRegressionConfig(), None).use_smartlog())
-        self.assertTrue(VcsSimulator(waves_options, DummyRegressionConfig(), None).use_smartlog())
+        default = VcsSimulator(default_options, DummyRegressionConfig(), None)
+        smartlog = VcsSimulator(smartlog_options, DummyRegressionConfig(), None)
+        waves = VcsSimulator(waves_options, DummyRegressionConfig(), None)
+        gui = VcsSimulator(gui_options, DummyRegressionConfig(), None)
+
+        self.assertFalse(default.use_smartlog())
+        self.assertTrue(smartlog.use_smartlog())
+        self.assertFalse(waves.use_smartlog())
+        self.assertTrue(gui.use_smartlog())
+
+        def simulation_command(simulator):
+            return simulator.get_sim_command(None, "", "/tmp/vcomp", "/tmp/stdout.log")
+
+        self.assertNotIn(" -sml ", simulation_command(waves))
+        self.assertIn(" -sml ", simulation_command(smartlog))
+        self.assertIn(" -sml ", simulation_command(gui))
+
+    def test_vcs_compile_template_separates_light_waves_from_full_gui_debug(self):
+        environment = jinja2.Environment(undefined=jinja2.StrictUndefined)
+        environment.filters["shell_quote"] = shlex.quote
+        template = environment.from_string(self._read_repo_file("bin/templates/vcs_compile_template.sh.j2"))
+
+        def render(debug_mode, *, gui=False, smartlog=False, waves=None):
+            return template.render(
+                VCOMP_DIR="/tmp/vcomp",
+                additional_defines=[],
+                bazel_compile_args="/tmp/compile_args.f",
+                bazel_runfiles_main="/tmp/runfiles",
+                cov_opts="",
+                debug_mode=debug_mode,
+                options=SimpleNamespace(
+                    compile_args_file=None,
+                    dtl=False,
+                    fgp=None,
+                    gui=gui,
+                    smartlog=smartlog,
+                    vcs_profile=False,
+                    vso=False,
+                    vso_cbv=False,
+                    vso_ccex=False,
+                    waves=waves,
+                    xprop_was_explicit=False,
+                ),
+                partcomp_opts="",
+                vcs_runner="vcs-runner",
+                vso_build_name="",
+                vso_workdir="",
+                xprop_cmd=None,
+            )
+
+        waves = render("waves", waves=[])
+        self.assertIn("-debug_access+pp", waves)
+        self.assertNotIn("-debug_access+all+designer+simctrl", waves)
+        self.assertNotIn("+define+UVM_VERDI_COMPWAVE", waves)
+        self.assertNotIn("+define+UVM_VCS_RECORD", waves)
+        self.assertNotIn(" -sml ", " ".join(waves.split()))
+
+        waves_with_smartlog = render("waves", smartlog=True, waves=[])
+        self.assertIn(" -sml ", " ".join(waves_with_smartlog.split()))
+
+        gui = render("gui", gui=True)
+        self.assertIn("-debug_access+all+reverse", gui)
+        self.assertIn("+define+UVM_VERDI_COMPWAVE", gui)
+        self.assertIn("+define+UVM_VCS_RECORD", gui)
+        self.assertIn(" -sml ", " ".join(gui.split()))
 
     def test_vcs_partition_compile_and_cache_are_enabled_by_default(self):
         options = parse_args(["-t", "unit:test", "--simulator", "VCS"])

@@ -24,7 +24,8 @@ def add_vcs_arguments(parser):
         '--gui',
         default=False,
         action='store_true',
-        help=('Compile one selected test with Verdi debug access and launch simv in the Verdi GUI.\n'
+        help=('Compile one selected test with full Verdi debug access, SmartLog, and UVM transaction recording, '
+              'then launch simv in the Verdi GUI.\n'
               'Preparation: select exactly one VCS test and ensure a Verdi license/display is available.'))
     gvcs.add_argument('--vcs-cm',
                       dest='cm',
@@ -161,7 +162,8 @@ def add_vcs_arguments(parser):
                       default=False,
                       action='store_true',
                       help=('Enable VCS SmartLog (-sml) for compile and simulation. Use for Verdi log correlation; '
-                            'leave disabled in throughput regressions unless the debug metadata is needed.'))
+                            'wave capture does not enable it automatically. Leave disabled in throughput regressions '
+                            'unless the debug metadata is needed.'))
     gvcs.add_argument('--vcs-runner',
                       type=str,
                       default=None,

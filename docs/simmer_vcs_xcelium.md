@@ -411,6 +411,15 @@ simmer -t <bench>:<test> --simulator VCS --smartlog
 simmer -t <bench>:<test> --simulator VCS --vcs-xprop F
 ```
 
+VCS `--waves` is the lightweight signal-dump mode. It compiles with `-kdb`,
+`-debug_access+pp`, and VPI, but does not enable SmartLog or UVM transaction
+recording. Add `--smartlog` only when Verdi log/source correlation is needed.
+`--gui` remains the full interactive-debug mode: it enables full reverse-debug
+access, SmartLog, `UVM_VERDI_COMPWAVE`, and `UVM_VCS_RECORD`. The installed
+VCS `-ntb_opts uvm-1.2` flow supplies its matching
+`uvm_custom_install_vcs_recorder.sv`; rules_verilog does not hardcode a
+version-specific VCS installation path.
+
 `--xprop` remains a compatibility spelling for VCS. Use `--vcs-xprop` in new
 VCS commands so simulator-specific controls stay grouped in `simmer -h`.
 
