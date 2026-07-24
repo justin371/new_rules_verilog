@@ -222,6 +222,20 @@ fingerprint matches. Shared partition databases and the full compatibility
 guidance are documented in [VCS and Xcelium
 workflow](docs/simmer_vcs_xcelium.md#vcs-partition-compile).
 
+When a real project source edit still makes the VCS two-step frontend parse
+large frozen VIP filelists, opt the testbench into
+`verilog_dv_tb(vcs_three_step = True, ...)`. The three-step flow runs one
+`vlogan -incr_vlogan` command for the dependencies selected by
+`vcs_vlogan_precompile_deps` and another for the remaining project filelists.
+The frozen group can skip analysis after a project edit while preserving
+cross-file macro state inside each group. Macro state does not cross the group
+boundary, so downstream sources must import the compiled packages rather than
+depend on macro/include-guard side effects from the frozen group. Analysis and
+elaboration arguments must be split between `vcs_vlogan_args` and
+`vcs_elab_args`; see the
+[three-step incremental analysis
+workflow](docs/simmer_vcs_xcelium.md#vcs-three-step-incremental-analysis).
+
 ### VCS ICO and VSO.ai
 
 ICO, VSO.ai CSO and VSO.ai Coverage Directed Solver are separate opt-in flows:

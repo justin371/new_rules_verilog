@@ -1177,21 +1177,25 @@ class JobManager():
 class BazelTBJob(Job):
     """Build the selected testbench and test configs in one Bazel invocation."""
 
-    def __init__(self, rcfg, target, vcomper, additional_targets=()):
+    def __init__(self, rcfg, target, vcomper, additional_targets=(), prebuilt_targets=()):
         self.bazel_target = target
         self.bazel_targets = []
         if not rcfg.options.no_compile:
             self.bazel_targets.append(target)
         self.bazel_targets.extend(additional_targets)
         self.bazel_targets = list(dict.fromkeys(self.bazel_targets))
+        prebuilt_targets = set(prebuilt_targets)
+        self.bazel_targets = [target for target in self.bazel_targets if target not in prebuilt_targets]
         super(BazelTBJob, self).__init__(rcfg, self)
         self.vcomper = vcomper
         if vcomper:
             self.vcomper.add_dependency(self)
 
         self.job_dir = self.vcomper.job_dir # Don't actually need a dir, but jobrunner/manager want it defined
-        if self.rcfg.options.no_bazel or not self.bazel_targets:
+        if self.rcfg.options.no_bazel:
             self.main_cmdline = "echo \"Bypassing {} due to --no-compile/--no-bazel\"".format(target)
+        elif not self.bazel_targets:
+            self.main_cmdline = "echo \"Using cached or discovery-built Bazel outputs for {}\"".format(target)
         else:
             self.main_cmdline = "bazel build {}".format(" ".join(self.bazel_targets))
 

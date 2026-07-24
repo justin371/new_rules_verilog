@@ -1,0 +1,11 @@
+-licqueue
+-V
+-notice
+-ntb_opts uvm-1.2
+-lca
+-lrt
+-timescale=1ns/1ps
+-mda_inst
+-Xufe=2steps
+
+{ELAB_ARGS}

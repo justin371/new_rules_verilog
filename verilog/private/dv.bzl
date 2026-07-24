@@ -569,7 +569,8 @@ def _verilog_dv_tb_impl(ctx):
         ctx.files.msie_primary_extra_runfiles +
         ctx.files.msie_incremental_extra_runfiles +
         ([ctx.file.xcelium_covfile] if ctx.file.xcelium_covfile else []) +
-        ([ctx.file.vcs_cm_hier] if ctx.file.vcs_cm_hier else [])
+        ([ctx.file.vcs_cm_hier] if ctx.file.vcs_cm_hier else []) +
+        extra_compile_outputs.generated_outputs
     )
     compile_input_records = verilog_input_inventory_records(
         all_deps,
@@ -759,8 +760,44 @@ verilog_dv_tb = rule(
             allow_single_file = True,
             doc = "VCS -cm_hier coverage configuration file.",
         ),
+        "vcs_three_step": attr.bool(
+            default = False,
+            doc = (
+                "Use VCS three-step analysis/elaboration. Dependencies selected by vcs_vlogan_precompile_deps " +
+                "form one frozen vlogan -incr_vlogan group, and remaining filelists form one project group. " +
+                "When enabled, extra_compile_args must be empty; put analysis options in vcs_vlogan_args and " +
+                "elaboration options in vcs_elab_args."
+            ),
+        ),
+        "vcs_vlogan_args": attr.string_list(
+            doc = (
+                "Additional VCS analysis options used only by vlogan in vcs_three_step mode. Put preprocessor " +
+                "defines and other source-analysis options here, with one command-line argument per list item. " +
+                "Files referenced with $(location) must also be listed in extra_runfiles."
+            ),
+        ),
+        "vcs_vlogan_precompile_deps": attr.label_list(
+            providers = [VerilogInfo],
+            doc = (
+                "Dependencies whose transitive VCS filelists form one frozen vlogan -incr_vlogan analysis group. " +
+                "Each selected dependency must already be reachable through deps or shells. The remaining " +
+                "filelists form one project analysis group. Preprocessor macros do not cross analysis groups, so " +
+                "the boundary must be self-contained and downstream sources must import compiled packages instead " +
+                "of depending on macro or include-guard side effects from the frozen group."
+            ),
+        ),
+        "vcs_elab_args": attr.string_list(
+            doc = (
+                "Additional VCS elaboration options used only by vcs in vcs_three_step mode. Put -top, " +
+                "+optconfigfile, and other elaboration-only options here. Files referenced with $(location) must " +
+                "also be listed in extra_runfiles."
+            ),
+        ),
         "extra_compile_args": attr.string_list(
-            doc = "Additional flags to pass to the selected simulator compile/elaboration step.\n",
+            doc = (
+                "Additional flags to pass to the selected simulator compile/elaboration step. VCS three-step " +
+                "targets must instead split these options between vcs_vlogan_args and vcs_elab_args.\n"
+            ),
         ),
         "extra_runtime_args": attr.string_list(
             doc = "Additional flags to pass to selected simulator runs. These flags will not be provided to compilation.\n" +
@@ -800,6 +837,14 @@ verilog_dv_tb = rule(
             default = Label("@rules_verilog//vendors/synopsys:verilog_dv_tb_compile_args.f.template"),
             allow_single_file = True,
             doc = "Template to generate compilation arguments flist.",
+        ),
+        "_vlogan_args_template_vcs": attr.label(
+            default = Label("@rules_verilog//vendors/synopsys:verilog_dv_tb_vlogan_args.f.template"),
+            allow_single_file = True,
+        ),
+        "_elab_args_template_vcs": attr.label(
+            default = Label("@rules_verilog//vendors/synopsys:verilog_dv_tb_elab_args.f.template"),
+            allow_single_file = True,
         ),
         "_compile_input_digest": attr.label(
             default = Label("@rules_verilog//verilog/private:compile_input_digest"),
@@ -919,6 +964,11 @@ verilog_dv_unit_test = rule(
 )
 
 def _verilog_dv_test_cfg_info_aspect_impl(target, ctx):
+    # Bazel applies command-line aspects to explicitly requested top-level
+    # targets even when required_providers does not match.
+    if DVTestInfo not in target:
+        return []
+
     if target[DVTestInfo].tb == None:
         return []
 
@@ -936,4 +986,5 @@ def _verilog_dv_test_cfg_info_aspect_impl(target, ctx):
 verilog_dv_test_cfg_info_aspect = aspect(
     doc = """Gather information about the tb and tags related to a verilog_dv_test_config for use in simmer.""",
     implementation = _verilog_dv_test_cfg_info_aspect_impl,
+    required_providers = [[DVTestInfo]],
 )

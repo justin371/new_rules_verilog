@@ -23,6 +23,21 @@ log = logging.getLogger(__name__)
 
 PARTCOMP_MANIFEST_FILENAME = ".rules_verilog_partcomp.json"
 _MAX_BENIGN_MAKE_CLOCK_SKEW_SECONDS = 0.1
+_INCR_VLOGAN_IGNORED_ENVIRONMENT = (
+    "HOST",
+    "HOSTNAME",
+    "LSB_AFFINITY_HOSTFILE",
+    "LSB_BIND_CPU_LIST",
+    "LSB_DJOB_HOSTFILE",
+    "LSB_HOSTS",
+    "LSB_JOBFILENAME",
+    "LSB_JOBID",
+    "LSB_JOBINDEX",
+    "LSB_MCPU_HOSTS",
+    "LSB_QUEUE",
+    "LSB_SUB_HOST",
+    "LS_SUBCWD",
+)
 _VCS_COMPILER_VERSION_RE = re.compile(
     r"(?im)\bCompiler[ \t]+version[ \t]*(?:=|:)?[ \t]*(.+?)(?=[ \t]+Runtime[ \t]+version\b|[;\r\n]|$)")
 
@@ -85,6 +100,8 @@ class VcsSimulator(SimulatorInterface):
         return "vcs"
 
     def get_compile_template(self, vcomp_job):
+        if getattr(vcomp_job, "tb_options", {}).get("vcs_three_step", False):
+            return self.env.get_template('vcs_three_step_compile_template.sh.j2')
         return self.env.get_template('vcs_compile_template.sh.j2')
 
     def get_sim_template(self):
@@ -196,11 +213,27 @@ class VcsSimulator(SimulatorInterface):
         vso_workdir = self.vso_workflow.workdir() if self.options.vso_cbv else ''
         if vso_workdir:
             os.makedirs(vso_workdir, exist_ok=True)
-        return {
+        context = {
             'vcs_runner': self.get_tool_runner(),
             'vso_build_name': self.vso_workflow.build_name(vcomp_job) if self.options.vso else '',
             'vso_workdir': vso_workdir,
         }
+        if getattr(vcomp_job, "vcs_three_step", False):
+            context.update({
+                'vcs_analysis_work_dir':
+                self.get_analysis_work_dir(vcomp_job),
+                'vcs_elab_args':
+                vcomp_job.vcs_elab_args,
+                'vcs_incr_vlogan_ignore_env':
+                shlex.quote("-vts_ignore_env={}".format(",".join(_INCR_VLOGAN_IGNORED_ENVIRONMENT))),
+                'vcs_setup_file':
+                self.get_analysis_setup_file(vcomp_job),
+                'vcs_vlogan_args':
+                vcomp_job.vcs_vlogan_args,
+                'vcs_vlogan_filelists':
+                vcomp_job.vcs_vlogan_filelists,
+            })
+        return context
 
     def get_compile_fingerprint_inputs(self, vcomp_job):
         inputs = super().get_compile_fingerprint_inputs(vcomp_job)
@@ -249,6 +282,35 @@ class VcsSimulator(SimulatorInterface):
 
     def get_bazel_runtime_args_file(self, bazel_runfiles_main, relpath, bazel_target):
         return os.path.join(bazel_runfiles_main, relpath, "{}_runtime_args.f".format(bazel_target))
+
+    def prepare_compile_job(self, vcomp_job):
+        vcomp_job.vcs_three_step = bool(vcomp_job.tb_options.get("vcs_three_step", False))
+        if not vcomp_job.vcs_three_step:
+            return
+        if self.options.compile_args_file:
+            raise ValueError(
+                "VCS three-step analysis does not accept --file because analysis and elaboration options are "
+                "separate. Put source-analysis options in vcs_vlogan_args and elaboration options in vcs_elab_args.")
+        for attribute, option_key in (
+            ("vcs_vlogan_args", "vcs_vlogan_args"),
+            ("vcs_vlogan_filelists", "vcs_vlogan_filelists"),
+            ("vcs_elab_args", "vcs_elab_args"),
+        ):
+            relative_path = vcomp_job.tb_options.get(option_key)
+            if not relative_path:
+                raise ValueError("VCS three-step testbench metadata is missing '{}'".format(option_key))
+            resolved_path = os.path.join(vcomp_job.bazel_runfiles_main, relative_path)
+            if not os.path.isfile(resolved_path):
+                raise FileNotFoundError("VCS three-step input is missing: {}".format(resolved_path))
+            setattr(vcomp_job, attribute, resolved_path)
+
+    def get_analysis_work_dir(self, vcomp_job):
+        dirname = "vlogan_work_gui" if self.options.gui else "vlogan_work"
+        return os.path.join(vcomp_job.job_dir, dirname)
+
+    def get_analysis_setup_file(self, vcomp_job):
+        dirname = "synopsys_sim_gui.setup" if self.options.gui else "synopsys_sim.setup"
+        return os.path.join(vcomp_job.job_dir, dirname)
 
     def _get_ico_artifact_dir(self):
         artifact_dir = os.path.join(self.rcfg.regression_dir, "ico_artifacts")
@@ -648,6 +710,7 @@ class VcsSimulator(SimulatorInterface):
             },
             "configuration": {
                 "partcomp_mode": self.options.vcs_partcomp_mode,
+                "three_step": bool(getattr(vcomp_job, "vcs_three_step", False)),
                 "debug_mode": "gui" if self.options.gui else "waves" if self.options.waves is not None else "default",
                 "coverage": self.options.cm,
                 "coverage_line": self.options.vcs_cm_line,
@@ -703,6 +766,13 @@ class VcsSimulator(SimulatorInterface):
         if not os.path.isfile(simv_path) or not os.access(simv_path, os.X_OK):
             raise FileNotFoundError(
                 "VCS --no-compile requires an existing elaborated executable at '{}'".format(simv_path))
+        if getattr(vcomp_job, "vcs_three_step", False):
+            setup_path = self.get_analysis_setup_file(vcomp_job)
+            work_dir = self.get_analysis_work_dir(vcomp_job)
+            if not os.path.isfile(setup_path) or not os.path.isdir(work_dir):
+                raise FileNotFoundError(
+                    "VCS --no-compile requires the three-step analysis library and setup file at '{}' and '{}'".format(
+                        work_dir, setup_path))
 
     def record_compile_artifacts(self, vcomp_job):
         self.validate_reusable_compile_artifacts(vcomp_job)
@@ -766,6 +836,9 @@ class VcsSimulator(SimulatorInterface):
         return test_job.job_dir
 
     def get_pre_sim_commands(self, test_job):
+        if getattr(test_job.vcomper, "vcs_three_step", False):
+            setup_path = shlex.quote(self.get_analysis_setup_file(test_job.vcomper))
+            return ["export SYNOPSYS_SIM_SETUP={}".format(setup_path)]
         return []
 
     def get_post_sim_commands(self, test_job):

@@ -1,0 +1,55 @@
++vcs+lic+wait
+-V
+-notice
+-sverilog
+-ntb_opts
+uvm-1.2
+-lca
++libext+.sv+.svh+.v+.vh+.vams+.vp+.svp
+
+# Enable the IEEE Std. 1800-2012 compliant SVA features
+-assert
+svaext
+# Enable the checker endchecker construct
+-assert
+checker
+
+-timescale=1ns/1ps
+
++define+TBV
++define+VCS
++define+UVM_REGEX_NO_DPI
++define+UVM_NO_DEPRECATED
++define+UVM_OBJECT_MUST_HAVE_CONSTRUCTOR
++define+TIMESCALE_STEP_FS=1000
++define+TIMESCALE_PREC_FS=1000
+
+# Use the canonical vlogan forms emitted by VCS X-2025.06 for the
+# corresponding -xlrm compatibility controls in the two-step flow.
+-Xarijit=0x4000
+-uniq_prior
+final
+-Xsumandat=0x800000
+-Xxlrm=sv_mda_find_index
+-Xxlrm=vsa_default_ap
+-Xxlrm=relax_cb_dir
+-Xxlrm=nettype_array
+-Xxlrm=real_cg
+-Xsumandat=0x200000
+
++lint=PCWM,TFIPC-L
++warn=SV-NFIVC
++warn=noUII-L
++warn=noLCA_FEATURES_ENABLED
+
+-error=TEIF
+-error=IPDASP
+-error=DPIMI
+-error=CWUC
+-error=MATN
+-error=TMPO
+-error=MRRE
+-error=AOUP
+
+{VLOGAN_ARGS}
+{DEFINES}

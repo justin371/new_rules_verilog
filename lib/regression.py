@@ -90,6 +90,7 @@ class RegressionConfig():
         self._bazel_profile_index = 0
         self.deferred_messages = [] # Messages to be printed at completion
         self.current_time = 0 # Timestamp for regression
+        self.discovery_prebuilt_targets = set()
 
         # Subsystem configuration (with tag associations)
         self.category_total_cases = {}
@@ -744,8 +745,13 @@ class RegressionConfig():
             query_results.extend(re.sub(r"\([a-z0-9]{7,64}\) *", "", stdout.replace('\n', ' ')).split())
         query_results = list(dict.fromkeys(query_results))
 
+        discovery_build_targets = list(query_results)
+        if not self.options.no_compile:
+            discovery_build_targets.extend(sorted(self.all_vcomp))
+        discovery_build_targets = list(dict.fromkeys(discovery_build_targets))
+
         text = []
-        for target_chunk in self._chunk_arguments(query_results):
+        for target_chunk in self._chunk_arguments(discovery_build_targets):
             dtp.reset()
             returncode, stdout, stderr = self._run_command([
                 "bazel",
@@ -758,8 +764,9 @@ class RegressionConfig():
             if returncode:
                 self.log.critical("bazel test discovery failed:\n%s", stderr)
             text.extend(stdout.split('\n') + stderr.split('\n'))
+        self.discovery_prebuilt_targets = set(discovery_build_targets)
 
-            # Parse test information from output
+        # Parse test information from output
         ttv = [
             re.search(
                 r'verilog_dv_test_cfg_info\(@(?:@)?(?P<test>[^,]+), @(?:@)?(?P<vcomp>[^,]+), (?P<tags>\[.*\]), (?P<simulator>[A-Z0-9_]+)\)',
