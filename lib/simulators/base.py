@@ -167,6 +167,10 @@ class SimulatorInterface(abc.ABC):
         # Example: return {'warning_regex': r"\*W.*"}
         pass
 
+    def get_ignored_compile_warning_line_numbers(self, log_path):
+        """Return one-based compile-log line numbers that are safe to ignore."""
+        return set()
+
     @abc.abstractmethod
     def get_gui_command_options(self):
         """Return simulator-specific options required for GUI mode."""

@@ -22,6 +22,7 @@ from .vcs_jobs import IcoInitJob, VsoAskJob, VsoInitJob
 log = logging.getLogger(__name__)
 
 PARTCOMP_MANIFEST_FILENAME = ".rules_verilog_partcomp.json"
+_MAX_BENIGN_MAKE_CLOCK_SKEW_SECONDS = 0.1
 _VCS_COMPILER_VERSION_RE = re.compile(
     r"(?im)\bCompiler[ \t]+version[ \t]*(?:=|:)?[ \t]*(.+?)(?=[ \t]+Runtime[ \t]+version\b|[;\r\n]|$)")
 
@@ -231,7 +232,7 @@ class VcsSimulator(SimulatorInterface):
         return self.options.smartlog
 
     def get_wave_view_command(self, wave_file_path, job_dir=None):
-        argv = shlex.split(self.get_tool_runner()) + ["verdi", "-ssf", wave_file_path]
+        argv = shlex.split(self.get_tool_runner()) + ["verdi", "-apex", "-ssf", wave_file_path]
         if job_dir is not None and self.use_smartlog():
             smartlog_path = os.path.join(job_dir, "stdout.log")
             if os.path.exists(smartlog_path):
@@ -598,6 +599,26 @@ class VcsSimulator(SimulatorInterface):
 
     def get_log_parsing_info(self):
         return {'warning_regex': r"(?i)^(?:\s*(?:Warning|Error)(?:-|\s*:)|.+:\s*(?:warning|error):).*"}
+
+    def get_ignored_compile_warning_line_numbers(self, log_path):
+        future_mtime_regex = re.compile(r"(?i)\bmake(?:\[\d+\])?:\s*warning:\s*file .+ has modification time "
+                                        r"([0-9]+(?:\.[0-9]+)?)\s+s in the future\b")
+        clock_skew_regex = re.compile(r"(?i)\bmake(?:\[\d+\])?:\s*warning:\s*clock skew detected\.\s*"
+                                      r"your build may be incomplete\.")
+        benign_future_mtime_lines = set()
+        clock_skew_summary_lines = set()
+
+        with open(log_path, 'r', encoding='utf-8', errors='ignore') as logp:
+            for line_number, line in enumerate(logp, start=1):
+                match = future_mtime_regex.search(line)
+                if match and float(match.group(1)) < _MAX_BENIGN_MAKE_CLOCK_SKEW_SECONDS:
+                    benign_future_mtime_lines.add(line_number)
+                if clock_skew_regex.search(line):
+                    clock_skew_summary_lines.add(line_number)
+
+        if benign_future_mtime_lines:
+            return benign_future_mtime_lines | clock_skew_summary_lines
+        return set()
 
     def get_gui_command_options(self):
         # Enable Verdi debug features along with DVE/Verdi GUI
