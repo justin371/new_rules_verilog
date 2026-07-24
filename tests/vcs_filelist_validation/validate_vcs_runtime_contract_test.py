@@ -2813,7 +2813,7 @@ run_bounded_process([
     def test_simmer_log_and_profile_performance_contracts(self):
         source = self._read_repo_file("bin/simmer.py")
 
-        self.assertIn("for warning_line in logp", source)
+        self.assertIn("for line_number, warning_line in enumerate(logp, start=1)", source)
         self.assertNotIn("text = logp.read()", source)
         self.assertNotIn('subprocess.run(["chmod", "-R"', source)
         self.assertIn("completed without simulation log", source)
