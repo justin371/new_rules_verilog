@@ -2151,6 +2151,7 @@ run_bounded_process([
         self.assertIn("-Mlib={{ (VCOMP_DIR ~ '/csrc')|shell_quote }}", template)
         self.assertNotIn("-p1800_macro_expansion", template)
         self.assertIn("{{ partcomp_opts }}", template)
+        self.assertIn("-Xufe=2steps", template)
         self.assertIn("{% if options.vso -%}", template)
         self.assertIn("-vso_opts buildname={{ vso_build_name|shell_quote }}", template)
         self.assertIn("{% elif options.vso_ccex -%}", template)

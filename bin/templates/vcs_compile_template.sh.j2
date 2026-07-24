@@ -18,6 +18,7 @@ cd {{ bazel_runfiles_main|shell_quote }}
   {% endif -%}
   {% if partcomp_opts -%}
     {{ partcomp_opts }} \
+    -Xufe=2steps \
   {% endif -%}
   {% if options.dtl -%}
     -enable_dynamic_tb \
